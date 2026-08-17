@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
-import { describeJob } from './describe'
 import type { TaskConfig } from './config'
+import { describeJob } from './describe'
 
 const base: TaskConfig = {
   id: 'issues',

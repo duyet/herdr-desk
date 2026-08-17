@@ -1,20 +1,7 @@
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
-import { homedir } from 'node:os'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import {
-  type DeskConfig,
-  type TaskConfig,
-  loadDeskConfig,
-  resolveTask,
-} from './config'
-import {
-  agentNames,
-  defaultHerdrBin,
-  defaultSocket,
-  herdrJson,
-  herdrReady,
-  pickPane,
-} from './herdr'
+import { loadDeskConfig, resolveTask, type TaskConfig } from './config'
+import { agentNames, herdrJson, herdrReady, pickPane } from './herdr'
 import { assembleManagerPrompt, taskVars } from './prompt'
 
 export type RunMode = 'morning' | 'nightly'
@@ -30,12 +17,6 @@ export function runDirFor(repo: string, task: TaskConfig, day: string): string {
   return join(repo, rel, day)
 }
 
-function logPath(name: string, day: string): string {
-  const dir = join(homedir(), '.local', 'logs', 'herdr-desk', name)
-  mkdirSync(dir, { recursive: true })
-  return join(dir, `${day}.log`)
-}
-
 export async function runTask(opts: {
   repo: string
   taskId?: string
@@ -48,7 +29,10 @@ export async function runTask(opts: {
   const runDir = runDirFor(repo, task, day)
   mkdirSync(runDir, { recursive: true })
   mkdirSync(join(repo, '.herdr-desk', 'runs'), { recursive: true })
-  writeFileSync(join(repo, '.herdr-desk', 'runs', 'LATEST'), `${task.id}/${day}\n`)
+  writeFileSync(
+    join(repo, '.herdr-desk', 'runs', 'LATEST'),
+    `${task.id}/${day}\n`,
+  )
 
   const ready = herdrReady()
   if (!ready.ok) {
@@ -136,9 +120,3 @@ export async function runTask(opts: {
   )
   return { spawned: true }
 }
-
-export function describeLog(config: DeskConfig, day = today()): string {
-  return logPath(config.name, day)
-}
-
-export { defaultHerdrBin, defaultSocket, today }

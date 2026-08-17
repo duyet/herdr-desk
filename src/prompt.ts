@@ -2,9 +2,9 @@ import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   type DeskConfig,
-  type TaskConfig,
   promptPath,
   resolveTaskPromptPath,
+  type TaskConfig,
 } from './config'
 import { interpolate } from './interpolate'
 

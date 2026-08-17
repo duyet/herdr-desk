@@ -52,7 +52,9 @@ export function cronMatches(expr: string, at: Date): boolean {
   const dowOk = expand(dowField(dow), 0, 6).has(at.getDay())
   // Vixie: if both DOM and DOW are restricted, either may match.
   const dayOk =
-    domRestricted && dowRestricted ? domOk || dowOk : (!domRestricted || domOk) && (!dowRestricted || dowOk)
+    domRestricted && dowRestricted
+      ? domOk || dowOk
+      : (!domRestricted || domOk) && (!dowRestricted || dowOk)
   return minuteOk && hourOk && monOk && dayOk
 }
 

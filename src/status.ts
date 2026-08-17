@@ -1,6 +1,6 @@
 import { cronNext } from './cron'
 import { describeJob } from './describe'
-import { type Discovered } from './discover'
+import type { Discovered } from './discover'
 import { loadRuns } from './history'
 import { textTable } from './table'
 
@@ -21,7 +21,10 @@ export function formatSchedule(desks: Discovered[], now = new Date()): string {
         const next = cronNext(expr, now)
         const last = [...runs]
           .reverse()
-          .find((r) => r.name === d.config.name && r.task === t.id && r.mode === mode)
+          .find(
+            (r) =>
+              r.name === d.config.name && r.task === t.id && r.mode === mode,
+          )
         const lastText = last
           ? `${last.ok ? 'ok' : 'fail'} ${last.at.slice(0, 16).replace('T', ' ')}`
           : 'never'

@@ -20,7 +20,11 @@ export async function readLastChanges(): Promise<string> {
       const dir = runDirFor(d.repo, t, day)
       const file = NAMES.map((n) => join(dir, n)).find((p) => existsSync(p))
       parts.push(`## ${d.config.name} / ${t.id}  (${day})`)
-      parts.push(file ? readFileSync(file, 'utf8').trim() : `_no changes.md yet in ${dir}_`)
+      parts.push(
+        file
+          ? readFileSync(file, 'utf8').trim()
+          : `_no changes.md yet in ${dir}_`,
+      )
       parts.push('')
     }
   }

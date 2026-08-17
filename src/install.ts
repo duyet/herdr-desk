@@ -1,7 +1,10 @@
 /** Host crontab leftovers from the pre-plugin CLI. */
 
 function crontabNow(): string {
-  const proc = Bun.spawnSync(['crontab', '-l'], { stdout: 'pipe', stderr: 'pipe' })
+  const proc = Bun.spawnSync(['crontab', '-l'], {
+    stdout: 'pipe',
+    stderr: 'pipe',
+  })
   return proc.exitCode === 0 ? proc.stdout.toString() : ''
 }
 

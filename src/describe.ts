@@ -32,13 +32,17 @@ function extras(text: string): string[] {
   return bits
 }
 
-export function describeJob(repo: string, task: TaskConfig, mode: Slot): string {
+export function describeJob(
+  repo: string,
+  task: TaskConfig,
+  mode: Slot,
+): string {
   const override = task.describe?.[mode]
   if (override) return override
 
   const n = task.maxChildren ?? 3
   const playbook = task.task.endsWith('.md')
-    ? task.label ?? task.id
+    ? (task.label ?? task.id)
     : task.task
   const core =
     mode === 'morning'

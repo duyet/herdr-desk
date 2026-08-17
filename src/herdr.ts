@@ -8,7 +8,9 @@ export type HerdrClient = {
 }
 
 export function defaultSocket(): string {
-  return process.env.HERDR_SOCKET_PATH ?? `${homedir()}/.config/herdr/herdr.sock`
+  return (
+    process.env.HERDR_SOCKET_PATH ?? `${homedir()}/.config/herdr/herdr.sock`
+  )
 }
 
 export function defaultHerdrBin(): string {
@@ -23,7 +25,8 @@ export function herdrReady(
   bin = defaultHerdrBin(),
   socket = defaultSocket(),
 ): { ok: true; bin: string; socket: string } | { ok: false; reason: string } {
-  if (!existsSync(bin)) return { ok: false, reason: `herdr not found at ${bin}` }
+  if (!existsSync(bin))
+    return { ok: false, reason: `herdr not found at ${bin}` }
   if (!existsSync(socket)) {
     return { ok: false, reason: `herdr socket missing (${socket})` }
   }
@@ -46,7 +49,9 @@ export async function herdrJson(
     proc.exited,
   ])
   if (exit !== 0) {
-    throw new Error(`herdr ${args.join(' ')} failed (${exit}): ${stderr || stdout}`)
+    throw new Error(
+      `herdr ${args.join(' ')} failed (${exit}): ${stderr || stdout}`,
+    )
   }
   const text = stdout.trim()
   if (!text) return {}
@@ -61,7 +66,8 @@ export function pickPane(createJson: unknown): {
   workspaceId: string
   paneId: string
 } {
-  const root = (createJson as { result?: Record<string, unknown> })?.result ?? {}
+  const root =
+    (createJson as { result?: Record<string, unknown> })?.result ?? {}
   const ws = (root.workspace ?? {}) as Record<string, unknown>
   const pane = (root.root_pane ?? root.pane ?? {}) as Record<string, unknown>
   const workspaceId = String(
@@ -69,7 +75,9 @@ export function pickPane(createJson: unknown): {
   )
   const paneId = String(pane.pane_id ?? pane.id ?? root.pane_id ?? '')
   if (!paneId) {
-    throw new Error(`no pane id in workspace create: ${JSON.stringify(createJson)}`)
+    throw new Error(
+      `no pane id in workspace create: ${JSON.stringify(createJson)}`,
+    )
   }
   return { workspaceId, paneId }
 }

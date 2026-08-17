@@ -2,9 +2,15 @@
 
 import { resolve } from 'node:path'
 import { listBundledTasks, loadDeskConfig } from './config'
-import { daemonPid, runDaemon, startDaemon, stopDaemon, tickOnce } from './daemon'
+import {
+  daemonPid,
+  runDaemon,
+  startDaemon,
+  stopDaemon,
+  tickOnce,
+} from './daemon'
 import { discoverDesks, formatScan } from './discover'
-import { formatHistory, loadRuns, appendRun } from './history'
+import { appendRun, formatHistory, loadRuns } from './history'
 import { stripAllDeskCrons } from './install'
 import { runTask } from './run'
 import { formatSchedule } from './status'
@@ -80,7 +86,9 @@ async function main() {
 
   if (cmd === 'start') {
     const r = startDaemon()
-    console.log(r.already ? `already running (pid ${r.pid})` : `started pid ${r.pid}`)
+    console.log(
+      r.already ? `already running (pid ${r.pid})` : `started pid ${r.pid}`,
+    )
     return
   }
 
@@ -109,7 +117,9 @@ async function main() {
 
   if (cmd === 'uninstall-cron' || cmd === 'uninstall') {
     stripAllDeskCrons()
-    console.log('removed host crontab blocks (plugin daemon is the scheduler now)')
+    console.log(
+      'removed host crontab blocks (plugin daemon is the scheduler now)',
+    )
     return
   }
 

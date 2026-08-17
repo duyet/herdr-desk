@@ -9,9 +9,18 @@
   },
   "scripts": {
     "start": "bun src/cli.ts",
-    "test": "bun test"
+    "test": "bun test",
+    "lint": "biome check .",
+    "typecheck": "tsc --noEmit",
+    "build": "bun build src/cli.ts --outdir dist --target=bun",
+    "ci": "bun run lint && bun run typecheck && bun test && bun run build"
   },
   "engines": {
     "bun": ">=1.1.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.0.6",
+    "@types/bun": "^1.2.0",
+    "typescript": "^5.8.0"
   }
 }

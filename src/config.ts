@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -78,7 +78,11 @@ export function resolveTask(config: DeskConfig, taskId?: string): TaskConfig {
 }
 
 export function resolveTaskPromptPath(task: TaskConfig, repo: string): string {
-  if (task.task.endsWith('.md') || task.task.includes('/') || task.task.startsWith('.')) {
+  if (
+    task.task.endsWith('.md') ||
+    task.task.includes('/') ||
+    task.task.startsWith('.')
+  ) {
     return isAbsolute(task.task) ? task.task : resolve(repo, task.task)
   }
   const bundled = join(DESK_ROOT, 'prompts', 'tasks', `${task.task}.md`)

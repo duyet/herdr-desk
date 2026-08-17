@@ -1,10 +1,16 @@
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { join } from 'node:path'
 import { cronMatches } from './cron'
 import { discoverDesks } from './discover'
 import { appendRun } from './history'
 import { pluginStateDir } from './paths'
-import { runTask, type RunMode } from './run'
+import { type RunMode, runTask } from './run'
 
 const TICK_MS = 20_000
 
@@ -35,7 +41,10 @@ export function daemonPid(): number | null {
 function loadFires(): Record<string, string> {
   if (!existsSync(firesPath())) return {}
   try {
-    return JSON.parse(readFileSync(firesPath(), 'utf8')) as Record<string, string>
+    return JSON.parse(readFileSync(firesPath(), 'utf8')) as Record<
+      string,
+      string
+    >
   } catch {
     return {}
   }
@@ -58,7 +67,12 @@ function dayKey(at: Date): string {
   return `${at.getFullYear()}-${p(at.getMonth() + 1)}-${p(at.getDate())}`
 }
 
-function fireKey(repo: string, taskId: string, mode: RunMode, day: string): string {
+function fireKey(
+  repo: string,
+  taskId: string,
+  mode: RunMode,
+  day: string,
+): string {
   return `${repo}::${taskId}::${mode}::${day}`
 }
 
@@ -137,12 +151,15 @@ export function startDaemon(): { already?: boolean; pid: number } {
   const live = daemonPid()
   if (live) return { already: true, pid: live }
   mkdirSync(pluginStateDir(), { recursive: true })
-  const child = Bun.spawn([process.execPath, join(import.meta.dir, 'cli.ts'), 'daemon'], {
-    stdout: 'ignore',
-    stderr: 'ignore',
-    stdin: 'ignore',
-    env: process.env,
-  })
+  const child = Bun.spawn(
+    [process.execPath, join(import.meta.dir, 'cli.ts'), 'daemon'],
+    {
+      stdout: 'ignore',
+      stderr: 'ignore',
+      stdin: 'ignore',
+      env: process.env,
+    },
+  )
   // child is detached-ish; we don't unref spawn in bun the same way — write pid after spawn
   const pid = child.pid
   writeFileSync(pidPath(), `${pid}\n`)

@@ -1,11 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
-import {
-  type DeskConfig,
-  findConfigPath,
-  loadDeskConfig,
-} from './config'
+import { type DeskConfig, findConfigPath, loadDeskConfig } from './config'
 import { herdrBin, pluginConfigDir, pluginStateDir } from './paths'
 
 export type Discovered = {
@@ -32,7 +28,9 @@ export function loadKnownRepos(): string[] {
 
 export function rememberRepos(repos: string[]): void {
   mkdirSync(pluginStateDir(), { recursive: true })
-  const merged = [...new Set([...loadKnownRepos(), ...repos.map((p) => resolve(p))])].sort()
+  const merged = [
+    ...new Set([...loadKnownRepos(), ...repos.map((p) => resolve(p))]),
+  ].sort()
   writeFileSync(knownPath(), `${JSON.stringify({ repos: merged }, null, 2)}\n`)
 }
 
@@ -81,7 +79,10 @@ export async function workspaceRepoRoots(): Promise<string[]> {
   }
 }
 
-function tryLoad(repo: string, source: Discovered['source']): Discovered | null {
+function tryLoad(
+  repo: string,
+  source: Discovered['source'],
+): Discovered | null {
   if (!findConfigPath(repo)) return null
   try {
     const config = loadDeskConfig(repo)
@@ -123,7 +124,8 @@ export async function discoverDesks(): Promise<Discovered[]> {
 }
 
 export function formatScan(desks: Discovered[]): string {
-  if (desks.length === 0) return 'no desks (no open workspace has .herdr-desk.json)'
+  if (desks.length === 0)
+    return 'no desks (no open workspace has .herdr-desk.json)'
   const lines: string[] = []
   for (const d of desks) {
     lines.push(`${d.config.name}  ${d.repo}  (${d.source})`)

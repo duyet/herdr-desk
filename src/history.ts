@@ -25,7 +25,10 @@ export function appendRun(rec: RunRecord): void {
 
 export function loadRuns(limit = 40): RunRecord[] {
   if (!existsSync(historyPath())) return []
-  const lines = readFileSync(historyPath(), 'utf8').trim().split('\n').filter(Boolean)
+  const lines = readFileSync(historyPath(), 'utf8')
+    .trim()
+    .split('\n')
+    .filter(Boolean)
   const slice = lines.slice(-Math.max(1, Math.min(limit, MAX)))
   const out: RunRecord[] = []
   for (const line of slice) {
