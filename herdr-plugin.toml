@@ -1,0 +1,40 @@
+id = "herdr-desk"
+name = "Herdr Desk"
+version = "0.2.0"
+description = "Scheduled repo managers: pick up .herdr-desk.json from open workspaces and fire morning/nightly Grok managers"
+min_herdr_version = "0.7.0"
+platforms = ["linux", "macos"]
+
+[[startup]]
+command = ["bun", "src/cli.ts", "start"]
+
+[[actions]]
+id = "start"
+title = "Start the desk daemon"
+command = ["bun", "src/cli.ts", "start"]
+
+[[actions]]
+id = "stop"
+title = "Stop the desk daemon"
+command = ["bun", "src/cli.ts", "stop"]
+
+[[actions]]
+id = "status"
+title = "Show daemon and discovered desks"
+command = ["bun", "src/cli.ts", "status"]
+
+[[actions]]
+id = "list"
+title = "List desks picked up from repos"
+command = ["bun", "src/cli.ts", "scan"]
+
+[[actions]]
+id = "validate"
+title = "Validate discovered repo configs"
+command = ["bun", "src/cli.ts", "validate"]
+
+# First focus after the server is up starts (or refreshes) the daemon
+# and remembers any newly opened repo with a .herdr-desk.json.
+[[events]]
+on = "workspace.focused"
+command = ["bun", "src/cli.ts", "on-focus"]

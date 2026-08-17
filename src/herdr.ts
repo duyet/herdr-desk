@@ -12,7 +12,11 @@ export function defaultSocket(): string {
 }
 
 export function defaultHerdrBin(): string {
-  return process.env.HERDR_BIN ?? `${homedir()}/.local/bin/herdr`
+  return (
+    process.env.HERDR_BIN_PATH ??
+    process.env.HERDR_BIN ??
+    `${homedir()}/.local/bin/herdr`
+  )
 }
 
 export function herdrReady(

@@ -1,34 +1,31 @@
 # herdr-desk
 
-One CLI that starts a **Grok manager** in a live Herdr session. Each
-repo is only JSON config. Logic and markdown prompts live here.
+A [Herdr](https://herdr.dev) plugin. Same shape as
+[herdr-routines](https://github.com/mrcndz/herdr-routines): a daemon
+inside Herdr, not host crontab.
 
-AnyRouter’s `ops/herdr-daily` and chmonitor’s issue-desk are the same
-job: morning manager on `main`, isolated worktrees, leave panes open,
-write a dated run folder. This repo is that job.
+Each repo drops a **`.herdr-desk.json`**. The plugin **picks it up**
+from open Herdr workspaces (and remembers the path so it still fires if
+that workspace is later closed).
 
-## Install on a machine
+When a schedule hits, it starts a **duyetbot / Grok manager** on `main`
+and that manager fans work into isolated Herdr worktrees. Prompts stay
+markdown under `prompts/`.
 
-Needs: running Herdr (`~/.config/herdr/herdr.sock`), `gh`, `git`, `bun`.
+## Install
 
-```bash
-bun ~/project/herdr-desk/src/cli.ts install --repo ~/project/chmonitor
-bun ~/project/herdr-desk/src/cli.ts install --repo ~/project/anyrouter
+```sh
+herdr plugin install duyet/herdr-desk
+# local checkout:
+# herdr plugin link ~/project/herdr-desk
+
+herdr plugin action invoke herdr-desk.start
 ```
 
-Cron calls this CLI. Re-run `install` after you move the checkout.
+`workspace.focused` also starts the daemon, so opening any workspace is
+enough after the plugin is linked.
 
-```bash
-bun ~/project/herdr-desk/src/cli.ts run issues --repo ~/project/chmonitor --morning
-bun ~/project/herdr-desk/src/cli.ts list --repo ~/project/chmonitor
-bun ~/project/herdr-desk/src/cli.ts tasks
-```
-
-If the Herdr socket is missing, `run` exits 0 and logs a skip.
-
-## Per-repo config
-
-Put `.herdr-desk.json` at the repo root:
+## Per-repo config (this is all a repo needs)
 
 ```json
 {
@@ -52,29 +49,44 @@ Put `.herdr-desk.json` at the repo root:
 }
 ```
 
-`task` is a bundled id (`prompts/tasks/<id>.md`) or a path to a markdown
-file in the repo. `extraPrompt` is repo-specific addendum (deploy rules,
-CI babysit, …).
-
 Also accepted: `herdr-desk.json`, `ops/desk.json`.
 
-## Prompts (markdown, not code)
+`task` is a bundled id (`prompts/tasks/<id>.md`) or a path to markdown
+in the repo. `extraPrompt` is repo-specific addendum.
 
+Optional extra roots (even if never opened in Herdr):
+
+```json
+// $(herdr plugin config-dir herdr-desk)/config.json
+{ "repos": ["~/project/some-other-repo"] }
 ```
-prompts/identity.md     duyetbot — manager, co-author, anti-slop
-prompts/morning.md      envelope
-prompts/nightly.md      envelope
-prompts/child.md        worktree child
-prompts/tasks/*.md      generic jobs
+
+## Actions
+
+```sh
+herdr plugin action invoke herdr-desk.start
+herdr plugin action invoke herdr-desk.stop
+herdr plugin action invoke herdr-desk.status
+herdr plugin action invoke herdr-desk.list
+herdr plugin action invoke herdr-desk.validate
 ```
 
-## State
+On-demand (actions take no args):
 
-The manager writes under `stateDir` / date (queue, summary, workers).
-Gitignore that folder in the target repo. Workspaces stay **open**.
+```sh
+bun src/cli.ts run issues --repo ~/project/chmonitor --morning
+```
 
 ## New repo
 
-1. Copy an example from `examples/`.
-2. Add a one-line pointer in that repo’s `AGENTS.md`.
-3. `bun …/herdr-desk/src/cli.ts install --repo /path`.
+1. Add `.herdr-desk.json` (+ optional `.herdr-desk/extra.md`).
+2. Open that repo as a Herdr workspace once (or list it in plugin
+   `config.json`).
+3. Done. No crontab, no copy of the CLI.
+
+## Dev
+
+```sh
+herdr plugin link .
+bun test
+```

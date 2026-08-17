@@ -1,8 +1,8 @@
 {
   "name": "herdr-desk",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
-  "description": "Scheduled Herdr manager: one CLI, per-repo config.",
+  "description": "Herdr plugin: scheduled managers, one .herdr-desk.json per repo.",
   "type": "module",
   "bin": {
     "herdr-desk": "./src/cli.ts"

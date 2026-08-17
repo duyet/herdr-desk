@@ -1,7 +1,5 @@
 # herdr-desk
 
-Scheduled Herdr manager CLI. Prompts are markdown under `prompts/`.
-Repos consume this with `.herdr-desk.json` only.
-
-Do not embed repo-specific product rules here. Put those in the target
-repo’s `extraPrompt` file.
+Herdr plugin. Prompts are markdown under `prompts/`. Repos only add
+`.herdr-desk.json`. The daemon discovers open workspaces and remembered
+roots — do not hard-code repo lists in this package.

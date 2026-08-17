@@ -1,22 +1,24 @@
 #!/usr/bin/env bun
 
 import { resolve } from 'node:path'
-import {
-  findConfigPath,
-  listBundledTasks,
-  loadDeskConfig,
-} from './config'
-import { installRepo, uninstallRepo } from './install'
+import { listBundledTasks, loadDeskConfig } from './config'
+import { daemonPid, runDaemon, startDaemon, stopDaemon, tickOnce } from './daemon'
+import { discoverDesks, formatScan } from './discover'
+import { stripAllDeskCrons } from './install'
 import { runTask } from './run'
 
 function usage(): never {
-  console.log(`herdr-desk — scheduled Herdr manager (config lives in the target repo)
+  console.log(`herdr-desk — Herdr plugin. Each repo is .herdr-desk.json; the daemon picks them up.
 
-  herdr-desk list [--repo DIR]
-  herdr-desk tasks
+  herdr-desk scan
+  herdr-desk validate
+  herdr-desk status
+  herdr-desk start | stop | daemon
+  herdr-desk tick
+  herdr-desk on-focus
   herdr-desk run [TASK] --repo DIR --morning|--nightly
-  herdr-desk install --repo DIR
-  herdr-desk uninstall --repo DIR
+  herdr-desk tasks
+  herdr-desk uninstall-cron
 `)
   process.exit(2)
 }
@@ -36,49 +38,90 @@ async function main() {
   const cmd = argv[0]
   if (!cmd || cmd === '-h' || cmd === '--help') usage()
 
-  const repo = resolve(arg('--repo', argv) ?? process.cwd())
-
   if (cmd === 'tasks') {
     for (const t of listBundledTasks()) console.log(t)
     return
   }
 
-  if (cmd === 'list') {
-    const path = findConfigPath(repo)
-    if (!path) {
-      console.log(`no config in ${repo}`)
-      process.exit(1)
-    }
-    const cfg = loadDeskConfig(repo)
-    console.log(`${cfg.name}  ${path}`)
-    for (const t of cfg.tasks) {
-      console.log(
-        `  ${t.id}\t${t.task}\t${t.agentName}\tmorning=${t.schedule?.morning ?? '-'}\tnightly=${t.schedule?.nightly ?? '-'}`,
-      )
-    }
+  if (cmd === 'scan') {
+    console.log(formatScan(await discoverDesks()))
     return
   }
 
-  if (cmd === 'install') {
-    console.log(installRepo(repo))
+  if (cmd === 'validate') {
+    const desks = await discoverDesks()
+    for (const d of desks) loadDeskConfig(d.repo)
+    console.log(`0 errors, ${desks.length} desk(s)`)
     return
   }
 
-  if (cmd === 'uninstall') {
-    uninstallRepo(repo)
-    console.log(`removed crontab block for ${repo}`)
+  if (cmd === 'status') {
+    const pid = daemonPid()
+    console.log(`daemon: ${pid ? `running (pid ${pid})` : 'stopped'}`)
+    console.log(formatScan(await discoverDesks()))
+    return
+  }
+
+  if (cmd === 'start') {
+    const r = startDaemon()
+    console.log(r.already ? `already running (pid ${r.pid})` : `started pid ${r.pid}`)
+    return
+  }
+
+  if (cmd === 'stop') {
+    console.log(stopDaemon() ? 'stopped' : 'not running')
+    return
+  }
+
+  if (cmd === 'daemon') {
+    await runDaemon()
+    return
+  }
+
+  if (cmd === 'tick') {
+    const n = await tickOnce()
+    console.log(`fired ${n}`)
+    return
+  }
+
+  if (cmd === 'on-focus') {
+    await discoverDesks()
+    const r = startDaemon()
+    console.log(r.already ? `daemon pid ${r.pid}` : `started pid ${r.pid}`)
+    return
+  }
+
+  if (cmd === 'uninstall-cron' || cmd === 'uninstall') {
+    stripAllDeskCrons()
+    console.log('removed host crontab blocks (plugin daemon is the scheduler now)')
     return
   }
 
   if (cmd === 'run') {
-    const rest = argv.slice(1).filter((a) => !a.startsWith('--') && a !== arg('--repo', argv))
+    const repo = resolve(arg('--repo', argv) ?? process.cwd())
+    const rest = argv
+      .slice(1)
+      .filter((a) => !a.startsWith('--') && a !== arg('--repo', argv))
     const taskId = rest[0]
     const mode = has('--nightly', argv) ? 'nightly' : 'morning'
-    if (!has('--morning', argv) && !has('--nightly', argv)) {
-      usage()
+    if (!has('--morning', argv) && !has('--nightly', argv)) usage()
+    console.log(JSON.stringify(await runTask({ repo, taskId, mode })))
+    return
+  }
+
+  if (cmd === 'list') {
+    const repo = resolve(arg('--repo', argv) ?? process.cwd())
+    if (arg('--repo', argv)) {
+      const cfg = loadDeskConfig(repo)
+      console.log(`${cfg.name}  ${repo}`)
+      for (const t of cfg.tasks) {
+        console.log(
+          `  ${t.id}\t${t.agentName}\tmorning=${t.schedule?.morning ?? '-'}\tnightly=${t.schedule?.nightly ?? '-'}`,
+        )
+      }
+      return
     }
-    const result = await runTask({ repo, taskId, mode })
-    console.log(JSON.stringify(result))
+    console.log(formatScan(await discoverDesks()))
     return
   }
 
