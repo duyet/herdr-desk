@@ -1,0 +1,17 @@
+{
+  "name": "herdr-desk",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Scheduled Herdr manager: one CLI, per-repo config.",
+  "type": "module",
+  "bin": {
+    "herdr-desk": "./src/cli.ts"
+  },
+  "scripts": {
+    "start": "bun src/cli.ts",
+    "test": "bun test"
+  },
+  "engines": {
+    "bun": ">=1.1.0"
+  }
+}
