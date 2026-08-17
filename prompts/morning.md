@@ -17,4 +17,5 @@ Read and follow, in order:
 
 Create the run dir if needed. Write `queue.md`, `workers.md`, and
 `summary.md` **before** spawning anyone. Then run the morning section of
-the task. Leave every workspace open.
+the task. When the run is done, write `changes.md` (what opened, merged,
+skipped). Leave every workspace open. There is no nightly follow-up.

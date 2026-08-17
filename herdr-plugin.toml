@@ -34,6 +34,11 @@ title = "Show recent desk run history"
 command = ["bin/desk", "history"]
 
 [[actions]]
+id = "last"
+title = "Show today's morning change summaries"
+command = ["bin/desk", "last"]
+
+[[actions]]
 id = "validate"
 title = "Validate discovered repo configs"
 command = ["bin/desk", "validate"]

@@ -13,6 +13,7 @@ describe('describeJob', () => {
   test('morning default', () => {
     expect(describeJob('/tmp', base, 'morning')).toContain('Triage issues/PRs')
     expect(describeJob('/tmp', base, 'morning')).toContain('≤3')
+    expect(describeJob('/tmp', base, 'morning')).toContain('changes.md')
   })
 
   test('override', () => {

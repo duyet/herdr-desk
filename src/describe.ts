@@ -43,8 +43,8 @@ export function describeJob(repo: string, task: TaskConfig, mode: Slot): string 
   const core =
     mode === 'morning'
       ? playbook === 'github-issues'
-        ? `Triage issues/PRs; spawn ≤${n} worktrees`
-        : `${task.label ?? task.id}: morning dispatch (≤${n})`
+        ? `Triage issues/PRs; spawn ≤${n} worktrees; write changes.md when done`
+        : `${task.label ?? task.id}: morning dispatch (≤${n}); write changes.md when done`
       : playbook === 'github-issues'
         ? 'Wrap summary; no new work unless one CI-fix left'
         : `${task.label ?? task.id}: nightly wrap`

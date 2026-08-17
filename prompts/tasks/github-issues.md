@@ -13,7 +13,7 @@ All under `{{runDir}}`:
 | `queue.md` / `issues.md` | Classification of open issues + PRs |
 | `workers.md` | Child worktrees, agent names, PR links |
 | `summary.md` / `SUMMARY.md` | Morning kickoff + running log |
-| `nightly.md` | Night wrap |
+| `changes.md` | **After the run:** what actually changed (PRs, merges, skips) |
 | `research-<n>.md` | Write-up when the right output is a note, not a PR |
 | `run.json` | Machine-readable snapshot if you want one |
 
@@ -44,11 +44,23 @@ herdr agent prompt <name> <child prompt>
 6. Fill workers + summary (counts, spawned, skipped + why).
 7. Stay up. Watch children. Pull `main` when a PR merges. Tell remaining
    children to rebase. **Do not close** workspaces.
+8. **When the morning run is done** (children settled, or you are not
+   starting more), write `changes.md` — the human-facing delta:
 
-## Nightly
+```markdown
+# Changes {{day}}
 
-Snapshot children and GitHub. Short end-of-day. No new worktrees unless
-a child is one CI-fix from landing.
+- Opened: PR #… title (url)
+- Merged: PR #… 
+- Still open / in review:
+- Research only (no PR):
+- Skipped + why:
+```
+
+Keep it short. This is what status/`last` shows. Also toast:
+`herdr notification show "{{deskName}} morning done" --body "{{runDir}}/changes.md"`
+
+There is no nightly slot. Do not wait until evening to write `changes.md`.
 
 ## Quality gate
 

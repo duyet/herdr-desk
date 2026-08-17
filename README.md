@@ -113,6 +113,7 @@ Herdr has no built-in crontab UI. This plugin is the schedule. Use:
 ```sh
 herdr plugin action invoke herdr-desk.status    # daemon + next/last fire per slot
 herdr plugin action invoke herdr-desk.history   # recent runs (runs.jsonl)
+herdr plugin action invoke herdr-desk.last      # today's changes.md from each repo
 herdr plugin action invoke herdr-desk.list      # discovered repos
 ```
 

@@ -16,6 +16,7 @@ function usage(): never {
   herdr-desk validate
   herdr-desk status
   herdr-desk history [N]
+  herdr-desk last
   herdr-desk start | stop | daemon
   herdr-desk tick
   herdr-desk on-focus
@@ -68,6 +69,12 @@ async function main() {
   if (cmd === 'history') {
     const n = Number(argv[1])
     console.log(formatHistory(loadRuns(Number.isFinite(n) && n > 0 ? n : 40)))
+    return
+  }
+
+  if (cmd === 'last') {
+    const { readLastChanges } = await import('./last')
+    console.log(await readLastChanges())
     return
   }
 
