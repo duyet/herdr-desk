@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import {
-  type DeskConfig,
+  type LoadedDesk,
   loadDeskConfig,
   resolveTask,
   type TaskConfig,
@@ -48,7 +48,7 @@ export async function runTask(opts: {
 }
 
 async function execute(
-  config: DeskConfig,
+  config: LoadedDesk,
   repo: string,
   task: TaskConfig,
   mode: RunMode,

@@ -2,24 +2,22 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/duyet/herdr-desk/main/herdr-desk.schema.json",
   "title": "herdr-desk repo config",
-  "description": "Drop this file at the repo root as .herdr-desk.json. The Herdr plugin picks it up. Do not copy the plugin into the repo.",
+  "description": "Usually just { name }. Defaults: github-issues, morning 07:00, 5 worktrees, <name>-desk. extraPrompt is inline markdown or a .md path.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["name", "tasks"],
+  "required": ["name"],
   "properties": {
-    "$schema": {
+    "$schema": { "type": "string" },
+    "name": { "type": "string", "minLength": 1 },
+    "repo": { "type": "string" },
+    "extraPrompt": {
       "type": "string",
-      "description": "Point at this schema so editors and agents validate the file."
+      "description": "Addendum. Inline markdown, or a path to a .md/.txt file if that file exists."
     },
-    "name": {
-      "type": "string",
-      "minLength": 1,
-      "description": "Short desk name (usually the repo folder)."
-    },
-    "repo": {
-      "type": "string",
-      "description": "Optional checkout path. Default: directory that contains this file."
-    },
+    "schedule": { "$ref": "#/$defs/schedule" },
+    "maxChildren": { "type": "integer", "minimum": 1, "maximum": 8, "default": 5 },
+    "agentName": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,31}$" },
+    "kind": { "type": "string", "default": "grok" },
     "tasks": {
       "type": "array",
       "minItems": 1,
@@ -29,52 +27,33 @@
   "$defs": {
     "cron": {
       "type": "string",
-      "pattern": "^\\S+\\s+\\S+\\s+\\S+\\s+\\S+\\s+\\S+$",
-      "description": "5-field cron (min hour dom mon dow), local clock. Example: 0 7 * * *"
+      "pattern": "^\\S+\\s+\\S+\\s+\\S+\\s+\\S+\\s+\\S+$"
+    },
+    "schedule": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "morning": { "$ref": "#/$defs/cron" },
+        "nightly": { "$ref": "#/$defs/cron" }
+      }
     },
     "task": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "task", "agentName"],
       "properties": {
-        "id": {
-          "type": "string",
-          "minLength": 1,
-          "description": "Task id used on the CLI (e.g. issues)."
-        },
-        "label": {
-          "type": "string",
-          "description": "Human label in status/history."
-        },
+        "id": { "type": "string" },
+        "label": { "type": "string" },
         "task": {
           "type": "string",
-          "minLength": 1,
-          "description": "Bundled playbook id (github-issues) or a path to a .md file in this repo."
+          "description": "Playbook id (github-issues), a .md path, or inline markdown."
         },
-        "agentName": {
-          "type": "string",
-          "pattern": "^[a-z][a-z0-9_-]{0,31}$",
-          "description": "Herdr agent name. Must match [a-z][a-z0-9_-]{0,31}."
-        },
-        "kind": {
-          "type": "string",
-          "default": "grok",
-          "description": "Herdr agent kind (usually grok)."
-        },
-        "maxChildren": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 8,
-          "default": 5,
-          "description": "Max isolated worktrees the morning manager may spawn."
-        },
-        "stateDir": {
-          "type": "string",
-          "description": "Run folder relative to the repo (dated subdirs). Example: .herdr-desk/runs/issues"
-        },
+        "agentName": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,31}$" },
+        "kind": { "type": "string" },
+        "maxChildren": { "type": "integer", "minimum": 1, "maximum": 8 },
+        "stateDir": { "type": "string" },
         "extraPrompt": {
           "type": "string",
-          "description": "Optional repo-local markdown addendum (CI, deploy rules)."
+          "description": "Inline markdown or a .md path."
         },
         "describe": {
           "type": "object",
@@ -82,36 +61,18 @@
           "properties": {
             "morning": { "type": "string" },
             "nightly": { "type": "string" }
-          },
-          "description": "Optional status-table one-liners. Inferred if omitted."
+          }
         },
-        "schedule": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "morning": { "$ref": "#/$defs/cron" },
-            "nightly": { "$ref": "#/$defs/cron" }
-          },
-          "description": "Omit nightly unless you really want an evening wrap."
-        }
+        "schedule": { "$ref": "#/$defs/schedule" }
       }
     }
   },
   "examples": [
+    { "name": "my-repo" },
     {
       "name": "my-repo",
-      "tasks": [
-        {
-          "id": "issues",
-          "label": "GitHub issues and PRs",
-          "task": "github-issues",
-          "agentName": "my-desk",
-          "kind": "grok",
-          "maxChildren": 5,
-          "stateDir": ".herdr-desk/runs/issues",
-          "schedule": { "morning": "0 7 * * *" }
-        }
-      ]
+      "extraPrompt": "Children never deploy. Manager deploys from main.",
+      "schedule": { "morning": "0 8 * * *" }
     }
   ]
 }

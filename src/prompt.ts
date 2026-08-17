@@ -1,17 +1,17 @@
 import { existsSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
 import {
-  type DeskConfig,
+  type LoadedDesk,
   promptPath,
   resolveTaskPromptPath,
   type TaskConfig,
 } from './config'
 import { interpolate } from './interpolate'
+import { looksLikePath, resolveText } from './text'
 
 export type PromptVars = Record<string, string>
 
 export function taskVars(opts: {
-  config: DeskConfig
+  config: LoadedDesk
   task: TaskConfig
   repo: string
   day: string
@@ -19,9 +19,9 @@ export function taskVars(opts: {
   workspaceId?: string
   paneId?: string
 }): PromptVars {
-  const extra = opts.task.extraPrompt
-    ? join(opts.repo, opts.task.extraPrompt)
-    : ''
+  const extra = resolveText(opts.repo, opts.task.extraPrompt)
+  const playbook = resolveText(opts.repo, opts.task.task)
+  const bundled = playbookPath(opts.repo, opts.task)
   return {
     day: opts.day,
     repo: opts.repo,
@@ -29,15 +29,31 @@ export function taskVars(opts: {
     taskId: opts.task.id,
     taskLabel: opts.task.label ?? opts.task.id,
     agentName: opts.task.agentName,
-    maxChildren: String(opts.task.maxChildren ?? 3),
+    maxChildren: String(opts.task.maxChildren ?? 5),
     kind: opts.task.kind ?? 'grok',
     identityPath: promptPath('identity'),
-    taskPromptPath: resolveTaskPromptPath(opts.task, opts.repo),
+    taskPromptPath: bundled,
+    taskPromptBody: bundled ? '' : playbook.text,
     childPromptPath: promptPath('child'),
-    extraPromptPath: extra,
+    extraPromptPath: extra.path ?? '',
+    extraPromptBody: extra.text,
     workspaceId: opts.workspaceId ?? '',
     paneId: opts.paneId ?? '',
     deskName: opts.config.name,
+  }
+}
+
+function playbookPath(repo: string, task: TaskConfig): string {
+  const value = task.task || 'github-issues'
+  if (value.includes('\n')) return ''
+  if (looksLikePath(value)) {
+    const hit = resolveText(repo, value)
+    return hit.path ?? ''
+  }
+  try {
+    return resolveTaskPromptPath({ ...task, task: value }, repo)
+  } catch {
+    return ''
   }
 }
 
@@ -51,10 +67,14 @@ export function assembleManagerPrompt(
 ): string {
   const envelope = renderFile(promptPath(mode), vars)
   const identity = renderFile(vars.identityPath, vars)
-  const task = renderFile(vars.taskPromptPath, vars)
-  const extra =
-    vars.extraPromptPath && existsSync(vars.extraPromptPath)
+  const taskBody = vars.taskPromptPath
+    ? renderFile(vars.taskPromptPath, vars)
+    : interpolate(vars.taskPromptBody ?? '', vars)
+  const extraRaw = vars.extraPromptBody ?? ''
+  const extra = extraRaw.trim()
+    ? `\n\n---\n# Repo addendum\n\n${interpolate(extraRaw, vars)}`
+    : vars.extraPromptPath && existsSync(vars.extraPromptPath)
       ? `\n\n---\n# Repo addendum\n\n${renderFile(vars.extraPromptPath, vars)}`
       : ''
-  return `${envelope}\n\n---\n${identity}\n\n---\n${task}${extra}\n`
+  return `${envelope}\n\n---\n${identity}\n\n---\n${taskBody}${extra}\n`
 }

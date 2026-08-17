@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { join } from 'node:path'
-import { DESK_ROOT, type DeskConfig, type TaskConfig } from './config'
+import { DESK_ROOT, type LoadedDesk, type TaskConfig } from './config'
 import { assembleManagerPrompt, taskVars } from './prompt'
 
 const task: TaskConfig = {
@@ -11,7 +11,7 @@ const task: TaskConfig = {
   maxChildren: 3,
 }
 
-const config: DeskConfig = { name: 'chmonitor', tasks: [task] }
+const config: LoadedDesk = { name: 'chmonitor', tasks: [task] }
 
 describe('assembleManagerPrompt', () => {
   test('morning includes identity and task', () => {

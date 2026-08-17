@@ -19,6 +19,10 @@ describe('validateDeskJson', () => {
     expect(validateDeskJson(good)).toEqual([])
   })
 
+  test('accepts name-only (defaults fill the rest)', () => {
+    expect(validateDeskJson({ name: 'demo' })).toEqual([])
+  })
+
   test('rejects a bad agent name and cron', () => {
     const bad = {
       name: 'demo',

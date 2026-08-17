@@ -1,14 +1,10 @@
-import { existsSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
 import type { TaskConfig } from './config'
+import { resolveText } from './text'
 
 export type Slot = 'morning' | 'nightly'
 
 function extraText(repo: string, task: TaskConfig): string {
-  if (!task.extraPrompt) return ''
-  const path = join(repo, task.extraPrompt)
-  if (!existsSync(path)) return ''
-  return readFileSync(path, 'utf8')
+  return resolveText(repo, task.extraPrompt).text
 }
 
 function extras(text: string): string[] {
@@ -40,10 +36,11 @@ export function describeJob(
   const override = task.describe?.[mode]
   if (override) return override
 
-  const n = task.maxChildren ?? 3
-  const playbook = task.task.endsWith('.md')
-    ? (task.label ?? task.id)
-    : task.task
+  const n = task.maxChildren ?? 5
+  const playbook =
+    !task.task || task.task.includes('\n') || task.task.endsWith('.md')
+      ? (task.label ?? task.id)
+      : task.task
   const core =
     mode === 'morning'
       ? playbook === 'github-issues'

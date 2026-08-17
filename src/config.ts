@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { applyDefaults } from './defaults'
 import { validateDeskJson } from './schema'
 
 export const DESK_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -31,8 +32,16 @@ export type DeskConfig = {
   $schema?: string
   name: string
   repo?: string
-  tasks: TaskConfig[]
+  extraPrompt?: string
+  schedule?: TaskSchedule
+  maxChildren?: number
+  agentName?: string
+  kind?: string
+  tasks?: TaskConfig[]
 }
+
+/** After applyDefaults — tasks is always filled. */
+export type LoadedDesk = DeskConfig & { tasks: TaskConfig[] }
 
 export const CONFIG_NAMES = [
   '.herdr-desk.json',
@@ -48,7 +57,7 @@ export function findConfigPath(repo: string): string | null {
   return null
 }
 
-export function loadDeskConfig(repo: string): DeskConfig {
+export function loadDeskConfig(repo: string): LoadedDesk {
   const path = findConfigPath(repo)
   if (!path) {
     throw new Error(
@@ -58,10 +67,10 @@ export function loadDeskConfig(repo: string): DeskConfig {
   const raw = JSON.parse(readFileSync(path, 'utf8')) as DeskConfig
   const errors = validateDeskJson(raw, path)
   if (errors.length) throw new Error(errors.join('\n'))
-  return { ...raw, repo: raw.repo ?? repo }
+  return applyDefaults(raw, repo)
 }
 
-export function resolveTask(config: DeskConfig, taskId?: string): TaskConfig {
+export function resolveTask(config: LoadedDesk, taskId?: string): TaskConfig {
   if (!taskId) {
     if (config.tasks.length === 1) return config.tasks[0]
     throw new Error(

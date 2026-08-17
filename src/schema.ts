@@ -22,7 +22,17 @@ export function validateDeskJson(
     return [`${path}: must be an object`]
   }
   const o = raw as Record<string, unknown>
-  const allowed = new Set(['$schema', 'name', 'repo', 'tasks'])
+  const allowed = new Set([
+    '$schema',
+    'name',
+    'repo',
+    'tasks',
+    'extraPrompt',
+    'schedule',
+    'maxChildren',
+    'agentName',
+    'kind',
+  ])
   for (const k of Object.keys(o)) {
     if (!allowed.has(k)) errors.push(`${path}: unknown field '${k}'`)
   }
@@ -32,13 +42,48 @@ export function validateDeskJson(
   if (o.repo !== undefined && typeof o.repo !== 'string') {
     errors.push(`${path}.repo: must be a string`)
   }
-  if (!Array.isArray(o.tasks) || o.tasks.length < 1) {
-    errors.push(`${path}.tasks: required non-empty array`)
-    return errors
+  if (o.extraPrompt !== undefined && typeof o.extraPrompt !== 'string') {
+    errors.push(`${path}.extraPrompt: string (inline markdown or a .md path)`)
   }
-  o.tasks.forEach((task, i) => {
-    errors.push(...validateTask(task, `${path}.tasks[${i}]`))
-  })
+  if (o.maxChildren !== undefined) {
+    const n = o.maxChildren
+    if (typeof n !== 'number' || !Number.isInteger(n) || n < 1 || n > 8) {
+      errors.push(`${path}.maxChildren: integer 1–8`)
+    }
+  }
+  if (
+    o.agentName !== undefined &&
+    (typeof o.agentName !== 'string' || !AGENT.test(o.agentName))
+  ) {
+    errors.push(`${path}.agentName: must match [a-z][a-z0-9_-]{0,31}`)
+  }
+  if (o.schedule !== undefined)
+    errors.push(...validateSchedule(o.schedule, `${path}.schedule`))
+  if (o.tasks !== undefined) {
+    if (!Array.isArray(o.tasks) || o.tasks.length < 1) {
+      errors.push(`${path}.tasks: if set, must be a non-empty array`)
+    } else {
+      o.tasks.forEach((task, i) => {
+        errors.push(...validateTask(task, `${path}.tasks[${i}]`))
+      })
+    }
+  }
+  return errors
+}
+
+function validateSchedule(raw: unknown, path: string): string[] {
+  const errors: string[] = []
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return [`${path}: must be an object`]
+  }
+  const s = raw as Record<string, unknown>
+  for (const k of Object.keys(s)) {
+    if (k !== 'morning' && k !== 'nightly') {
+      errors.push(`${path}: unknown field '${k}'`)
+    } else if (typeof s[k] !== 'string' || !CRON.test(s[k] as string)) {
+      errors.push(`${path}.${k}: 5-field cron (e.g. 0 7 * * *)`)
+    }
+  }
   return errors
 }
 
@@ -63,14 +108,20 @@ function validateTask(raw: unknown, path: string): string[] {
   for (const k of Object.keys(o)) {
     if (!allowed.has(k)) errors.push(`${path}: unknown field '${k}'`)
   }
-  if (typeof o.id !== 'string' || !o.id.trim()) {
-    errors.push(`${path}.id: required string`)
+  if (o.id !== undefined && (typeof o.id !== 'string' || !o.id.trim())) {
+    errors.push(`${path}.id: must be a string`)
   }
-  if (typeof o.task !== 'string' || !o.task.trim()) {
-    errors.push(`${path}.task: required string (github-issues or a .md path)`)
+  if (o.task !== undefined && typeof o.task !== 'string') {
+    errors.push(`${path}.task: playbook id, .md path, or inline markdown`)
   }
-  if (typeof o.agentName !== 'string' || !AGENT.test(o.agentName)) {
+  if (
+    o.agentName !== undefined &&
+    (typeof o.agentName !== 'string' || !AGENT.test(o.agentName))
+  ) {
     errors.push(`${path}.agentName: must match [a-z][a-z0-9_-]{0,31}`)
+  }
+  if (o.extraPrompt !== undefined && typeof o.extraPrompt !== 'string') {
+    errors.push(`${path}.extraPrompt: string (inline markdown or a .md path)`)
   }
   if (o.maxChildren !== undefined) {
     const n = o.maxChildren
@@ -78,23 +129,7 @@ function validateTask(raw: unknown, path: string): string[] {
       errors.push(`${path}.maxChildren: integer 1–8`)
     }
   }
-  if (o.schedule !== undefined) {
-    if (
-      !o.schedule ||
-      typeof o.schedule !== 'object' ||
-      Array.isArray(o.schedule)
-    ) {
-      errors.push(`${path}.schedule: must be an object`)
-    } else {
-      const s = o.schedule as Record<string, unknown>
-      for (const k of Object.keys(s)) {
-        if (k !== 'morning' && k !== 'nightly') {
-          errors.push(`${path}.schedule: unknown field '${k}'`)
-        } else if (typeof s[k] !== 'string' || !CRON.test(s[k] as string)) {
-          errors.push(`${path}.schedule.${k}: 5-field cron (e.g. 0 7 * * *)`)
-        }
-      }
-    }
-  }
+  if (o.schedule !== undefined)
+    errors.push(...validateSchedule(o.schedule, `${path}.schedule`))
   return errors
 }

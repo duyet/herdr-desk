@@ -1,14 +1,14 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { type DeskConfig, findConfigPath, loadDeskConfig } from './config'
+import { findConfigPath, type LoadedDesk, loadDeskConfig } from './config'
 import { herdrCall } from './herdr'
 import { pluginConfigDir, pluginStateDir } from './paths'
 
 export type Discovered = {
   repo: string
   configPath: string
-  config: DeskConfig
+  config: LoadedDesk
   source: 'workspace' | 'remembered' | 'plugin-config'
 }
 

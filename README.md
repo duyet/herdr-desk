@@ -52,15 +52,12 @@ Stop. Do not add features.
 ```
 Wire herdr-desk for the current repo. Keep it tiny.
 
-1. herdr plugin install duyet/herdr-desk (or link if already cloned). Start the plugin.
-2. If .herdr-desk.json is missing, add one: name = repo folder, one task id "issues",
-   task "github-issues", agentName "<short>-desk", kind grok, maxChildren 3,
-   stateDir ".herdr-desk/runs/issues", morning "0 7 * * *", nightly "0 22 * * *".
-   Gitignore .herdr-desk/runs/*/
-3. Do not add extraPrompt unless this repo already has special CI/deploy rules.
-4. Open or leave this repo as a Herdr workspace so the plugin can pick it up.
-5. Verify: bun <plugin-root>/src/cli.ts status   (or herdr plugin action invoke herdr-desk.status)
-   Run folders use today's date automatically. Do not invent a date. Do not copy prompts here.
+1. herdr plugin install duyet/herdr-desk (or link). Start the plugin.
+2. If .herdr-desk.json is missing, write { "$schema": "<schema url>", "name": "<folder>" }.
+   Defaults fill the rest. Only add extraPrompt for special rules (inline text, not a new file).
+3. Gitignore .herdr-desk/runs/*/
+4. Leave this repo as a Herdr workspace.
+5. herdr plugin action invoke herdr-desk.status
 ```
 
 Same text lives in [`prompts/install-agent.md`](prompts/install-agent.md).
@@ -73,38 +70,28 @@ https://raw.githubusercontent.com/duyet/herdr-desk/main/herdr-desk.schema.json
 Set `"$schema"` to that URL. `herdr-desk validate` checks every discovered
 file against it.
 
-This is all a target repo needs:
+Usually this is the whole file:
 
 ```json
 {
   "$schema": "https://raw.githubusercontent.com/duyet/herdr-desk/main/herdr-desk.schema.json",
-  "name": "my-repo",
-  "tasks": [
-    {
-      "id": "issues",
-      "label": "GitHub issues and PRs",
-      "task": "github-issues",
-      "agentName": "my-desk",
-      "kind": "grok",
-      "maxChildren": 3,
-      "stateDir": ".herdr-desk/runs/issues",
-      "extraPrompt": ".herdr-desk/extra.md",
-      "schedule": {
-        "morning": "0 7 * * *",
-        "nightly": "0 22 * * *"
-      }
-    }
-  ]
+  "name": "my-repo"
 }
 ```
 
-Also accepted: `herdr-desk.json`, `ops/desk.json`.
+Defaults: playbook `github-issues`, agent `<name>-desk`, 5 worktrees, morning `0 7 * * *`, state `.herdr-desk/runs/issues/`.
 
-| Field | Meaning |
-|---|---|
-| `task` | Bundled playbook id (`prompts/tasks/<id>.md`) or a path to markdown in the repo |
-| `extraPrompt` | Optional repo-local addendum (CI rules, deploy rules) |
-| `schedule` | 5-field cron, local wall clock |
+Optional extras — **inline markdown or a `.md` path** (if the file exists it is loaded; otherwise the string is the prompt):
+
+```json
+{
+  "name": "my-repo",
+  "schedule": { "morning": "0 8 * * *" },
+  "extraPrompt": "Children never deploy. Manager deploys from main."
+}
+```
+
+Also accepted: `herdr-desk.json`. See `examples/`.
 
 Optional extra roots (repos you never open in Herdr):
 
