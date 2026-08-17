@@ -10,7 +10,7 @@ import { cronMatches } from './cron'
 import { dayKey } from './day'
 import { discoverDesks } from './discover'
 import { pluginStateDir } from './paths'
-import { type RunMode, runTask } from './run'
+import { runTask } from './run'
 
 const TICK_MS = 20_000
 
@@ -65,10 +65,10 @@ function log(line: string): void {
 function fireKey(
   repo: string,
   taskId: string,
-  mode: RunMode,
+  cron: string,
   day: string,
 ): string {
-  return `${repo}::${taskId}::${mode}::${day}`
+  return `${repo}::${taskId}::${cron}::${day}`
 }
 
 export async function tickOnce(at = new Date()): Promise<number> {
@@ -78,20 +78,19 @@ export async function tickOnce(at = new Date()): Promise<number> {
   let n = 0
   for (const d of desks) {
     for (const task of d.config.tasks) {
-      for (const mode of ['morning', 'nightly'] as const) {
-        const expr = task.schedule?.[mode]
+      for (const expr of task.crons) {
         if (!expr || !cronMatches(expr, at)) continue
-        const key = fireKey(d.repo, task.id, mode, day)
+        const key = fireKey(d.repo, task.id, expr, day)
         if (fires[key]) continue
-        log(`fire ${d.config.name}/${task.id} ${mode}`)
+        log(`fire ${d.config.name}/${task.id} ${expr}`)
         try {
-          const result = await runTask({ repo: d.repo, taskId: task.id, mode })
+          const result = await runTask({ repo: d.repo, taskId: task.id })
           fires[key] = new Date().toISOString()
           log(`ok ${JSON.stringify(result)}`)
           n++
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err)
-          log(`fail ${d.config.name}/${task.id} ${mode}: ${msg}`)
+          log(`fail ${d.config.name}/${task.id} ${expr}: ${msg}`)
         }
       }
     }

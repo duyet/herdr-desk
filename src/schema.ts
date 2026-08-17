@@ -27,7 +27,8 @@ export function validateDeskJson(
     'name',
     'repo',
     'tasks',
-    'extraPrompt',
+    'extra',
+    'playbook',
     'schedule',
     'maxChildren',
     'agentName',
@@ -42,8 +43,11 @@ export function validateDeskJson(
   if (o.repo !== undefined && typeof o.repo !== 'string') {
     errors.push(`${path}.repo: must be a string`)
   }
-  if (o.extraPrompt !== undefined && typeof o.extraPrompt !== 'string') {
-    errors.push(`${path}.extraPrompt: string (inline markdown or a .md path)`)
+  if (o.extra !== undefined && typeof o.extra !== 'string') {
+    errors.push(`${path}.extra: string (inline markdown or a .md path)`)
+  }
+  if (o.playbook !== undefined && typeof o.playbook !== 'string') {
+    errors.push(`${path}.playbook: bundled id, .md path, or inline markdown`)
   }
   if (o.maxChildren !== undefined) {
     const n = o.maxChildren
@@ -71,20 +75,20 @@ export function validateDeskJson(
   return errors
 }
 
+function validateCron(raw: unknown, path: string): string[] {
+  if (typeof raw !== 'string' || !CRON.test(raw)) {
+    return [`${path}: 5-field cron (e.g. "0 8 * * *")`]
+  }
+  return []
+}
+
 function validateSchedule(raw: unknown, path: string): string[] {
-  const errors: string[] = []
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-    return [`${path}: must be an object`]
+  if (typeof raw === 'string') return validateCron(raw, path)
+  if (Array.isArray(raw)) {
+    if (raw.length < 1) return [`${path}: array must not be empty`]
+    return raw.flatMap((item, i) => validateCron(item, `${path}[${i}]`))
   }
-  const s = raw as Record<string, unknown>
-  for (const k of Object.keys(s)) {
-    if (k !== 'morning' && k !== 'nightly') {
-      errors.push(`${path}: unknown field '${k}'`)
-    } else if (typeof s[k] !== 'string' || !CRON.test(s[k] as string)) {
-      errors.push(`${path}.${k}: 5-field cron (e.g. 0 7 * * *)`)
-    }
-  }
-  return errors
+  return [`${path}: cron string or array of cron strings`]
 }
 
 function validateTask(raw: unknown, path: string): string[] {
@@ -96,12 +100,12 @@ function validateTask(raw: unknown, path: string): string[] {
   const allowed = new Set([
     'id',
     'label',
-    'task',
+    'playbook',
     'agentName',
     'kind',
     'maxChildren',
     'stateDir',
-    'extraPrompt',
+    'extra',
     'describe',
     'schedule',
   ])
@@ -111,8 +115,8 @@ function validateTask(raw: unknown, path: string): string[] {
   if (o.id !== undefined && (typeof o.id !== 'string' || !o.id.trim())) {
     errors.push(`${path}.id: must be a string`)
   }
-  if (o.task !== undefined && typeof o.task !== 'string') {
-    errors.push(`${path}.task: playbook id, .md path, or inline markdown`)
+  if (o.playbook !== undefined && typeof o.playbook !== 'string') {
+    errors.push(`${path}.playbook: bundled id, .md path, or inline markdown`)
   }
   if (
     o.agentName !== undefined &&
@@ -120,8 +124,11 @@ function validateTask(raw: unknown, path: string): string[] {
   ) {
     errors.push(`${path}.agentName: must match [a-z][a-z0-9_-]{0,31}`)
   }
-  if (o.extraPrompt !== undefined && typeof o.extraPrompt !== 'string') {
-    errors.push(`${path}.extraPrompt: string (inline markdown or a .md path)`)
+  if (o.extra !== undefined && typeof o.extra !== 'string') {
+    errors.push(`${path}.extra: string (inline markdown or a .md path)`)
+  }
+  if (o.describe !== undefined && typeof o.describe !== 'string') {
+    errors.push(`${path}.describe: string`)
   }
   if (o.maxChildren !== undefined) {
     const n = o.maxChildren

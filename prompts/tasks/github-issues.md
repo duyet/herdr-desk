@@ -12,14 +12,14 @@ All under `{{runDir}}`:
 |------|---------|
 | `queue.md` / `issues.md` | Classification of open issues + PRs |
 | `workers.md` | Child worktrees, agent names, PR links |
-| `summary.md` / `SUMMARY.md` | Morning kickoff + running log |
+| `summary.md` / `SUMMARY.md` | Start-of-run plan + running log |
 | `changes.md` | **After the run:** what actually changed (PRs, merges, skips) |
 | `research-<n>.md` | Write-up when the right output is a note, not a PR |
 | `run.json` | Machine-readable snapshot if you want one |
 
 Do not put secrets in these files.
 
-## Morning
+## Run
 
 1. `git fetch origin` and `git pull --ff-only origin main`. If this
    checkout is not a clean `main`, write the blocker in the summary and stop.
@@ -44,7 +44,7 @@ herdr agent prompt <name> <child prompt>
 6. Fill workers + summary (counts, spawned, skipped + why).
 7. Stay up. Watch children. Pull `main` when a PR merges. Tell remaining
    children to rebase. **Do not close** workspaces.
-8. **When the morning run is done** (children settled, or you are not
+8. **When the run is done** (children settled, or you are not
    starting more), write `changes.md` — the human-facing delta:
 
 ```markdown
@@ -58,9 +58,9 @@ herdr agent prompt <name> <child prompt>
 ```
 
 Keep it short. This is what status/`last` shows. Also toast:
-`herdr notification show "{{deskName}} morning done" --body "{{runDir}}/changes.md"`
+`herdr notification show "{{deskName}} done" --body "{{runDir}}/changes.md"`
 
-There is no nightly slot. Do not wait until evening to write `changes.md`.
+Do not wait until later to write `changes.md`.
 
 ## Quality gate
 

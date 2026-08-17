@@ -11,8 +11,6 @@ import { agentNames, herdrCall, herdrReady, pickPane } from './herdr'
 import { recordRun } from './history'
 import { assembleManagerPrompt, taskVars } from './prompt'
 
-export type RunMode = 'morning' | 'nightly'
-
 type RunResult = {
   skipped?: string
   spawned?: boolean
@@ -27,19 +25,18 @@ export function runDirFor(repo: string, task: TaskConfig, day: string): string {
 export async function runTask(opts: {
   repo: string
   taskId?: string
-  mode: RunMode
 }): Promise<RunResult> {
   const config = loadDeskConfig(opts.repo)
   const repo = config.repo ?? opts.repo
   const task = resolveTask(config, opts.taskId)
   try {
-    return await execute(config, repo, task, opts.mode)
+    return await execute(config, repo, task)
   } catch (err) {
     recordRun({
       name: config.name,
       repo,
       task: task.id,
-      mode: opts.mode,
+      mode: 'run',
       ok: false,
       detail: err instanceof Error ? err.message : String(err),
     })
@@ -51,7 +48,6 @@ async function execute(
   config: LoadedDesk,
   repo: string,
   task: TaskConfig,
-  mode: RunMode,
 ): Promise<RunResult> {
   const day = dayKey()
   const runDir = runDirFor(repo, task, day)
@@ -63,7 +59,7 @@ async function execute(
       name: config.name,
       repo,
       task: task.id,
-      mode,
+      mode: 'run',
       ok: true,
       detail: JSON.stringify(result),
     })
@@ -89,17 +85,9 @@ async function execute(
       'agent',
       'prompt',
       task.agentName,
-      assembleManagerPrompt(mode, vars),
+      assembleManagerPrompt(vars),
     ])
     return done({ prompted: true })
-  }
-
-  if (mode === 'nightly') {
-    writeFileSync(
-      join(runDir, 'nightly.md'),
-      `# Nightly ${day}\n\nManager \`${task.agentName}\` was not running.\n`,
-    )
-    return done({ skipped: 'manager not live' })
   }
 
   const created = await herdrCall([
@@ -129,7 +117,6 @@ async function execute(
     'prompt',
     task.agentName,
     assembleManagerPrompt(
-      'morning',
       taskVars({ config, task, repo, day, runDir, workspaceId, paneId }),
     ),
   ])

@@ -3,11 +3,11 @@
   "name": "my-repo",
   "tasks": [
     {
-      "id": "triage",
+      "id": "local:triage",
       "label": "Inbox triage",
       "agentName": "triage-desk",
-      "task": "# Inbox\n\nTriage open issues only. Open at most one PR. Write changes.md when done.\nSkip anything that needs a product decision.",
-      "schedule": { "morning": "30 7 * * *" }
+      "playbook": "# Inbox\n\nTriage open issues only. Open at most one PR. Write changes.md when done.\nSkip anything that needs a product decision.",
+      "schedule": "30 7 * * *"
     }
   ]
 }

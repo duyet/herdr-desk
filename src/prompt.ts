@@ -19,9 +19,9 @@ export function taskVars(opts: {
   workspaceId?: string
   paneId?: string
 }): PromptVars {
-  const extra = resolveText(opts.repo, opts.task.extraPrompt)
-  const playbook = resolveText(opts.repo, opts.task.task)
-  const bundled = playbookPath(opts.repo, opts.task)
+  const extra = resolveText(opts.repo, opts.task.extra)
+  const playbook = resolveText(opts.repo, opts.task.playbook)
+  const bundled = playbookFile(opts.repo, opts.task)
   return {
     day: opts.day,
     repo: opts.repo,
@@ -35,23 +35,23 @@ export function taskVars(opts: {
     taskPromptPath: bundled,
     taskPromptBody: bundled ? '' : playbook.text,
     childPromptPath: promptPath('child'),
-    extraPromptPath: extra.path ?? '',
-    extraPromptBody: extra.text,
+    extraPath: extra.path ?? '',
+    extraBody: extra.text,
     workspaceId: opts.workspaceId ?? '',
     paneId: opts.paneId ?? '',
     deskName: opts.config.name,
   }
 }
 
-function playbookPath(repo: string, task: TaskConfig): string {
-  const value = task.task || 'github-issues'
+function playbookFile(repo: string, task: TaskConfig): string {
+  const value = task.playbook
   if (value.includes('\n')) return ''
   if (looksLikePath(value)) {
     const hit = resolveText(repo, value)
     return hit.path ?? ''
   }
   try {
-    return resolveTaskPromptPath({ ...task, task: value }, repo)
+    return resolveTaskPromptPath(task, repo)
   } catch {
     return ''
   }
@@ -61,20 +61,17 @@ export function renderFile(path: string, vars: PromptVars): string {
   return interpolate(readFileSync(path, 'utf8'), vars)
 }
 
-export function assembleManagerPrompt(
-  mode: 'morning' | 'nightly',
-  vars: PromptVars,
-): string {
-  const envelope = renderFile(promptPath(mode), vars)
+export function assembleManagerPrompt(vars: PromptVars): string {
+  const envelope = renderFile(promptPath('run'), vars)
   const identity = renderFile(vars.identityPath, vars)
   const taskBody = vars.taskPromptPath
     ? renderFile(vars.taskPromptPath, vars)
     : interpolate(vars.taskPromptBody ?? '', vars)
-  const extraRaw = vars.extraPromptBody ?? ''
+  const extraRaw = vars.extraBody ?? ''
   const extra = extraRaw.trim()
     ? `\n\n---\n# Repo addendum\n\n${interpolate(extraRaw, vars)}`
-    : vars.extraPromptPath && existsSync(vars.extraPromptPath)
-      ? `\n\n---\n# Repo addendum\n\n${renderFile(vars.extraPromptPath, vars)}`
+    : vars.extraPath && existsSync(vars.extraPath)
+      ? `\n\n---\n# Repo addendum\n\n${renderFile(vars.extraPath, vars)}`
       : ''
   return `${envelope}\n\n---\n${identity}\n\n---\n${taskBody}${extra}\n`
 }

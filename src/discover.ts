@@ -116,9 +116,7 @@ export function formatScan(desks: Discovered[]): string {
   for (const d of desks) {
     lines.push(`${d.config.name}  ${d.repo}  (${d.source})`)
     for (const t of d.config.tasks) {
-      lines.push(
-        `  ${t.id}  ${t.agentName}  morning=${t.schedule?.morning ?? '-'}  nightly=${t.schedule?.nightly ?? '-'}`,
-      )
+      lines.push(`  ${t.id}  ${t.agentName}  ${t.crons.join(' | ') || '-'}`)
     }
   }
   return lines.join('\n')

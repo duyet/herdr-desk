@@ -1,6 +1,6 @@
 {
   "$schema": "https://raw.githubusercontent.com/duyet/herdr-desk/main/herdr-desk.schema.json",
   "name": "my-repo",
-  "schedule": { "morning": "0 8 * * *" },
-  "extraPrompt": "Children never deploy. Manager deploys from main after a PR lands."
+  "schedule": "0 8 * * *",
+  "extra": "Children never deploy. Manager deploys from main after a PR lands."
 }

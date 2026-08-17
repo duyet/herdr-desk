@@ -1,10 +1,8 @@
 import type { TaskConfig } from './config'
 import { resolveText } from './text'
 
-export type Slot = 'morning' | 'nightly'
-
 function extraText(repo: string, task: TaskConfig): string {
-  return resolveText(repo, task.extraPrompt).text
+  return resolveText(repo, task.extra).text
 }
 
 function extras(text: string): string[] {
@@ -28,27 +26,19 @@ function extras(text: string): string[] {
   return bits
 }
 
-export function describeJob(
-  repo: string,
-  task: TaskConfig,
-  mode: Slot,
-): string {
-  const override = task.describe?.[mode]
-  if (override) return override
+export function describeJob(repo: string, task: TaskConfig): string {
+  if (task.describe) return task.describe
 
   const n = task.maxChildren ?? 5
+  const raw = task.playbook
   const playbook =
-    !task.task || task.task.includes('\n') || task.task.endsWith('.md')
+    !raw || raw.includes('\n') || raw.endsWith('.md')
       ? (task.label ?? task.id)
-      : task.task
+      : raw
   const core =
-    mode === 'morning'
-      ? playbook === 'github-issues'
-        ? `Triage issues/PRs; spawn ≤${n} worktrees; write changes.md when done`
-        : `${task.label ?? task.id}: morning dispatch (≤${n}); write changes.md when done`
-      : playbook === 'github-issues'
-        ? 'Wrap summary; no new work unless one CI-fix left'
-        : `${task.label ?? task.id}: nightly wrap`
+    playbook === 'github-issues'
+      ? `Triage issues/PRs; spawn ≤${n} worktrees; write changes.md when done`
+      : `${task.label ?? task.id}: run (≤${n}); write changes.md when done`
 
   const extra = extras(extraText(repo, task))
   return extra.length ? `${core}. ${extra.join('; ')}` : core

@@ -14,10 +14,10 @@ describe('repo config', () => {
         name: 'fixture',
         tasks: [
           {
-            id: 'issues',
-            task: 'github-issues',
+            id: 'desk:github-issues',
+            playbook: 'github-issues',
             agentName: 'fix-desk',
-            schedule: { morning: '0 7 * * *' },
+            schedule: '0 7 * * *',
           },
         ],
       }),

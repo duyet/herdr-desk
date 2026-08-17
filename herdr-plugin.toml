@@ -1,7 +1,7 @@
 id = "herdr-desk"
 name = "Herdr Desk"
 version = "0.1.0" # x-release-please-version
-description = "Scheduled repo managers: pick up .herdr-desk.json from open workspaces and fire morning/nightly Grok managers"
+description = "Scheduled repo managers: pick up .herdr-desk.json from open workspaces and fire start/wrap Grok managers"
 min_herdr_version = "0.7.0"
 platforms = ["linux", "macos"]
 
@@ -35,7 +35,7 @@ command = ["bin/desk", "history"]
 
 [[actions]]
 id = "last"
-title = "Show today's morning change summaries"
+title = "Show today's start-run change summaries"
 command = ["bin/desk", "last"]
 
 [[actions]]

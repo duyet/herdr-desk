@@ -22,8 +22,9 @@ Wire herdr-desk. Keep it tiny.
    ```
    { "$schema": "<that url>", "name": "<repo-folder>" }
    ```
-   Defaults fill playbook, agent, 5 worktrees, 07:00 morning. No nightly.
-   Only add extraPrompt if this repo has special rules — inline text, not
+   Defaults fill playbook github-issues, id desk:github-issues, agent,
+   5 worktrees, 07:00 start. No wrap slot.
+   Only add extra if this repo has special rules — inline text, not
    a new extra.md, unless they already have a file.
 3. Gitignore .herdr-desk/runs/*/
 4. Leave this repo as a Herdr workspace.

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/duyet/herdr-desk/main/herdr-desk.schema.json",
   "title": "herdr-desk repo config",
-  "description": "Usually just { name }. Defaults: github-issues, morning 07:00, 5 worktrees, <name>-desk. extraPrompt is inline markdown or a .md path.",
+  "description": "Usually { name }. Defaults: playbook github-issues, job id desk:github-issues, schedule 0 7 * * *, 5 worktrees, <name>-desk. extra is inline markdown or a .md path.",
   "type": "object",
   "additionalProperties": false,
   "required": ["name"],
@@ -10,9 +10,13 @@
     "$schema": { "type": "string" },
     "name": { "type": "string", "minLength": 1 },
     "repo": { "type": "string" },
-    "extraPrompt": {
+    "playbook": {
       "type": "string",
-      "description": "Addendum. Inline markdown, or a path to a .md/.txt file if that file exists."
+      "description": "Bundled id (github-issues), a .md path, or inline markdown."
+    },
+    "extra": {
+      "type": "string",
+      "description": "Repo addendum. Inline markdown, or a path if that file exists."
     },
     "schedule": { "$ref": "#/$defs/schedule" },
     "maxChildren": { "type": "integer", "minimum": 1, "maximum": 8, "default": 5 },
@@ -30,39 +34,35 @@
       "pattern": "^\\S+\\s+\\S+\\s+\\S+\\s+\\S+\\s+\\S+$"
     },
     "schedule": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "morning": { "$ref": "#/$defs/cron" },
-        "nightly": { "$ref": "#/$defs/cron" }
-      }
+      "description": "When to run. One cron, or several crons that all run this playbook.",
+      "oneOf": [
+        { "$ref": "#/$defs/cron" },
+        {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/cron" }
+        }
+      ]
     },
     "task": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "id": { "type": "string" },
-        "label": { "type": "string" },
-        "task": {
+        "id": {
           "type": "string",
-          "description": "Playbook id (github-issues), a .md path, or inline markdown."
+          "description": "Job handle. desk: for a bundled playbook, local: for a repo-owned prompt."
+        },
+        "label": { "type": "string" },
+        "playbook": {
+          "type": "string",
+          "description": "Bundled id (github-issues), a .md path, or inline markdown."
         },
         "agentName": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,31}$" },
         "kind": { "type": "string" },
         "maxChildren": { "type": "integer", "minimum": 1, "maximum": 8 },
         "stateDir": { "type": "string" },
-        "extraPrompt": {
-          "type": "string",
-          "description": "Inline markdown or a .md path."
-        },
-        "describe": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "morning": { "type": "string" },
-            "nightly": { "type": "string" }
-          }
-        },
+        "extra": { "type": "string" },
+        "describe": { "type": "string" },
         "schedule": { "$ref": "#/$defs/schedule" }
       }
     }
@@ -71,8 +71,14 @@
     { "name": "my-repo" },
     {
       "name": "my-repo",
-      "extraPrompt": "Children never deploy. Manager deploys from main.",
-      "schedule": { "morning": "0 8 * * *" }
+      "tasks": [
+        {
+          "id": "desk:github-issues",
+          "playbook": "github-issues",
+          "schedule": "0 8 * * *",
+          "extra": "Children never deploy. Manager deploys from main."
+        }
+      ]
     }
   ]
 }

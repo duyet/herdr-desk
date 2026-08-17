@@ -6,42 +6,48 @@ import { validateDeskJson } from './schema'
 
 export const DESK_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
-export type TaskSchedule = {
-  morning?: string
-  nightly?: string
-}
+/** Cron string, or several crons that all run the same playbook. */
+export type Schedule = string | string[]
 
 export type TaskConfig = {
   id: string
   label?: string
-  /** Bundled prompt id (`github-issues`) or path to a .md file. */
-  task: string
+  playbook: string
   agentName: string
   kind?: string
   maxChildren?: number
-  schedule?: TaskSchedule
-  /** Run folder relative to the repo. */
+  /** Authoring form (string or list). */
+  schedule?: Schedule
+  /** Normalized cron list after defaults. */
+  crons: string[]
   stateDir?: string
-  /** Extra repo-local markdown appended to the manager prompt. */
-  extraPrompt?: string
-  /** Optional one-liners for status table (else the plugin infers them). */
-  describe?: Partial<Record<'morning' | 'nightly', string>>
+  extra?: string
+  describe?: string
 }
 
 export type DeskConfig = {
   $schema?: string
   name: string
   repo?: string
-  extraPrompt?: string
-  schedule?: TaskSchedule
+  extra?: string
+  playbook?: string
+  schedule?: Schedule
   maxChildren?: number
   agentName?: string
   kind?: string
-  tasks?: TaskConfig[]
+  tasks?: Array<
+    Partial<Omit<TaskConfig, 'crons' | 'playbook' | 'agentName' | 'id'>> & {
+      id?: string
+      playbook?: string
+      agentName?: string
+      schedule?: Schedule
+    }
+  >
 }
 
-/** After applyDefaults — tasks is always filled. */
-export type LoadedDesk = DeskConfig & { tasks: TaskConfig[] }
+export type LoadedDesk = Omit<DeskConfig, 'tasks'> & {
+  tasks: TaskConfig[]
+}
 
 export const CONFIG_NAMES = [
   '.herdr-desk.json',
@@ -83,16 +89,17 @@ export function resolveTask(config: LoadedDesk, taskId?: string): TaskConfig {
 }
 
 export function resolveTaskPromptPath(task: TaskConfig, repo: string): string {
+  const playbook = task.playbook
   if (
-    task.task.endsWith('.md') ||
-    task.task.includes('/') ||
-    task.task.startsWith('.')
+    playbook.endsWith('.md') ||
+    playbook.includes('/') ||
+    playbook.startsWith('.')
   ) {
-    return isAbsolute(task.task) ? task.task : resolve(repo, task.task)
+    return isAbsolute(playbook) ? playbook : resolve(repo, playbook)
   }
-  const bundled = join(DESK_ROOT, 'prompts', 'tasks', `${task.task}.md`)
+  const bundled = join(DESK_ROOT, 'prompts', 'tasks', `${playbook}.md`)
   if (!existsSync(bundled)) {
-    throw new Error(`bundled task prompt not found: ${bundled}`)
+    throw new Error(`bundled playbook not found: ${bundled}`)
   }
   return bundled
 }

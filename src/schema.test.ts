@@ -8,11 +8,11 @@ const good = {
   name: 'demo',
   tasks: [
     {
-      id: 'issues',
-      task: 'github-issues',
+      id: 'desk:github-issues',
+      playbook: 'github-issues',
       agentName: 'my-desk',
       maxChildren: 5,
-      schedule: { morning: '0 7 * * *' },
+      schedule: '0 7 * * *',
     },
   ],
 }
@@ -24,6 +24,15 @@ describe('validateDeskJson', () => {
 
   test('accepts name-only (defaults fill the rest)', () => {
     expect(validateDeskJson({ name: 'demo' })).toEqual([])
+  })
+
+  test('accepts a cron list', () => {
+    expect(
+      validateDeskJson({
+        name: 'demo',
+        schedule: ['0 8 * * *', '30 20 * * *'],
+      }),
+    ).toEqual([])
   })
 
   test('examples/repo/.herdr-desk.json and repo root validate', () => {
@@ -42,15 +51,23 @@ describe('validateDeskJson', () => {
       name: 'demo',
       tasks: [
         {
-          id: 'issues',
-          task: 'github-issues',
+          id: 'desk:github-issues',
+          playbook: 'github-issues',
           agentName: 'My Desk',
-          schedule: { morning: '7am' },
+          schedule: '7am',
         },
       ],
     }
     const errs = validateDeskJson(bad)
     expect(errs.some((e) => e.includes('agentName'))).toBe(true)
     expect(errs.some((e) => e.includes('cron'))).toBe(true)
+  })
+
+  test('rejects legacy schedule objects', () => {
+    const errs = validateDeskJson({
+      name: 'demo',
+      schedule: { start: '0 8 * * *' },
+    })
+    expect(errs.some((e) => e.includes('schedule'))).toBe(true)
   })
 })

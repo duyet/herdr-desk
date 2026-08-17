@@ -4,5 +4,5 @@
   "agentName": "review-bot",
   "kind": "claude",
   "maxChildren": 2,
-  "schedule": { "morning": "0 9 * * 1-5" }
+  "schedule": "0 9 * * 1-5"
 }

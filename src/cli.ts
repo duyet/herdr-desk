@@ -14,6 +14,7 @@ import { formatHistory, loadRuns } from './history'
 import { stripAllDeskCrons } from './install'
 import { readLastChanges } from './last'
 import { runTask } from './run'
+import { scheduleLabel } from './schedule'
 import { SCHEMA_PATH, SCHEMA_URL } from './schema'
 import { formatSchedule } from './status'
 
@@ -28,7 +29,7 @@ function usage(): never {
   herdr-desk start | stop | daemon
   herdr-desk tick
   herdr-desk on-focus
-  herdr-desk run [TASK] --repo DIR --morning|--nightly
+  herdr-desk run [JOB] --repo DIR
   herdr-desk tasks
   herdr-desk uninstall-cron
 `)
@@ -39,10 +40,6 @@ function arg(flag: string, argv: string[]): string | undefined {
   const i = argv.indexOf(flag)
   if (i === -1) return undefined
   return argv[i + 1]
-}
-
-function has(flag: string, argv: string[]): boolean {
-  return argv.includes(flag)
 }
 
 async function main() {
@@ -132,9 +129,7 @@ async function main() {
       .slice(1)
       .filter((a) => !a.startsWith('--') && a !== arg('--repo', argv))
     const taskId = rest[0]
-    const mode = has('--nightly', argv) ? 'nightly' : 'morning'
-    if (!has('--morning', argv) && !has('--nightly', argv)) usage()
-    console.log(JSON.stringify(await runTask({ repo, taskId, mode })))
+    console.log(JSON.stringify(await runTask({ repo, taskId })))
     return
   }
 
@@ -144,9 +139,7 @@ async function main() {
       const cfg = loadDeskConfig(repo)
       console.log(`${cfg.name}  ${repo}`)
       for (const t of cfg.tasks) {
-        console.log(
-          `  ${t.id}\t${t.agentName}\tmorning=${t.schedule?.morning ?? '-'}\tnightly=${t.schedule?.nightly ?? '-'}`,
-        )
+        console.log(`  ${t.id}\t${t.agentName}\t${scheduleLabel(t.crons)}`)
       }
       return
     }

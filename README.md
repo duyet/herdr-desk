@@ -9,7 +9,7 @@ the terminal multiplexer is up.
 
 Put a **`.herdr-desk.json`** in a repo. Open that repo as a Herdr
 workspace once. The plugin finds the file, remembers the path, and
-fires the schedule (morning / nightly) by starting a Grok manager.
+fires each job's `schedule` cron by starting a Grok manager.
 Prompts are markdown in this plugin (`prompts/`). Repos stay config
 only.
 
@@ -54,7 +54,7 @@ Wire herdr-desk for the current repo. Keep it tiny.
 
 1. herdr plugin install duyet/herdr-desk (or link). Start the plugin.
 2. If .herdr-desk.json is missing, write { "$schema": "<schema url>", "name": "<folder>" }.
-   Defaults fill the rest. Only add extraPrompt for special rules (inline text, not a new file).
+   Defaults fill the rest. Only add extra for special rules (inline text, not a new file).
 3. Gitignore .herdr-desk/runs/*/
 4. Leave this repo as a Herdr workspace.
 5. herdr plugin action invoke herdr-desk.status
@@ -79,15 +79,21 @@ Usually this is the whole file:
 }
 ```
 
-Defaults: playbook `github-issues`, agent `<name>-desk`, 5 worktrees, morning `0 7 * * *`, state `.herdr-desk/runs/issues/`.
+Defaults: playbook `github-issues`, job id `desk:github-issues`, agent `<name>-desk`, 5 worktrees, `schedule` `0 7 * * *`, state `.herdr-desk/runs/github-issues/`. `desk:` is a bundled playbook; `local:` is a repo-owned `.md`.
 
 Optional extras — **inline markdown or a `.md` path** (if the file exists it is loaded; otherwise the string is the prompt):
 
 ```json
 {
   "name": "my-repo",
-  "schedule": { "morning": "0 8 * * *" },
-  "extraPrompt": "Children never deploy. Manager deploys from main."
+  "tasks": [
+    {
+      "id": "desk:github-issues",
+      "playbook": "github-issues",
+      "schedule": "0 8 * * *",
+      "extra": "Children never deploy. Manager deploys from main."
+    }
+  ]
 }
 ```
 
@@ -98,7 +104,7 @@ Also accepted: `herdr-desk.json`. Copy from `examples/<kind>/.herdr-desk.json`:
 | `examples/minimal/` | `{ "name" }` only — all defaults |
 | `examples/inline-extra/` | Extra rules as inline text (not a file) |
 | `examples/custom-agent/` | Another Herdr kind + agent name |
-| `examples/inline-prompt/` | Custom playbook inline in `task` |
+| `examples/inline-prompt/` | Custom playbook inline; id `local:…` |
 
 Optional extra roots (repos you never open in Herdr):
 
@@ -147,11 +153,10 @@ herdr plugin action invoke herdr-desk.validate
 On-demand (plugin actions take no arguments):
 
 ```sh
-bun src/cli.ts run issues --repo /path/to/repo --morning
-bun src/cli.ts run issues --repo /path/to/repo --nightly
+bun src/cli.ts run desk:github-issues --repo /path/to/repo
 ```
 
-A successful morning leaves the Herdr workspace **open** and writes
+A successful run leaves the Herdr workspace **open** and writes
 under `stateDir/<YYYY-MM-DD>/`.
 
 ## New repo

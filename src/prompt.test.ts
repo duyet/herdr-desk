@@ -4,17 +4,18 @@ import { DESK_ROOT, type LoadedDesk, type TaskConfig } from './config'
 import { assembleManagerPrompt, taskVars } from './prompt'
 
 const task: TaskConfig = {
-  id: 'issues',
+  id: 'desk:github-issues',
   label: 'GitHub issues and PRs',
-  task: 'github-issues',
+  playbook: 'github-issues',
   agentName: 'chm-desk',
   maxChildren: 3,
+  crons: ['0 7 * * *'],
 }
 
 const config: LoadedDesk = { name: 'chmonitor', tasks: [task] }
 
 describe('assembleManagerPrompt', () => {
-  test('morning includes identity and task', () => {
+  test('includes identity and playbook', () => {
     const vars = taskVars({
       config,
       task,
@@ -22,7 +23,7 @@ describe('assembleManagerPrompt', () => {
       day: '2026-08-18',
       runDir: '/tmp/repo/.herdr-desk/runs/issues/2026-08-18',
     })
-    const text = assembleManagerPrompt('morning', vars)
+    const text = assembleManagerPrompt(vars)
     expect(text).toContain('duyetbot')
     expect(text).toContain('GitHub issues and PRs')
     expect(text).toContain('chm-desk')
