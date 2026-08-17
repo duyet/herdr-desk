@@ -67,10 +67,17 @@ Same text lives in [`prompts/install-agent.md`](prompts/install-agent.md).
 
 ## Repo config
 
+Schema (editors + agents):  
+https://raw.githubusercontent.com/duyet/herdr-desk/main/herdr-desk.schema.json
+
+Set `"$schema"` to that URL. `herdr-desk validate` checks every discovered
+file against it.
+
 This is all a target repo needs:
 
 ```json
 {
+  "$schema": "https://raw.githubusercontent.com/duyet/herdr-desk/main/herdr-desk.schema.json",
   "name": "my-repo",
   "tasks": [
     {

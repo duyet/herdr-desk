@@ -14,6 +14,7 @@ import { formatHistory, loadRuns } from './history'
 import { stripAllDeskCrons } from './install'
 import { readLastChanges } from './last'
 import { runTask } from './run'
+import { SCHEMA_PATH, SCHEMA_URL } from './schema'
 import { formatSchedule } from './status'
 
 function usage(): never {
@@ -62,6 +63,8 @@ async function main() {
   if (cmd === 'validate') {
     const desks = await discoverDesks()
     for (const d of desks) loadDeskConfig(d.repo)
+    console.log(`schema: ${SCHEMA_URL}`)
+    console.log(`local:  ${SCHEMA_PATH}`)
     console.log(`0 errors, ${desks.length} desk(s)`)
     return
   }

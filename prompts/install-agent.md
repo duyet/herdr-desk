@@ -17,9 +17,12 @@ Stop. Do not add features.
 Wire herdr-desk for the current repo. Keep it tiny.
 
 1. herdr plugin install duyet/herdr-desk (or link if already cloned). Start the plugin.
-2. If .herdr-desk.json is missing, add one: name = repo folder, one task id "issues",
-   task "github-issues", agentName "<short>-desk", kind grok, maxChildren 3,
-   stateDir ".herdr-desk/runs/issues", morning "0 7 * * *", nightly "0 22 * * *".
+2. If .herdr-desk.json is missing, write one that validates against
+   https://raw.githubusercontent.com/duyet/herdr-desk/main/herdr-desk.schema.json
+   (set "$schema" to that URL). Use the schema example: name = repo folder,
+   one task id "issues", task "github-issues", agentName "<short>-desk",
+   kind grok, maxChildren 5, stateDir ".herdr-desk/runs/issues",
+   schedule.morning "0 7 * * *". Do not add nightly. Do not invent fields.
    Gitignore .herdr-desk/runs/*/
 3. Do not add extraPrompt unless this repo already has special CI/deploy rules.
 4. Open or leave this repo as a Herdr workspace so the plugin can pick it up.

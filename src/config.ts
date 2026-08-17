@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { validateDeskJson } from './schema'
 
 export const DESK_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -27,6 +28,7 @@ export type TaskConfig = {
 }
 
 export type DeskConfig = {
+  $schema?: string
   name: string
   repo?: string
   tasks: TaskConfig[]
@@ -54,14 +56,8 @@ export function loadDeskConfig(repo: string): DeskConfig {
     )
   }
   const raw = JSON.parse(readFileSync(path, 'utf8')) as DeskConfig
-  if (!raw?.name || !Array.isArray(raw.tasks)) {
-    throw new Error(`${path}: expected { name, tasks[] }`)
-  }
-  for (const task of raw.tasks) {
-    if (!task.id || !task.task || !task.agentName) {
-      throw new Error(`${path}: each task needs id, task, agentName`)
-    }
-  }
+  const errors = validateDeskJson(raw, path)
+  if (errors.length) throw new Error(errors.join('\n'))
   return { ...raw, repo: raw.repo ?? repo }
 }
 
