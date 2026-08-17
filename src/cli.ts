@@ -10,8 +10,9 @@ import {
   tickOnce,
 } from './daemon'
 import { discoverDesks, formatScan } from './discover'
-import { appendRun, formatHistory, loadRuns } from './history'
+import { formatHistory, loadRuns } from './history'
 import { stripAllDeskCrons } from './install'
+import { readLastChanges } from './last'
 import { runTask } from './run'
 import { formatSchedule } from './status'
 
@@ -79,7 +80,6 @@ async function main() {
   }
 
   if (cmd === 'last') {
-    const { readLastChanges } = await import('./last')
     console.log(await readLastChanges())
     return
   }
@@ -131,31 +131,7 @@ async function main() {
     const taskId = rest[0]
     const mode = has('--nightly', argv) ? 'nightly' : 'morning'
     if (!has('--morning', argv) && !has('--nightly', argv)) usage()
-    try {
-      const result = await runTask({ repo, taskId, mode })
-      appendRun({
-        at: new Date().toISOString(),
-        name: loadDeskConfig(repo).name,
-        repo,
-        task: taskId ?? loadDeskConfig(repo).tasks[0]?.id ?? 'issues',
-        mode,
-        ok: true,
-        detail: JSON.stringify(result),
-      })
-      console.log(JSON.stringify(result))
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      appendRun({
-        at: new Date().toISOString(),
-        name: loadDeskConfig(repo).name,
-        repo,
-        task: taskId ?? 'issues',
-        mode,
-        ok: false,
-        detail: msg,
-      })
-      throw err
-    }
+    console.log(JSON.stringify(await runTask({ repo, taskId, mode })))
     return
   }
 

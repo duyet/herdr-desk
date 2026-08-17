@@ -1,15 +1,22 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
-import { loadDeskConfig, resolveTask, type TaskConfig } from './config'
-import { agentNames, herdrJson, herdrReady, pickPane } from './herdr'
+import { dirname, join } from 'node:path'
+import {
+  type DeskConfig,
+  loadDeskConfig,
+  resolveTask,
+  type TaskConfig,
+} from './config'
+import { dayKey } from './day'
+import { agentNames, herdrCall, herdrReady, pickPane } from './herdr'
+import { recordRun } from './history'
 import { assembleManagerPrompt, taskVars } from './prompt'
 
 export type RunMode = 'morning' | 'nightly'
 
-function today(): string {
-  const d = new Date()
-  const p = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+type RunResult = {
+  skipped?: string
+  spawned?: boolean
+  prompted?: boolean
 }
 
 export function runDirFor(repo: string, task: TaskConfig, day: string): string {
@@ -21,52 +28,81 @@ export async function runTask(opts: {
   repo: string
   taskId?: string
   mode: RunMode
-}): Promise<{ skipped?: string; spawned?: boolean; prompted?: boolean }> {
+}): Promise<RunResult> {
   const config = loadDeskConfig(opts.repo)
   const repo = config.repo ?? opts.repo
   const task = resolveTask(config, opts.taskId)
-  const day = today()
+  try {
+    return await execute(config, repo, task, opts.mode)
+  } catch (err) {
+    recordRun({
+      name: config.name,
+      repo,
+      task: task.id,
+      mode: opts.mode,
+      ok: false,
+      detail: err instanceof Error ? err.message : String(err),
+    })
+    throw err
+  }
+}
+
+async function execute(
+  config: DeskConfig,
+  repo: string,
+  task: TaskConfig,
+  mode: RunMode,
+): Promise<RunResult> {
+  const day = dayKey()
   const runDir = runDirFor(repo, task, day)
   mkdirSync(runDir, { recursive: true })
-  mkdirSync(join(repo, '.herdr-desk', 'runs'), { recursive: true })
-  writeFileSync(
-    join(repo, '.herdr-desk', 'runs', 'LATEST'),
-    `${task.id}/${day}\n`,
-  )
+  writeFileSync(join(dirname(runDir), 'LATEST'), `${task.id}/${day}\n`)
+
+  const done = (result: RunResult) => {
+    recordRun({
+      name: config.name,
+      repo,
+      task: task.id,
+      mode,
+      ok: true,
+      detail: JSON.stringify(result),
+    })
+    return result
+  }
 
   const ready = herdrReady()
   if (!ready.ok) {
     if (ready.reason.includes('socket')) {
       console.log(`${ready.reason} — skip`)
-      return { skipped: ready.reason }
+      return done({ skipped: ready.reason })
     }
     throw new Error(ready.reason)
   }
 
-  const list = await herdrJson(ready.bin, ready.socket, ['agent', 'list'])
-  const live = agentNames(list).includes(task.agentName)
+  const live = agentNames(await herdrCall(['agent', 'list'])).includes(
+    task.agentName,
+  )
   const vars = taskVars({ config, task, repo, day, runDir })
 
   if (live) {
-    const text = assembleManagerPrompt(opts.mode, vars)
-    await herdrJson(ready.bin, ready.socket, [
+    await herdrCall([
       'agent',
       'prompt',
       task.agentName,
-      text,
+      assembleManagerPrompt(mode, vars),
     ])
-    return { prompted: true }
+    return done({ prompted: true })
   }
 
-  if (opts.mode === 'nightly') {
+  if (mode === 'nightly') {
     writeFileSync(
       join(runDir, 'nightly.md'),
       `# Nightly ${day}\n\nManager \`${task.agentName}\` was not running.\n`,
     )
-    return { skipped: 'manager not live' }
+    return done({ skipped: 'manager not live' })
   }
 
-  const created = await herdrJson(ready.bin, ready.socket, [
+  const created = await herdrCall([
     'workspace',
     'create',
     '--cwd',
@@ -77,7 +113,7 @@ export async function runTask(opts: {
   ])
   const { workspaceId, paneId } = pickPane(created)
   await Bun.sleep(2000)
-  await herdrJson(ready.bin, ready.socket, [
+  await herdrCall([
     'agent',
     'start',
     task.agentName,
@@ -88,20 +124,14 @@ export async function runTask(opts: {
     '--timeout',
     '180000',
   ])
-  const fullVars = taskVars({
-    config,
-    task,
-    repo,
-    day,
-    runDir,
-    workspaceId,
-    paneId,
-  })
-  await herdrJson(ready.bin, ready.socket, [
+  await herdrCall([
     'agent',
     'prompt',
     task.agentName,
-    assembleManagerPrompt('morning', fullVars),
+    assembleManagerPrompt(
+      'morning',
+      taskVars({ config, task, repo, day, runDir, workspaceId, paneId }),
+    ),
   ])
   writeFileSync(
     join(runDir, 'spawn.json'),
@@ -118,5 +148,5 @@ export async function runTask(opts: {
       2,
     )}\n`,
   )
-  return { spawned: true }
+  return done({ spawned: true })
 }

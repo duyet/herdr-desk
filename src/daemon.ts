@@ -7,8 +7,8 @@ import {
 } from 'node:fs'
 import { join } from 'node:path'
 import { cronMatches } from './cron'
+import { dayKey } from './day'
 import { discoverDesks } from './discover'
-import { appendRun } from './history'
 import { pluginStateDir } from './paths'
 import { type RunMode, runTask } from './run'
 
@@ -62,11 +62,6 @@ function log(line: string): void {
   console.log(line)
 }
 
-function dayKey(at: Date): string {
-  const p = (n: number) => String(n).padStart(2, '0')
-  return `${at.getFullYear()}-${p(at.getMonth() + 1)}-${p(at.getDate())}`
-}
-
 function fireKey(
   repo: string,
   taskId: string,
@@ -92,34 +87,16 @@ export async function tickOnce(at = new Date()): Promise<number> {
         try {
           const result = await runTask({ repo: d.repo, taskId: task.id, mode })
           fires[key] = new Date().toISOString()
-          saveFires(fires)
-          appendRun({
-            at: new Date().toISOString(),
-            name: d.config.name,
-            repo: d.repo,
-            task: task.id,
-            mode,
-            ok: true,
-            detail: JSON.stringify(result),
-          })
           log(`ok ${JSON.stringify(result)}`)
           n++
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err)
-          appendRun({
-            at: new Date().toISOString(),
-            name: d.config.name,
-            repo: d.repo,
-            task: task.id,
-            mode,
-            ok: false,
-            detail: msg,
-          })
           log(`fail ${d.config.name}/${task.id} ${mode}: ${msg}`)
         }
       }
     }
   }
+  saveFires(fires)
   return n
 }
 

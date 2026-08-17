@@ -14,7 +14,3 @@ export function pluginStateDir(): string {
     join(homedir(), '.local', 'state', 'herdr', 'plugins', 'herdr-desk')
   )
 }
-
-export function herdrBin(): string {
-  return process.env.HERDR_BIN_PATH ?? process.env.HERDR_BIN ?? 'herdr'
-}

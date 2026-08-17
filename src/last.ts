@@ -1,19 +1,14 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { dayKey } from './day'
 import { discoverDesks } from './discover'
 import { runDirFor } from './run'
-
-function today(): string {
-  const d = new Date()
-  const p = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
-}
 
 const NAMES = ['changes.md', 'CHANGES.md', 'SUMMARY.md', 'summary.md']
 
 export async function readLastChanges(): Promise<string> {
   const desks = await discoverDesks()
-  const day = today()
+  const day = dayKey()
   const parts: string[] = []
   for (const d of desks) {
     for (const t of d.config.tasks) {

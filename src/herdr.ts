@@ -1,12 +1,6 @@
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 
-export type HerdrClient = {
-  bin: string
-  socket: string
-  json: (args: string[]) => Promise<unknown>
-}
-
 export function defaultSocket(): string {
   return (
     process.env.HERDR_SOCKET_PATH ?? `${homedir()}/.config/herdr/herdr.sock`
@@ -31,6 +25,13 @@ export function herdrReady(
     return { ok: false, reason: `herdr socket missing (${socket})` }
   }
   return { ok: true, bin, socket }
+}
+
+/** Call Herdr with the default bin/socket. Throws if Herdr is missing. */
+export async function herdrCall(args: string[]): Promise<unknown> {
+  const ready = herdrReady()
+  if (!ready.ok) throw new Error(ready.reason)
+  return herdrJson(ready.bin, ready.socket, args)
 }
 
 export async function herdrJson(

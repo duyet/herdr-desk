@@ -23,6 +23,10 @@ export function appendRun(rec: RunRecord): void {
   writeFileSync(historyPath(), `${JSON.stringify(rec)}\n`, { flag: 'a' })
 }
 
+export function recordRun(rec: Omit<RunRecord, 'at'> & { at?: string }): void {
+  appendRun({ at: rec.at ?? new Date().toISOString(), ...rec })
+}
+
 export function loadRuns(limit = 40): RunRecord[] {
   if (!existsSync(historyPath())) return []
   const lines = readFileSync(historyPath(), 'utf8')

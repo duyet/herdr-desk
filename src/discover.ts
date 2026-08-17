@@ -2,7 +2,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { type DeskConfig, findConfigPath, loadDeskConfig } from './config'
-import { herdrBin, pluginConfigDir, pluginStateDir } from './paths'
+import { herdrCall } from './herdr'
+import { pluginConfigDir, pluginStateDir } from './paths'
 
 export type Discovered = {
   repo: string
@@ -49,19 +50,8 @@ function extraReposFromPluginConfig(): string[] {
 }
 
 export async function workspaceRepoRoots(): Promise<string[]> {
-  const bin = herdrBin()
-  const proc = Bun.spawn([bin, 'workspace', 'list'], {
-    stdout: 'pipe',
-    stderr: 'pipe',
-    env: process.env,
-  })
-  const [stdout, exit] = await Promise.all([
-    new Response(proc.stdout).text(),
-    proc.exited,
-  ])
-  if (exit !== 0) return []
   try {
-    const parsed = JSON.parse(stdout) as {
+    const parsed = (await herdrCall(['workspace', 'list'])) as {
       result?: {
         workspaces?: Array<{
           worktree?: { repo_root?: string; checkout_path?: string }
@@ -83,15 +73,11 @@ function tryLoad(
   repo: string,
   source: Discovered['source'],
 ): Discovered | null {
-  if (!findConfigPath(repo)) return null
+  const configPath = findConfigPath(repo)
+  if (!configPath) return null
   try {
     const config = loadDeskConfig(repo)
-    return {
-      repo: config.repo ?? repo,
-      configPath: findConfigPath(repo) as string,
-      config,
-      source,
-    }
+    return { repo: config.repo ?? repo, configPath, config, source }
   } catch {
     return null
   }

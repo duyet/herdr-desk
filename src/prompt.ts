@@ -58,7 +58,3 @@ export function assembleManagerPrompt(
       : ''
   return `${envelope}\n\n---\n${identity}\n\n---\n${task}${extra}\n`
 }
-
-export function assembleChildPrompt(vars: PromptVars): string {
-  return renderFile(promptPath('child'), vars)
-}
