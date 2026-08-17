@@ -159,6 +159,12 @@ under `stateDir/<YYYY-MM-DD>/`.
 2. Open the repo as a Herdr workspace once, or list it in plugin `config.json`.
 3. Stop. Do not copy this plugin into the repo.
 
+## Version
+
+**0.1.x only.** release-please opens a `chore(main): release 0.1.N` PR
+and updates `CHANGELOG.md`. `feat` / `fix` bump the patch, not 0.2.
+Merge that PR yourself — do not auto-merge it.
+
 ## Dev
 
 ```sh
