@@ -55,3 +55,18 @@ export function cronMatches(expr: string, at: Date): boolean {
     domRestricted && dowRestricted ? domOk || dowOk : (!domRestricted || domOk) && (!dowRestricted || dowOk)
   return minuteOk && hourOk && monOk && dayOk
 }
+
+/** Next matching minute at or after `from` (seconds cleared). Null if none in 8 days. */
+export function cronNext(expr: string, from = new Date()): Date | null {
+  const start = new Date(from)
+  start.setSeconds(0, 0)
+  const cur = new Date(start)
+  // if we're mid-minute and already matched, skip to next minute
+  cur.setMinutes(cur.getMinutes() + 1)
+  const limit = 8 * 24 * 60
+  for (let i = 0; i < limit; i++) {
+    if (cronMatches(expr, cur)) return new Date(cur)
+    cur.setMinutes(cur.getMinutes() + 1)
+  }
+  return null
+}

@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Herdr event PATH is often empty — put bun on it.
+export PATH="${HOME}/.bun/bin:/usr/local/bin:/usr/bin:${PATH}"
+ROOT="${HERDR_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
+exec bun "${ROOT}/src/cli.ts" "$@"

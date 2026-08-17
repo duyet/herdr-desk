@@ -106,6 +106,31 @@ Optional extra roots (repos you never open in Herdr):
 { "repos": ["~/src/other-repo"] }
 ```
 
+## See the cron and history
+
+Herdr has no built-in crontab UI. This plugin is the schedule. Use:
+
+```sh
+herdr plugin action invoke herdr-desk.status    # daemon + next/last fire per slot
+herdr plugin action invoke herdr-desk.history   # recent runs (runs.jsonl)
+herdr plugin action invoke herdr-desk.list      # discovered repos
+```
+
+Or:
+
+```sh
+bun src/cli.ts status
+bun src/cli.ts history
+```
+
+Host-level plugin command log (start / focus hooks, not the schedule itself):
+
+```sh
+herdr plugin log list --plugin herdr-desk --limit 20
+```
+
+State on disk: `~/.local/state/herdr/plugins/herdr-desk/` (`daemon.log`, `runs.jsonl`).
+
 ## Actions
 
 ```sh
@@ -113,6 +138,7 @@ herdr plugin action invoke herdr-desk.start
 herdr plugin action invoke herdr-desk.stop
 herdr plugin action invoke herdr-desk.status
 herdr plugin action invoke herdr-desk.list
+herdr plugin action invoke herdr-desk.history
 herdr plugin action invoke herdr-desk.validate
 ```
 

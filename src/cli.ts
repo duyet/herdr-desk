@@ -4,8 +4,10 @@ import { resolve } from 'node:path'
 import { listBundledTasks, loadDeskConfig } from './config'
 import { daemonPid, runDaemon, startDaemon, stopDaemon, tickOnce } from './daemon'
 import { discoverDesks, formatScan } from './discover'
+import { formatHistory, loadRuns, appendRun } from './history'
 import { stripAllDeskCrons } from './install'
 import { runTask } from './run'
+import { formatSchedule } from './status'
 
 function usage(): never {
   console.log(`herdr-desk — Herdr plugin. Each repo is .herdr-desk.json; the daemon picks them up.
@@ -13,6 +15,7 @@ function usage(): never {
   herdr-desk scan
   herdr-desk validate
   herdr-desk status
+  herdr-desk history [N]
   herdr-desk start | stop | daemon
   herdr-desk tick
   herdr-desk on-focus
@@ -58,7 +61,13 @@ async function main() {
   if (cmd === 'status') {
     const pid = daemonPid()
     console.log(`daemon: ${pid ? `running (pid ${pid})` : 'stopped'}`)
-    console.log(formatScan(await discoverDesks()))
+    console.log(formatSchedule(await discoverDesks()))
+    return
+  }
+
+  if (cmd === 'history') {
+    const n = Number(argv[1])
+    console.log(formatHistory(loadRuns(Number.isFinite(n) && n > 0 ? n : 40)))
     return
   }
 
@@ -105,7 +114,31 @@ async function main() {
     const taskId = rest[0]
     const mode = has('--nightly', argv) ? 'nightly' : 'morning'
     if (!has('--morning', argv) && !has('--nightly', argv)) usage()
-    console.log(JSON.stringify(await runTask({ repo, taskId, mode })))
+    try {
+      const result = await runTask({ repo, taskId, mode })
+      appendRun({
+        at: new Date().toISOString(),
+        name: loadDeskConfig(repo).name,
+        repo,
+        task: taskId ?? loadDeskConfig(repo).tasks[0]?.id ?? 'issues',
+        mode,
+        ok: true,
+        detail: JSON.stringify(result),
+      })
+      console.log(JSON.stringify(result))
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      appendRun({
+        at: new Date().toISOString(),
+        name: loadDeskConfig(repo).name,
+        repo,
+        task: taskId ?? 'issues',
+        mode,
+        ok: false,
+        detail: msg,
+      })
+      throw err
+    }
     return
   }
 

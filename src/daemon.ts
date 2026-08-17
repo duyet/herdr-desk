@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from '
 import { join } from 'node:path'
 import { cronMatches } from './cron'
 import { discoverDesks } from './discover'
+import { appendRun } from './history'
 import { pluginStateDir } from './paths'
 import { runTask, type RunMode } from './run'
 
@@ -78,10 +79,28 @@ export async function tickOnce(at = new Date()): Promise<number> {
           const result = await runTask({ repo: d.repo, taskId: task.id, mode })
           fires[key] = new Date().toISOString()
           saveFires(fires)
+          appendRun({
+            at: new Date().toISOString(),
+            name: d.config.name,
+            repo: d.repo,
+            task: task.id,
+            mode,
+            ok: true,
+            detail: JSON.stringify(result),
+          })
           log(`ok ${JSON.stringify(result)}`)
           n++
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err)
+          appendRun({
+            at: new Date().toISOString(),
+            name: d.config.name,
+            repo: d.repo,
+            task: task.id,
+            mode,
+            ok: false,
+            detail: msg,
+          })
           log(`fail ${d.config.name}/${task.id} ${mode}: ${msg}`)
         }
       }
