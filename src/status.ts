@@ -1,6 +1,8 @@
 import { cronNext } from './cron'
+import { describeJob } from './describe'
 import { type Discovered } from './discover'
 import { loadRuns } from './history'
+import { textTable } from './table'
 
 function fmt(d: Date | null): string {
   if (!d) return '-'
@@ -10,9 +12,8 @@ function fmt(d: Date | null): string {
 
 export function formatSchedule(desks: Discovered[], now = new Date()): string {
   const runs = loadRuns(200)
-  const lines: string[] = []
+  const rows: string[][] = []
   for (const d of desks) {
-    lines.push(`${d.config.name}  ${d.repo}`)
     for (const t of d.config.tasks) {
       for (const mode of ['morning', 'nightly'] as const) {
         const expr = t.schedule?.[mode]
@@ -21,12 +22,24 @@ export function formatSchedule(desks: Discovered[], now = new Date()): string {
         const last = [...runs]
           .reverse()
           .find((r) => r.name === d.config.name && r.task === t.id && r.mode === mode)
-        const lastText = last ? `${last.ok ? 'ok' : 'fail'} ${last.at}` : 'never'
-        lines.push(
-          `  ${t.id} ${mode.padEnd(8)} [${expr}]  next ${fmt(next)}  last ${lastText}`,
-        )
+        const lastText = last
+          ? `${last.ok ? 'ok' : 'fail'} ${last.at.slice(0, 16).replace('T', ' ')}`
+          : 'never'
+        rows.push([
+          d.config.name,
+          `${t.id}/${mode}`,
+          expr,
+          fmt(next),
+          lastText,
+          t.agentName,
+          describeJob(d.repo, t, mode),
+        ])
       }
     }
   }
-  return lines.join('\n') || 'no desks'
+  if (rows.length === 0) return 'no desks'
+  return textTable(
+    ['Repo', 'Job', 'Cron', 'Next', 'Last', 'Agent', 'What'],
+    rows,
+  )
 }

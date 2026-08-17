@@ -1,6 +1,6 @@
 id = "herdr-desk"
 name = "Herdr Desk"
-version = "0.2.1"
+version = "0.2.2"
 description = "Scheduled repo managers: pick up .herdr-desk.json from open workspaces and fire morning/nightly Grok managers"
 min_herdr_version = "0.7.0"
 platforms = ["linux", "macos"]

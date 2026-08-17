@@ -1,0 +1,54 @@
+import { existsSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import type { TaskConfig } from './config'
+
+export type Slot = 'morning' | 'nightly'
+
+function extraText(repo: string, task: TaskConfig): string {
+  if (!task.extraPrompt) return ''
+  const path = join(repo, task.extraPrompt)
+  if (!existsSync(path)) return ''
+  return readFileSync(path, 'utf8')
+}
+
+function extras(text: string): string[] {
+  const bits: string[] = []
+  const t = text.toLowerCase()
+  if (t.includes('never deploy') || t.includes('children never deploy')) {
+    bits.push('children never deploy')
+  }
+  if (t.includes('deploys from') || t.includes('deploy from this `main`')) {
+    bits.push('manager deploys from main')
+  }
+  if (t.includes('unit-tests') && t.includes('dashboard')) {
+    bits.push('babysit unit-tests+dashboard')
+  }
+  if (t.includes('do not wait on github actions')) {
+    bits.push('do not wait on GHA')
+  }
+  if (t.includes('never auto-merge release-please')) {
+    bits.push('no release-please merge')
+  }
+  return bits
+}
+
+export function describeJob(repo: string, task: TaskConfig, mode: Slot): string {
+  const override = task.describe?.[mode]
+  if (override) return override
+
+  const n = task.maxChildren ?? 3
+  const playbook = task.task.endsWith('.md')
+    ? task.label ?? task.id
+    : task.task
+  const core =
+    mode === 'morning'
+      ? playbook === 'github-issues'
+        ? `Triage issues/PRs; spawn ≤${n} worktrees`
+        : `${task.label ?? task.id}: morning dispatch (≤${n})`
+      : playbook === 'github-issues'
+        ? 'Wrap summary; no new work unless one CI-fix left'
+        : `${task.label ?? task.id}: nightly wrap`
+
+  const extra = extras(extraText(repo, task))
+  return extra.length ? `${core}. ${extra.join('; ')}` : core
+}

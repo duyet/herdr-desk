@@ -22,6 +22,8 @@ export type TaskConfig = {
   stateDir?: string
   /** Extra repo-local markdown appended to the manager prompt. */
   extraPrompt?: string
+  /** Optional one-liners for status table (else the plugin infers them). */
+  describe?: Partial<Record<'morning' | 'nightly', string>>
 }
 
 export type DeskConfig = {
