@@ -91,7 +91,14 @@ Optional extras — **inline markdown or a `.md` path** (if the file exists it i
 }
 ```
 
-Also accepted: `herdr-desk.json`. See `examples/`.
+Also accepted: `herdr-desk.json`. Copy from `examples/<kind>/.herdr-desk.json`:
+
+| Example | What it shows |
+|---|---|
+| `examples/minimal/` | `{ "name" }` only — all defaults |
+| `examples/inline-extra/` | Extra rules as inline text (not a file) |
+| `examples/custom-agent/` | Another Herdr kind + agent name |
+| `examples/inline-prompt/` | Custom playbook inline in `task` |
 
 Optional extra roots (repos you never open in Herdr):
 

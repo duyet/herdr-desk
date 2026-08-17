@@ -13,7 +13,8 @@
     "lint": "biome check .",
     "typecheck": "tsc --noEmit",
     "build": "bun build src/cli.ts --outdir dist --target=bun",
-    "ci": "bun run lint && bun run typecheck && bun test && bun run build"
+    "validate:examples": "bun scripts/validate-examples.ts",
+    "ci": "bun run lint && bun run typecheck && bun test && bun run validate:examples && bun run build"
   },
   "engines": {
     "bun": ">=1.1.0"

@@ -1,0 +1,6 @@
+{
+  "$schema": "./herdr-desk.schema.json",
+  "name": "herdr-desk",
+  "schedule": { "morning": "0 10 * * *" },
+  "extraPrompt": "This repo is the herdr-desk plugin. Triage open issues and PRs. Keep diffs small. Stay on 0.1.x. Never auto-merge release-please PRs. Do not invent features."
+}

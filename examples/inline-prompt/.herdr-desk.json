@@ -1,0 +1,13 @@
+{
+  "$schema": "https://raw.githubusercontent.com/duyet/herdr-desk/main/herdr-desk.schema.json",
+  "name": "my-repo",
+  "tasks": [
+    {
+      "id": "triage",
+      "label": "Inbox triage",
+      "agentName": "triage-desk",
+      "task": "# Inbox\n\nTriage open issues only. Open at most one PR. Write changes.md when done.\nSkip anything that needs a product decision.",
+      "schedule": { "morning": "30 7 * * *" }
+    }
+  ]
+}
