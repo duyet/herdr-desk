@@ -30,6 +30,9 @@ herdr plugin action invoke herdr-desk.start
 ```
 
 The daemon also starts on Herdr startup and on `workspace.focused`.
+If it comes up after a daily slot, it still fires that slot once the same
+day. `start` / `on-focus` restart the process when plugin source is newer
+than the live daemon (stale code after a plugin pull).
 
 ## Paste to a coding agent
 

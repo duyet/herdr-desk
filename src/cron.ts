@@ -72,3 +72,23 @@ export function cronNext(expr: string, from = new Date()): Date | null {
   }
   return null
 }
+
+/** True if `expr` matches this minute, or already matched earlier today. */
+export function cronDueToday(expr: string, at = new Date()): boolean {
+  if (cronMatches(expr, at)) return true
+  const cur = new Date(at)
+  cur.setSeconds(0, 0)
+  const y = cur.getFullYear()
+  const mo = cur.getMonth()
+  const d = cur.getDate()
+  cur.setMinutes(cur.getMinutes() - 1)
+  while (
+    cur.getFullYear() === y &&
+    cur.getMonth() === mo &&
+    cur.getDate() === d
+  ) {
+    if (cronMatches(expr, cur)) return true
+    cur.setMinutes(cur.getMinutes() - 1)
+  }
+  return false
+}

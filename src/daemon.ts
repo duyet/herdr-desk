@@ -2,11 +2,12 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  statSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs'
 import { join } from 'node:path'
-import { cronMatches } from './cron'
+import { cronDueToday } from './cron'
 import { dayKey } from './day'
 import { discoverDesks } from './discover'
 import { pluginStateDir } from './paths'
@@ -79,7 +80,7 @@ export async function tickOnce(at = new Date()): Promise<number> {
   for (const d of desks) {
     for (const task of d.config.tasks) {
       for (const expr of task.crons) {
-        if (!expr || !cronMatches(expr, at)) continue
+        if (!expr || !cronDueToday(expr, at)) continue
         const key = fireKey(d.repo, task.id, expr, day)
         if (fires[key]) continue
         log(`fire ${d.config.name}/${task.id} ${expr}`)
@@ -90,6 +91,7 @@ export async function tickOnce(at = new Date()): Promise<number> {
           n++
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err)
+          fires[key] = `fail ${new Date().toISOString()}`
           log(`fail ${d.config.name}/${task.id} ${expr}: ${msg}`)
         }
       }
@@ -123,9 +125,25 @@ export async function runDaemon(): Promise<void> {
   }
 }
 
+function sourceNewerThanDaemon(): boolean {
+  if (!existsSync(pidPath())) return false
+  try {
+    const pidM = statSync(pidPath()).mtimeMs
+    const src = join(import.meta.dir, 'daemon.ts')
+    if (!existsSync(src)) return false
+    return statSync(src).mtimeMs > pidM
+  } catch {
+    return false
+  }
+}
+
 export function startDaemon(): { already?: boolean; pid: number } {
   const live = daemonPid()
-  if (live) return { already: true, pid: live }
+  if (live) {
+    if (!sourceNewerThanDaemon()) return { already: true, pid: live }
+    log(`restart stale daemon pid=${live}`)
+    stopDaemon()
+  }
   mkdirSync(pluginStateDir(), { recursive: true })
   const child = Bun.spawn(
     [process.execPath, join(import.meta.dir, 'cli.ts'), 'daemon'],
