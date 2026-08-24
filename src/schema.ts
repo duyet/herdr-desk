@@ -1,5 +1,6 @@
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { cronExprOk } from './cron'
 
 export const SCHEMA_URL =
   'https://raw.githubusercontent.com/duyet/herdr-desk/main/herdr-desk.schema.json'
@@ -76,7 +77,7 @@ export function validateDeskJson(
 }
 
 function validateCron(raw: unknown, path: string): string[] {
-  if (typeof raw !== 'string' || !CRON.test(raw)) {
+  if (typeof raw !== 'string' || !CRON.test(raw) || !cronExprOk(raw)) {
     return [`${path}: 5-field cron (e.g. "0 8 * * *")`]
   }
   return []
