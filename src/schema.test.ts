@@ -46,6 +46,30 @@ describe('validateDeskJson', () => {
     }
   })
 
+  test('rejects cron fields that Number() would silently mishandle', () => {
+    // Why: token count used to pass; expand() then treated */q as NaN step
+    // (one fire at the field min) and 10-2 / 61 as empty (never fire).
+    const cases = ['*/q * * * *', '61 * * * *', '10-2 * * * *']
+    for (const schedule of cases) {
+      const errs = validateDeskJson({ name: 'demo', schedule })
+      expect(
+        errs.some((e) => e.includes('cron')),
+        schedule,
+      ).toBe(true)
+    }
+  })
+
+  test('still accepts stepped, ranged, and named-dow crons', () => {
+    for (const schedule of [
+      '*/15 * * * *',
+      '0-10 * * * *',
+      '0 8 * * 1-5',
+      '0 9 * * mon-fri',
+    ]) {
+      expect(validateDeskJson({ name: 'demo', schedule }), schedule).toEqual([])
+    }
+  })
+
   test('rejects a bad agent name and cron', () => {
     const bad = {
       name: 'demo',
