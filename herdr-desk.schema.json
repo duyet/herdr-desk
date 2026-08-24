@@ -50,6 +50,7 @@
       "properties": {
         "id": {
           "type": "string",
+          "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.:-]*$",
           "description": "Job handle. desk: for a bundled playbook, local: for a repo-owned prompt."
         },
         "label": { "type": "string" },

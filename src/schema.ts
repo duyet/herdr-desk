@@ -1,4 +1,4 @@
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 export const SCHEMA_URL =
@@ -12,10 +12,19 @@ export const SCHEMA_PATH = join(
 
 const CRON = /^\S+\s+\S+\s+\S+\s+\S+\s+\S+$/
 const AGENT = /^[a-z][a-z0-9_-]{0,31}$/
+/** Job handle: desk: / local: prefixes, no path separators. */
+const TASK_ID = /^[a-z0-9][a-z0-9_.:-]*$/i
+
+export function insideRepo(repo: string, rel: string): boolean {
+  const root = resolve(repo)
+  const abs = resolve(root, rel)
+  return abs.startsWith(root + sep)
+}
 
 export function validateDeskJson(
   raw: unknown,
   path = '.herdr-desk.json',
+  repo?: string,
 ): string[] {
   const errors: string[] = []
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
@@ -68,7 +77,7 @@ export function validateDeskJson(
       errors.push(`${path}.tasks: if set, must be a non-empty array`)
     } else {
       o.tasks.forEach((task, i) => {
-        errors.push(...validateTask(task, `${path}.tasks[${i}]`))
+        errors.push(...validateTask(task, `${path}.tasks[${i}]`, repo))
       })
     }
   }
@@ -91,7 +100,7 @@ function validateSchedule(raw: unknown, path: string): string[] {
   return [`${path}: cron string or array of cron strings`]
 }
 
-function validateTask(raw: unknown, path: string): string[] {
+function validateTask(raw: unknown, path: string, repo?: string): string[] {
   const errors: string[] = []
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
     return [`${path}: must be an object`]
@@ -112,8 +121,15 @@ function validateTask(raw: unknown, path: string): string[] {
   for (const k of Object.keys(o)) {
     if (!allowed.has(k)) errors.push(`${path}: unknown field '${k}'`)
   }
-  if (o.id !== undefined && (typeof o.id !== 'string' || !o.id.trim())) {
-    errors.push(`${path}.id: must be a string`)
+  if (o.id !== undefined && (typeof o.id !== 'string' || !TASK_ID.test(o.id))) {
+    errors.push(`${path}.id: must match [a-z0-9][a-z0-9_.:-]*`)
+  }
+  if (o.stateDir !== undefined) {
+    if (typeof o.stateDir !== 'string' || !o.stateDir.trim()) {
+      errors.push(`${path}.stateDir: must be a string`)
+    } else if (repo && !insideRepo(repo, o.stateDir)) {
+      errors.push(`${path}.stateDir: must stay inside the repo`)
+    }
   }
   if (o.playbook !== undefined && typeof o.playbook !== 'string') {
     errors.push(`${path}.playbook: bundled id, .md path, or inline markdown`)

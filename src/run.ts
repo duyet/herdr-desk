@@ -1,5 +1,5 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve, sep } from 'node:path'
 import {
   type LoadedDesk,
   loadDeskConfig,
@@ -19,6 +19,11 @@ type RunResult = {
 
 export function runDirFor(repo: string, task: TaskConfig, day: string): string {
   const rel = task.stateDir ?? join('.herdr-desk', 'runs', task.id)
+  const root = resolve(repo)
+  const abs = resolve(root, rel, day)
+  if (!abs.startsWith(root + sep)) {
+    throw new Error(`stateDir escapes repo: ${rel}`)
+  }
   return join(repo, rel, day)
 }
 

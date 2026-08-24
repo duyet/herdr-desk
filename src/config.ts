@@ -71,7 +71,7 @@ export function loadDeskConfig(repo: string): LoadedDesk {
     )
   }
   const raw = JSON.parse(readFileSync(path, 'utf8')) as DeskConfig
-  const errors = validateDeskJson(raw, path)
+  const errors = validateDeskJson(raw, path, repo)
   if (errors.length) throw new Error(errors.join('\n'))
   return applyDefaults(raw, repo)
 }
