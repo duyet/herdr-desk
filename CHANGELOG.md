@@ -3,6 +3,15 @@
 Versions stay on **0.1.x**. `feat` and `fix` bump the patch. Do not merge a
 1.0 or 0.2 release PR.
 
+## [0.1.2](https://github.com/duyet/herdr-desk/compare/v0.1.1...v0.1.2) (2026-08-24)
+
+
+### Bug Fixes
+
+* **cron:** reject invalid field tokens at schema load ([#12](https://github.com/duyet/herdr-desk/issues/12)) ([e9012e3](https://github.com/duyet/herdr-desk/commit/e9012e366acc831d2df1ec8f42feda6b6a2a4800)), closes [#4](https://github.com/duyet/herdr-desk/issues/4)
+* **daemon:** prune fires.json and quarantine corrupt state ([#7](https://github.com/duyet/herdr-desk/issues/7)) ([2523122](https://github.com/duyet/herdr-desk/commit/2523122b1c6d5d54f1a8eab114bcdeceeb718514)), closes [#5](https://github.com/duyet/herdr-desk/issues/5)
+* **schema:** reject traversal task ids and stateDir ([#8](https://github.com/duyet/herdr-desk/issues/8)) ([47ffc0b](https://github.com/duyet/herdr-desk/commit/47ffc0b4e86134eb24f6031f1597cd2b5ccf26d8)), closes [#6](https://github.com/duyet/herdr-desk/issues/6)
+
 ## [0.1.1](https://github.com/duyet/herdr-desk/compare/v0.1.0...v0.1.1) (2026-08-21)
 
 
