@@ -2,6 +2,7 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  renameSync,
   statSync,
   unlinkSync,
   writeFileSync,
@@ -14,6 +15,8 @@ import { pluginStateDir } from './paths'
 import { runTask } from './run'
 
 const TICK_MS = 20_000
+/** Keep fire keys whose day is within this many days of today (cronNext horizon). */
+const FIRE_KEEP_DAYS = 8
 
 function pidPath(): string {
   return join(pluginStateDir(), 'daemon.pid')
@@ -21,6 +24,10 @@ function pidPath(): string {
 
 function firesPath(): string {
   return join(pluginStateDir(), 'fires.json')
+}
+
+function firesBakPath(): string {
+  return join(pluginStateDir(), 'fires.json.bak')
 }
 
 function logPath(): string {
@@ -39,7 +46,30 @@ export function daemonPid(): number | null {
   }
 }
 
-function loadFires(): Record<string, string> {
+function fireDay(key: string): string | null {
+  const i = key.lastIndexOf('::')
+  if (i < 0) return null
+  const day = key.slice(i + 2)
+  return /^\d{4}-\d{2}-\d{2}$/.test(day) ? day : null
+}
+
+export function pruneFires(
+  map: Record<string, string>,
+  at = new Date(),
+): Record<string, string> {
+  const cutoff = new Date(at)
+  cutoff.setHours(0, 0, 0, 0)
+  cutoff.setDate(cutoff.getDate() - FIRE_KEEP_DAYS)
+  const minDay = dayKey(cutoff)
+  const out: Record<string, string> = {}
+  for (const [k, v] of Object.entries(map)) {
+    const d = fireDay(k)
+    if (d && d >= minDay) out[k] = v
+  }
+  return out
+}
+
+export function loadFires(): Record<string, string> {
   if (!existsSync(firesPath())) return {}
   try {
     return JSON.parse(readFileSync(firesPath(), 'utf8')) as Record<
@@ -47,13 +77,23 @@ function loadFires(): Record<string, string> {
       string
     >
   } catch {
+    const bak = firesBakPath()
+    try {
+      if (existsSync(bak)) unlinkSync(bak)
+      renameSync(firesPath(), bak)
+    } catch {
+      /* ignore */
+    }
     return {}
   }
 }
 
-function saveFires(map: Record<string, string>): void {
+export function saveFires(map: Record<string, string>, at = new Date()): void {
   mkdirSync(pluginStateDir(), { recursive: true })
-  writeFileSync(firesPath(), `${JSON.stringify(map, null, 2)}\n`)
+  writeFileSync(
+    firesPath(),
+    `${JSON.stringify(pruneFires(map, at), null, 2)}\n`,
+  )
 }
 
 function log(line: string): void {
