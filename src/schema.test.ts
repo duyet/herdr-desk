@@ -70,4 +70,39 @@ describe('validateDeskJson', () => {
     })
     expect(errs.some((e) => e.includes('schedule'))).toBe(true)
   })
+
+  test('rejects a traversal task id', () => {
+    const errs = validateDeskJson({
+      name: 'demo',
+      tasks: [{ id: '../../.ssh' }],
+    })
+    expect(errs.some((e) => e.includes('.id'))).toBe(true)
+  })
+
+  test('rejects a stateDir that escapes the repo', () => {
+    const errs = validateDeskJson(
+      {
+        name: 'demo',
+        tasks: [{ id: 'desk:github-issues', stateDir: '../outside' }],
+      },
+      '.herdr-desk.json',
+      '/tmp/herdr-desk-repo',
+    )
+    expect(errs.some((e) => e.includes('stateDir'))).toBe(true)
+  })
+
+  test('accepts a stateDir inside the repo', () => {
+    expect(
+      validateDeskJson(
+        {
+          name: 'demo',
+          tasks: [
+            { id: 'desk:github-issues', stateDir: '.herdr-desk/runs/ok' },
+          ],
+        },
+        '.herdr-desk.json',
+        '/tmp/herdr-desk-repo',
+      ),
+    ).toEqual([])
+  })
 })
