@@ -159,8 +159,11 @@ On-demand (plugin actions take no arguments):
 bun src/cli.ts run desk:github-issues --repo /path/to/repo
 ```
 
-A successful run leaves the Herdr workspace **open** and writes
-under `stateDir/<YYYY-MM-DD>/`.
+A successful run finds the **already-open** Herdr Space for that repo
+(anyrouter, chmonitor, …), creates a **worktree child** of it, and
+starts the manager there. It will not open a sibling Space at the same
+level. If that project is not open, the run skips. Children are further
+worktrees of the same parent. Writes under `stateDir/<YYYY-MM-DD>/`.
 
 ## New repo
 

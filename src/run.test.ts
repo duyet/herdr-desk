@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { join } from 'node:path'
 import type { TaskConfig } from './config'
-import { runDirFor } from './run'
+import { deskWorktreeBranch, runDirFor } from './run'
 
 const base: TaskConfig = {
   id: 'desk:github-issues',
@@ -30,5 +30,13 @@ describe('runDirFor', () => {
         '2026-08-24',
       ),
     ).toThrow(/escapes repo/)
+  })
+})
+
+describe('deskWorktreeBranch', () => {
+  test('slugs the task id into a git branch under desk/', () => {
+    expect(deskWorktreeBranch(base, '2026-09-13')).toBe(
+      'desk/desk-github-issues-2026-09-13',
+    )
   })
 })

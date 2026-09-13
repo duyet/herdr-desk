@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { findConfigPath, type LoadedDesk, loadDeskConfig } from './config'
-import { herdrCall } from './herdr'
+import { herdrCall, listedWorkspaces } from './herdr'
 import { pluginConfigDir, pluginStateDir } from './paths'
 
 export type Discovered = {
@@ -51,16 +51,10 @@ function extraReposFromPluginConfig(): string[] {
 
 export async function workspaceRepoRoots(): Promise<string[]> {
   try {
-    const parsed = (await herdrCall(['workspace', 'list'])) as {
-      result?: {
-        workspaces?: Array<{
-          worktree?: { repo_root?: string; checkout_path?: string }
-        }>
-      }
-    }
+    const listed = listedWorkspaces(await herdrCall(['workspace', 'list']))
     const roots: string[] = []
-    for (const ws of parsed.result?.workspaces ?? []) {
-      const root = ws.worktree?.repo_root ?? ws.worktree?.checkout_path
+    for (const w of listed) {
+      const root = w.repoRoot ?? w.cwd ?? w.checkoutPath
       if (root) roots.push(resolve(root))
     }
     return [...new Set(roots)]

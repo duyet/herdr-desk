@@ -7,7 +7,14 @@ import {
   type TaskConfig,
 } from './config'
 import { dayKey } from './day'
-import { agentNames, herdrCall, herdrReady, pickPane } from './herdr'
+import {
+  agentNames,
+  herdrCall,
+  herdrReady,
+  listedWorkspaces,
+  pickPane,
+  projectWorkspaceForRepo,
+} from './herdr'
 import { recordRun } from './history'
 import { assembleManagerPrompt, taskVars } from './prompt'
 
@@ -80,10 +87,28 @@ async function execute(
     throw new Error(ready.reason)
   }
 
+  const listed = listedWorkspaces(await herdrCall(['workspace', 'list']))
+  const project = projectWorkspaceForRepo(listed, {
+    repo,
+    name: config.name,
+  })
+  if (!project) {
+    const reason = `no open Herdr session for ${config.name} (${repo}) — skip; will not create a sibling Space`
+    console.log(reason)
+    return done({ skipped: reason })
+  }
+
   const live = agentNames(await herdrCall(['agent', 'list'])).includes(
     task.agentName,
   )
-  const vars = taskVars({ config, task, repo, day, runDir })
+  const vars = taskVars({
+    config,
+    task,
+    repo,
+    day,
+    runDir,
+    workspaceId: project.workspaceId,
+  })
 
   if (live) {
     await herdrCall([
@@ -95,16 +120,13 @@ async function execute(
     return done({ prompted: true })
   }
 
-  const created = await herdrCall([
-    'workspace',
-    'create',
-    '--cwd',
-    repo,
-    '--label',
-    `${config.name} ${task.id} ${day}`,
-    '--no-focus',
-  ])
-  const { workspaceId, paneId } = pickPane(created)
+  const label = `${config.name} ${task.id} ${day}`
+  const { paneId, childWorkspaceId } = await spawnDeskWorktree(
+    project.workspaceId,
+    deskWorktreeBranch(task, day),
+    label,
+  )
+  const workspaceId = project.workspaceId
   await Bun.sleep(2000)
   await herdrCall([
     'agent',
@@ -133,6 +155,7 @@ async function execute(
         task: task.id,
         agent: task.agentName,
         workspaceId,
+        childWorkspaceId,
         paneId,
         startedAt: new Date().toISOString(),
       },
@@ -141,4 +164,50 @@ async function execute(
     )}\n`,
   )
   return done({ spawned: true })
+}
+
+export function deskWorktreeBranch(task: TaskConfig, day: string): string {
+  const slug = task.id.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-|-$/g, '')
+  return `desk/${slug}-${day}`
+}
+
+/** Worktree child of the open project Space — never a sibling workspace. */
+async function spawnDeskWorktree(
+  parentWorkspaceId: string,
+  branch: string,
+  label: string,
+): Promise<{ paneId: string; childWorkspaceId: string }> {
+  let created: unknown
+  try {
+    created = await herdrCall([
+      'worktree',
+      'open',
+      '--workspace',
+      parentWorkspaceId,
+      '--branch',
+      branch,
+      '--label',
+      label,
+      '--no-focus',
+    ])
+  } catch {
+    created = await herdrCall([
+      'worktree',
+      'create',
+      '--workspace',
+      parentWorkspaceId,
+      '--branch',
+      branch,
+      '--base',
+      'origin/main',
+      '--label',
+      label,
+      '--no-focus',
+    ])
+  }
+  const pane = pickPane(created)
+  return {
+    paneId: pane.paneId,
+    childWorkspaceId: pane.workspaceId,
+  }
 }

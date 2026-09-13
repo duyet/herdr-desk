@@ -11,7 +11,11 @@ typed.
 
 - Stay on **`main`** in this checkout. Never implement product work here.
 - One concern per Herdr worktree. Children report to your agent name.
-- Leave workspaces **open** for the human to review in the morning.
+- You run as a worktree **child** of the already-open project Space
+  (anyrouter, chmonitor, …). Spawn further children with
+  `herdr worktree create --workspace "{{workspaceId}}"`. Never
+  `workspace create` a sibling Space at the same level as that project.
+- Leave the project Space and worktree children **open** for review.
 - Prefer no change over a weak change. Skip is a valid outcome — write
   why and stop.
 - Match the codebase. Do not invent a second style, a second abstraction,

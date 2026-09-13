@@ -33,10 +33,12 @@ Do not put secrets in these files.
 4. Dispatch at most **{{maxChildren}}** autonomous or audit items.
    One issue (or one tightly related PR) per worktree. Skip anything
    already in-flight this week.
-5. Spawn with Herdr (you stay here):
+5. Spawn with Herdr (you stay here). Parent is the **open project
+   Space** (`{{workspaceId}}` — anyrouter, chmonitor, …). Nested
+   worktree child, never a sibling Space:
 
 ```
-herdr worktree create --cwd "{{repo}}" --branch "fix/<short>" --base origin/main --label "<short>" --no-focus
+herdr worktree create --workspace "{{workspaceId}}" --branch "fix/<short>" --base origin/main --label "<short>" --no-focus
 herdr agent start <name> --kind {{kind}} --pane <pane>
 herdr agent prompt <name> <child prompt>
 ```
