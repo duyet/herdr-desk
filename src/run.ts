@@ -8,10 +8,13 @@ import {
 } from './config'
 import { dayKey } from './day'
 import {
-  agentNames,
   herdrCall,
   herdrReady,
+  isAgentLive,
+  type ListedAgent,
+  type ListedWorkspace,
   listedWorkspaces,
+  namedAgents,
   pickPane,
   projectWorkspaceForRepo,
 } from './herdr'
@@ -98,8 +101,14 @@ async function execute(
     return done({ skipped: reason })
   }
 
-  const live = agentNames(await herdrCall(['agent', 'list'])).includes(
-    task.agentName,
+  // One long-lived manager session per task. Reuse the session that is already
+  // running; restart it in its existing pane if it finished; only fork a new
+  // worktree when there is nothing to reuse. The manager's branch is also
+  // stable across days, so a daily tick re-prompts the same session instead of
+  // stacking a new workspace + pane per run.
+  const allAgents = namedAgents(await herdrCall(['agent', 'list']))
+  const live = allAgents.find(
+    (a) => a.name === task.agentName && isAgentLive(a),
   )
   const vars = taskVars({
     config,
@@ -120,12 +129,12 @@ async function execute(
     return done({ prompted: true })
   }
 
-  const label = `${config.name} ${task.id} ${day}`
-  const { paneId, childWorkspaceId } = await spawnDeskWorktree(
-    project.workspaceId,
-    deskWorktreeBranch(task, day),
-    label,
-  )
+  const label = `${config.name} ${task.id}`
+  const restart = reusableManagerPane(allAgents, listed, task)
+  const child =
+    restart ?? (await spawnDeskWorktree(project.workspaceId, task, label))
+  const paneId = child.paneId
+  const childWorkspaceId = child.workspaceId
   const workspaceId = project.workspaceId
   await Bun.sleep(2000)
   await herdrCall([
@@ -157,6 +166,7 @@ async function execute(
         workspaceId,
         childWorkspaceId,
         paneId,
+        reusedWorktree: Boolean(restart),
         startedAt: new Date().toISOString(),
       },
       null,
@@ -166,17 +176,57 @@ async function execute(
   return done({ spawned: true })
 }
 
-export function deskWorktreeBranch(task: TaskConfig, day: string): string {
+/**
+ * Branch for the manager's own worktree. Stable per task (no date) so the
+ * daily tick reuses one checkout instead of creating a new worktree per day.
+ */
+export function deskWorktreeBranch(task: TaskConfig): string {
   const slug = task.id.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-|-$/g, '')
-  return `desk/${slug}-${day}`
+  return `desk/${slug}`
 }
 
-/** Worktree child of the open project Space — never a sibling workspace. */
+/**
+ * Pane of a finished manager session whose worktree is still open.
+ *
+ * Restarting there keeps the workspace count flat. `agent start` on a pane
+ * whose agent already exited would otherwise stack a new session, so this is
+ * only used when the session is not live.
+ */
+function reusableManagerPane(
+  agents: ListedAgent[],
+  workspaces: ListedWorkspace[],
+  task: TaskConfig,
+): { paneId: string; workspaceId: string } | undefined {
+  const branch = deskWorktreeBranch(task)
+  for (const agent of agents) {
+    if (agent.name !== task.agentName) continue
+    if (isAgentLive(agent)) continue
+    if (!agent.paneId || !agent.workspaceId) continue
+    const ws = workspaces.find((w) => w.workspaceId === agent.workspaceId)
+    // The checkout must still exist and still be this task's manager branch.
+    // A deleted worktree means the pane is gone too.
+    if (ws) {
+      if (!(ws.checkoutPath ?? '').includes(branch)) continue
+    } else if (!agent.cwd?.includes(branch)) {
+      continue
+    }
+    return { paneId: agent.paneId, workspaceId: agent.workspaceId }
+  }
+  return undefined
+}
+
+/**
+ * Worktree child of the open project Space — never a sibling workspace.
+ *
+ * `worktree open` re-attaches an existing branch, so a manager worktree that
+ * is still on disk is reused rather than duplicated.
+ */
 async function spawnDeskWorktree(
   parentWorkspaceId: string,
-  branch: string,
+  task: TaskConfig,
   label: string,
-): Promise<{ paneId: string; childWorkspaceId: string }> {
+): Promise<{ paneId: string; workspaceId: string }> {
+  const branch = deskWorktreeBranch(task)
   let created: unknown
   try {
     created = await herdrCall([
@@ -206,8 +256,5 @@ async function spawnDeskWorktree(
     ])
   }
   const pane = pickPane(created)
-  return {
-    paneId: pane.paneId,
-    childWorkspaceId: pane.workspaceId,
-  }
+  return { paneId: pane.paneId, workspaceId: pane.workspaceId }
 }

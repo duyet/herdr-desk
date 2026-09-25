@@ -214,3 +214,47 @@ export function agentNames(listJson: unknown): string[] {
       ?.agents ?? []
   return agents.map((a) => a.name).filter((n): n is string => Boolean(n))
 }
+
+export type ListedAgent = {
+  name: string
+  paneId?: string
+  workspaceId?: string
+  cwd?: string
+  status?: string
+}
+
+/** `herdr agent list` rows that carry an explicit name, with their status. */
+export function namedAgents(listJson: unknown): ListedAgent[] {
+  const agents =
+    (listJson as { result?: { agents?: Array<Record<string, unknown>> } })
+      ?.result?.agents ?? []
+  const out: ListedAgent[] = []
+  for (const raw of agents) {
+    const name = str(raw.name)
+    if (!name) continue
+    out.push({
+      name,
+      paneId: str(raw.pane_id),
+      workspaceId: str(raw.workspace_id),
+      cwd: str(raw.cwd) ?? str(raw.foreground_cwd),
+      status: str(raw.agent_status) ?? str(raw.status),
+    })
+  }
+  return out
+}
+
+/**
+ * A session is only *live* while it is `working` or `idle`.
+ *
+ * A `done` session is finished: `agent prompt` against it does nothing, so
+ * treating it as live is exactly what makes the desk spawn a fresh session
+ * every tick and strand the old pane. Same for a session whose cwd is gone
+ * (worktree deleted underneath it).
+ */
+export function isAgentLive(agent: ListedAgent, exists = existsSync): boolean {
+  if (agent.status && !LIVE_AGENT_STATUSES.has(agent.status)) return false
+  if (agent.cwd && !exists(agent.cwd)) return false
+  return true
+}
+
+const LIVE_AGENT_STATUSES = new Set(['idle', 'working'])

@@ -34,9 +34,14 @@ describe('runDirFor', () => {
 })
 
 describe('deskWorktreeBranch', () => {
-  test('slugs the task id into a git branch under desk/', () => {
-    expect(deskWorktreeBranch(base, '2026-09-13')).toBe(
-      'desk/desk-github-issues-2026-09-13',
-    )
+  test('slugs the task id into a stable git branch under desk/', () => {
+    expect(deskWorktreeBranch(base)).toBe('desk/desk-github-issues')
+  })
+
+  test('is the same branch every day, so the manager worktree is reused', () => {
+    // A per-day branch (desk/<task>-<day>) forced a new worktree + session on
+    // every tick. The manager is long-lived, so its branch must not move.
+    expect(deskWorktreeBranch(base)).toBe(deskWorktreeBranch(base))
+    expect(deskWorktreeBranch(base)).not.toContain('2026')
   })
 })
