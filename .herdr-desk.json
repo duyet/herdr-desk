@@ -1,12 +1,15 @@
 {
   "$schema": "https://raw.githubusercontent.com/duyet/herdr-desk/main/herdr-desk.schema.json",
-  "name": "herdr-desk",
+  "name": "chmonitor",
   "tasks": [
     {
       "id": "desk:github-issues",
       "playbook": "github-issues",
-      "schedule": "0 10 * * *",
-      "extra": "This repo is the herdr-desk plugin. Triage open issues and PRs. Keep diffs small. Stay on 0.1.x. Never auto-merge release-please PRs. Do not invent features."
+      "agentName": "chm-desk",
+      "kind": "opencode",
+      "maxChildren": 5,
+      "schedule": "0 * * * *",
+      "extra": "Required CI: `unit-tests` and `dashboard`. Arm `gh pr merge --auto --squash` and babysit. Do not wait on `e2e-test`, `e2e-test-tsr`, or `component-test`. Never auto-merge release-please PRs. Children must use the OpenCode v2 runtime (`opencode2`, equivalent to the local `opencode` v2 binary) with model `opencode/space-bunny-free`; confirm the model before editing. Do not run heavy local Node/build/test tasks: rely on CI for lint, typecheck, tests, and builds. Children may open PRs. Manager does not implement on `main`. Reuse before spawning: one long-lived manager session, one worktree per issue, and re-prompt a child already working the issue instead of duplicating it. Clean up a child worktree only after its PR merged. State is local; do not commit `.herdr-desk/runs/`."
     }
   ]
 }

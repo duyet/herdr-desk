@@ -1,5 +1,11 @@
 import { describe, expect, test } from 'bun:test'
-import { listedWorkspaces, pickPane, projectWorkspaceForRepo } from './herdr'
+import {
+  isAgentLive,
+  listedWorkspaces,
+  namedAgents,
+  pickPane,
+  projectWorkspaceForRepo,
+} from './herdr'
 
 describe('listedWorkspaces', () => {
   test('reads workspace_id, cwd, and worktree provenance', () => {
@@ -131,5 +137,48 @@ describe('pickPane', () => {
         },
       }),
     ).toEqual({ workspaceId: 'w1', paneId: 'w1:p3' })
+  })
+})
+
+describe('namedAgents', () => {
+  test('keeps only agents that carry an explicit name', () => {
+    const rows = namedAgents({
+      result: {
+        agents: [
+          { agent: 'opencode', agent_status: 'idle' },
+          { name: 'chm-desk', agent: 'opencode', agent_status: 'working' },
+        ],
+      },
+    })
+    expect(rows.map((a) => a.name)).toEqual(['chm-desk'])
+  })
+})
+
+describe('isAgentLive', () => {
+  const live = { name: 'chm-desk', status: 'idle', cwd: '/wt' }
+
+  test('idle and working sessions are live', () => {
+    const exists = () => true
+    expect(isAgentLive({ ...live, status: 'idle' }, exists)).toBe(true)
+    expect(isAgentLive({ ...live, status: 'working' }, exists)).toBe(true)
+  })
+
+  test('a done session is not live — prompting it is a no-op', () => {
+    // The regression: `done` counted as live, so the desk never re-prompted the
+    // manager and forked a new worktree + session on every tick.
+    expect(isAgentLive({ ...live, status: 'done' }, () => true)).toBe(false)
+  })
+
+  test('a session whose cwd is gone is not live', () => {
+    // Worktree deleted underneath a still-listed session.
+    expect(isAgentLive({ ...live, status: 'idle' }, () => false)).toBe(false)
+  })
+
+  test('an unknown status is not assumed live (fail closed)', () => {
+    expect(isAgentLive({ ...live, status: 'weird' }, () => true)).toBe(false)
+  })
+
+  test('a session with no reported status and an existing cwd is live', () => {
+    expect(isAgentLive({ name: 'chm-desk', cwd: '/wt' }, () => true)).toBe(true)
   })
 })

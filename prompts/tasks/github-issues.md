@@ -38,14 +38,22 @@ Do not put secrets in these files.
    worktree child, never a sibling Space:
 
 ```
-herdr worktree create --workspace "{{workspaceId}}" --branch "fix/<short>" --base origin/main --label "<short>" --no-focus
+herdr worktree open  --workspace "{{workspaceId}}" --branch "fix/<short>" --label "<short>" --no-focus
 herdr agent start <name> --kind {{kind}} --pane <pane>
 herdr agent prompt <name> <child prompt>
 ```
 
+   Use `worktree open` for a branch that already exists (it re-attaches);
+   `worktree create --base origin/main` only for a genuinely new one.
+   Check `herdr worktree list` and `herdr agent list` first: a child
+   already working the same issue gets re-prompted, not duplicated.
+
 6. Fill workers + summary (counts, spawned, skipped + why).
 7. Stay up. Watch children. Pull `main` when a PR merges. Tell remaining
-   children to rebase. **Do not close** workspaces.
+   children to rebase. **Do not close** workspaces you still need. Once a
+   child's PR has merged and nothing remains for it, remove its worktree
+   (`git worktree remove <path>`, after confirming the branch is merged)
+   rather than letting worktrees accumulate across runs.
 8. **When the run is done** (children settled, or you are not
    starting more), write `changes.md` — the human-facing delta:
 
