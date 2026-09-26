@@ -3,6 +3,13 @@
 Versions stay on **0.1.x**. `feat` and `fix` bump the patch. Do not merge a
 1.0 or 0.2 release PR.
 
+## [0.1.4](https://github.com/duyet/herdr-desk/compare/v0.1.3...v0.1.4) (2026-09-26)
+
+
+### Bug Fixes
+
+* **run:** stop a stale LATEST dir from silencing every later fire ([#15](https://github.com/duyet/herdr-desk/issues/15)) ([85c976c](https://github.com/duyet/herdr-desk/commit/85c976cf4415294dd6701718f7c6adb081be77dc))
+
 ## [0.1.3](https://github.com/duyet/herdr-desk/compare/v0.1.2...v0.1.3) (2026-09-25)
 
 
