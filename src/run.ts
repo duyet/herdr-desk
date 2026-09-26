@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve, sep } from 'node:path'
 import {
   type LoadedDesk,
@@ -37,6 +37,25 @@ export function runDirFor(repo: string, task: TaskConfig, day: string): string {
   return join(repo, rel, day)
 }
 
+/**
+ * Point `<task state dir>/LATEST` at today's run dir.
+ *
+ * A plain `writeFileSync` throws `EISDIR` when a *directory* already sits at
+ * that path, and one such leftover makes every later fire fail the same way —
+ * the desk goes quiet forever and the only symptom is a run dir with no files
+ * in it. Clear whatever is there first, so a stale dir or symlink is
+ * self-healing instead of terminal.
+ */
+export function writeLatestPointer(
+  stateDir: string,
+  taskId: string,
+  day: string,
+): void {
+  const pointer = join(stateDir, 'LATEST')
+  rmSync(pointer, { recursive: true, force: true })
+  writeFileSync(pointer, `${taskId}/${day}\n`)
+}
+
 export async function runTask(opts: {
   repo: string
   taskId?: string
@@ -67,7 +86,7 @@ async function execute(
   const day = dayKey()
   const runDir = runDirFor(repo, task, day)
   mkdirSync(runDir, { recursive: true })
-  writeFileSync(join(dirname(runDir), 'LATEST'), `${task.id}/${day}\n`)
+  writeLatestPointer(dirname(runDir), task.id, day)
 
   const done = (result: RunResult) => {
     recordRun({
