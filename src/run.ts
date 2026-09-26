@@ -161,11 +161,11 @@ async function execute(
     'start',
     task.agentName,
     '--kind',
-    task.kind ?? 'grok',
+    task.agent.ladder[0],
     '--pane',
     paneId,
     '--timeout',
-    '180000',
+    String(task.agent.timeoutMs ?? 180000),
   ])
   await herdrCall([
     'agent',

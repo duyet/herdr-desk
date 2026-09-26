@@ -1,9 +1,45 @@
-import type { DeskConfig, LoadedDesk, TaskConfig } from './config'
+import {
+  type AgentInput,
+  type AgentSpec,
+  DEFAULT_AGENT,
+  DEFAULT_AGENT_TIMEOUT_MS,
+  type DeskConfig,
+  type LoadedDesk,
+  type TaskConfig,
+} from './config'
 import { cronsOf } from './schedule'
 import { deskSlug } from './text'
 
 const BUNDLED_PREFIX = 'desk:'
 const LOCAL_PREFIX = 'local:'
+
+/**
+ * Merge an `agent` block over a lower-priority spec.
+ *
+ * A string pins a single rung, which is why `"agent": "claude"` and
+ * `"agent": { "ladder": ["claude"] }` mean the same thing. `default` is a
+ * convenience alias for a one-rung ladder. An empty or absent `ladder`
+ * inherits, so a repo can override only `permission` without restating the
+ * machine-wide ladder.
+ */
+function mergeAgent(base: AgentSpec, input: AgentInput | undefined): AgentSpec {
+  if (input === undefined) return base
+  if (typeof input === 'string') {
+    return { ...base, ladder: input.trim() ? [input.trim()] : base.ladder }
+  }
+  const ladderRaw = input.ladder ?? input.default
+  const ladder =
+    typeof ladderRaw === 'string'
+      ? [ladderRaw]
+      : Array.isArray(ladderRaw)
+        ? ladderRaw.map((r) => String(r).trim()).filter(Boolean)
+        : undefined
+  const out: AgentSpec = { ...base }
+  if (ladder?.length) out.ladder = ladder
+  if (input.permission !== undefined) out.permission = input.permission
+  if (input.timeoutMs !== undefined) out.timeoutMs = input.timeoutMs
+  return out
+}
 
 function defaultId(playbook: string): string {
   if (playbook.includes('\n')) return `${LOCAL_PREFIX}inline`
@@ -30,6 +66,14 @@ export function applyDefaults(raw: DeskConfig, repo: string): LoadedDesk {
   const name = raw.name.trim()
   const rootPlaybook = raw.playbook || 'github-issues'
   const rootCrons = cronsOf(raw.schedule)
+
+  // Root agent, lowest priority. `kind` is only consulted when `agent` is
+  // absent, so a config that sets both resolves to `agent`.
+  const rootAgent = mergeAgent(
+    { ...DEFAULT_AGENT, timeoutMs: DEFAULT_AGENT_TIMEOUT_MS },
+    raw.agent ?? raw.kind,
+  )
+
   const tasks = (raw.tasks?.length ? raw.tasks : [{}]).map((t) => {
     const playbook = t.playbook || rootPlaybook
     const id = t.id?.trim() || defaultId(playbook)
@@ -37,7 +81,7 @@ export function applyDefaults(raw: DeskConfig, repo: string): LoadedDesk {
     const extra = t.extra ?? raw.extra
     return {
       label: t.label ?? 'GitHub issues and PRs',
-      kind: t.kind ?? raw.kind ?? 'grok',
+      agent: mergeAgent(rootAgent, t.agent ?? t.kind),
       maxChildren: t.maxChildren ?? raw.maxChildren ?? 5,
       agentName: t.agentName ?? raw.agentName ?? deskSlug(name),
       describe: t.describe,

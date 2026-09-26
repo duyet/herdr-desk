@@ -9,9 +9,12 @@ the terminal multiplexer is up.
 
 Put a **`.herdr-desk.json`** in a repo. Open that repo as a Herdr
 workspace once. The plugin finds the file, remembers the path, and
-fires each job's `schedule` cron by starting a Grok manager.
+fires each job's `schedule` cron by starting a manager agent.
 Prompts are markdown in this plugin (`prompts/`). Repos stay config
 only.
+
+**→ [docs/setup.md](docs/setup.md) is the install guide.**
+**→ [docs/design.md](docs/design.md) is the 0.2 design.**
 
 ## Install
 
@@ -64,6 +67,8 @@ Wire herdr-desk for the current repo. Keep it tiny.
 ```
 
 Same text lives in [`prompts/install-agent.md`](prompts/install-agent.md).
+Upgrades are a different task, with their own prompt:
+[`prompts/update-agent.md`](prompts/update-agent.md).
 
 ## Repo config
 
@@ -83,6 +88,44 @@ Usually this is the whole file:
 ```
 
 Defaults: playbook `github-issues`, job id `desk:github-issues`, agent `<name>-desk`, 5 worktrees, `schedule` `0 7 * * *`, state `.herdr-desk/runs/github-issues/`. `desk:` is a bundled playbook; `local:` is a repo-owned `.md`.
+
+### Which agent runs it
+
+`agent` replaces `kind`. It takes a **ladder** — tried in order, so a rung that
+cannot start (not logged in, out of credit, rate limited) escalates to the next:
+
+```json
+{ "name": "my-repo", "agent": { "ladder": ["opencode2", "opencode", "claude", "codex"] } }
+```
+
+A rung is a bare Herdr kind (`claude`, `codex`, `grok`, `opencode`) **or a
+command**, so wrappers work: `"anyr claude --yolo"`. The default is `grok`,
+which is only a back-compatibility default, not a recommendation.
+
+`kind` is still read, so 0.1.x configs keep working untouched.
+
+### A whole tree of repos, one file
+
+A config above your repos with `"group": true` covers everything beneath it:
+
+```json
+// ~/project/.herdr-desk.json
+{ "name": "myrepos", "group": true, "repos": ["*/"], "schedule": "0 7 * * *",
+  "agent": { "ladder": ["claude", "codex"], "permission": "yolo" } }
+```
+
+Members need no config, or one line to override. `group: true` is required, so
+a stray file in a parent directory cannot steer your repos by accident.
+
+Precedence, highest first: `HERDR_DESK_*` env → repo → nearest group config →
+machine `config.json` → built-in defaults.
+
+Not sure why a value is what it is?
+
+```sh
+bun src/cli.ts config explain --repo DIR          # every layer, and which won
+bun src/cli.ts config show --repo DIR             # effective, after defaults
+```
 
 Optional extras — **inline markdown or a `.md` path** (if the file exists it is loaded; otherwise the string is the prompt):
 
@@ -106,7 +149,8 @@ Also accepted: `herdr-desk.json`. Copy from `examples/<kind>/.herdr-desk.json`:
 |---|---|
 | `examples/minimal/` | `{ "name" }` only — all defaults |
 | `examples/inline-extra/` | Extra rules as inline text (not a file) |
-| `examples/custom-agent/` | Another Herdr kind + agent name |
+| `examples/custom-agent/` | An `agent` ladder, including a wrapper command |
+| `examples/legacy-kind/` | Deprecated `kind`, still valid |
 | `examples/inline-prompt/` | Custom playbook inline; id `local:…` |
 
 Optional extra roots (repos you never open in Herdr):
@@ -125,6 +169,7 @@ herdr plugin action invoke herdr-desk.status    # daemon + next/last fire per sl
 herdr plugin action invoke herdr-desk.history   # recent runs (runs.jsonl)
 herdr plugin action invoke herdr-desk.last      # today's changes.md from each repo
 herdr plugin action invoke herdr-desk.list      # discovered repos
+bun src/cli.ts config explain --repo DIR        # which layer supplied what
 ```
 
 Or:
@@ -213,9 +258,16 @@ worktrees of the same parent. Writes under `stateDir/<YYYY-MM-DD>/`.
 and updates `CHANGELOG.md`. `feat` / `fix` bump the patch, not 0.2.
 Merge that PR yourself — do not auto-merge it.
 
+There is no `herdr plugin update` in Herdr v1, so upgrading means reinstalling.
+Config and state live outside the plugin checkout, so a reinstall keeps both.
+`bun src/cli.ts status` reports the installed version.
+
 ## Dev
 
 ```sh
 herdr plugin link .
 bun test
+bunx tsc --noEmit
+bunx biome check src
+bun scripts/validate-examples.ts
 ```

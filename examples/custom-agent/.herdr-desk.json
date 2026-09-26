@@ -2,7 +2,7 @@
   "$schema": "https://raw.githubusercontent.com/duyet/herdr-desk/main/herdr-desk.schema.json",
   "name": "my-repo",
   "agentName": "review-bot",
-  "kind": "claude",
+  "agent": { "ladder": ["opencode2", "anyr claude --yolo", "claude", "codex"] },
   "maxChildren": 2,
   "schedule": "0 9 * * 1-5"
 }

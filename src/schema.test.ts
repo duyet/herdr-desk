@@ -130,3 +130,90 @@ describe('validateDeskJson', () => {
     ).toEqual([])
   })
 })
+
+describe('agent field', () => {
+  test('accepts a bare rung, a command, and a ladder', () => {
+    for (const agent of [
+      'claude',
+      'opencode2',
+      'anyr claude --yolo',
+      './scripts/desk-agent.sh --fast',
+      { ladder: ['opencode2', 'opencode', 'claude'] },
+      { default: 'pi' },
+      { permission: 'yolo' },
+      { ladder: 'codex', permission: 'yolo', timeoutMs: 60_000 },
+    ]) {
+      expect(
+        validateDeskJson({ name: 'demo', agent }),
+        JSON.stringify(agent),
+      ).toEqual([])
+      expect(
+        validateDeskJson({ name: 'demo', tasks: [{ id: 't', agent }] }),
+        JSON.stringify(agent),
+      ).toEqual([])
+    }
+  })
+
+  test('a 0.1.x kind config still validates cleanly', () => {
+    // Back-compat: kind must not become an error, or every existing repo fails
+    // `validate` on upgrade.
+    expect(validateDeskJson({ name: 'demo', kind: 'grok' })).toEqual([])
+    expect(
+      validateDeskJson({ name: 'demo', tasks: [{ id: 't', kind: 'claude' }] }),
+    ).toEqual([])
+  })
+
+  test('setting both agent and kind is reported as a conflict', () => {
+    const errs = validateDeskJson({
+      name: 'demo',
+      agent: 'claude',
+      kind: 'grok',
+    })
+    expect(errs.some((e) => e.includes("kind: ignored because 'agent'"))).toBe(
+      true,
+    )
+  })
+
+  test('rejects a malformed agent block', () => {
+    expect(
+      validateDeskJson({ name: 'demo', agent: { ladder: [] } }).some((e) =>
+        e.includes('ladder'),
+      ),
+    ).toBe(true)
+    expect(
+      validateDeskJson({ name: 'demo', agent: { ladder: 7 } }).some((e) =>
+        e.includes('ladder'),
+      ),
+    ).toBe(true)
+    expect(
+      validateDeskJson({ name: 'demo', agent: { nope: 1 } }).some((e) =>
+        e.includes('nope'),
+      ),
+    ).toBe(true)
+    expect(
+      validateDeskJson({ name: 'demo', agent: { permission: '' } }).some((e) =>
+        e.includes('permission'),
+      ),
+    ).toBe(true)
+    expect(
+      validateDeskJson({ name: 'demo', agent: 7 }).some((e) =>
+        e.includes('agent'),
+      ),
+    ).toBe(true)
+  })
+
+  test('bounds timeoutMs to the range agent start accepts', () => {
+    // 0 is the value that would mean "no readiness wait at all", which reads as
+    // a fast agent rather than a broken one.
+    expect(
+      validateDeskJson({ name: 'demo', agent: { timeoutMs: 0 } }).some((e) =>
+        e.includes('timeoutMs'),
+      ),
+    ).toBe(true)
+    expect(
+      validateDeskJson({ name: 'demo', agent: { timeoutMs: 999_999 } }).some(
+        (e) => e.includes('timeoutMs'),
+      ),
+    ).toBe(true)
+  })
+})
