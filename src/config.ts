@@ -9,12 +9,51 @@ export const DESK_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 /** Cron string, or several crons that all run the same playbook. */
 export type Schedule = string | string[]
 
+/**
+ * Resolved agent selection.
+ *
+ * `ladder` is ordered by preference: the first rung is tried first, and a
+ * failure escalates down the list. A rung is either a bare Herdr agent kind
+ * (`claude`) or a command (`anyr claude --yolo`, `opencode2`,
+ * `./scripts/desk-agent.sh`) — see `agents.ts` for how the transport is chosen.
+ */
+export type AgentSpec = {
+  ladder: string[]
+  /** Permission posture, e.g. `default` or `yolo`. */
+  permission: string
+  /** Readiness budget for one launch attempt, in ms. */
+  timeoutMs?: number
+}
+
+/**
+ * Defaults preserve 0.1.x behaviour exactly. The default rung stays `grok`
+ * because every repo that never set `kind` was running grok; changing it would
+ * silently switch agents on upgrade.
+ */
+export const DEFAULT_AGENT: AgentSpec = {
+  ladder: ['grok'],
+  permission: 'default',
+}
+
+export const DEFAULT_AGENT_TIMEOUT_MS = 180_000
+
+/** Authoring form: a bare rung, or a block overriding parts of the ladder. */
+export type AgentInput =
+  | string
+  | {
+      ladder?: string | string[]
+      default?: string
+      permission?: string
+      timeoutMs?: number
+    }
+
 export type TaskConfig = {
   id: string
   label?: string
   playbook: string
   agentName: string
-  kind?: string
+  /** Resolved agent selection. Replaces the 0.1.x `kind` field. */
+  agent: AgentSpec
   maxChildren?: number
   /** Authoring form (string or list). */
   schedule?: Schedule
@@ -28,19 +67,32 @@ export type TaskConfig = {
 export type DeskConfig = {
   $schema?: string
   name: string
+  /**
+   * Marks this file as an umbrella config for every repo beneath its directory.
+   * Required rather than inferred, so a stray config in a parent directory
+   * cannot silently start steering a repo.
+   */
+  group?: boolean
   repo?: string
   extra?: string
   playbook?: string
   schedule?: Schedule
   maxChildren?: number
   agentName?: string
+  agent?: AgentInput
+  /** @deprecated 0.1.x single-rung field. Read as `agent`; still accepted. */
   kind?: string
   tasks?: Array<
-    Partial<Omit<TaskConfig, 'crons' | 'playbook' | 'agentName' | 'id'>> & {
+    Partial<
+      Omit<TaskConfig, 'crons' | 'playbook' | 'agentName' | 'id' | 'agent'>
+    > & {
       id?: string
       playbook?: string
       agentName?: string
       schedule?: Schedule
+      agent?: AgentInput
+      /** @deprecated use `agent`. */
+      kind?: string
     }
   >
 }

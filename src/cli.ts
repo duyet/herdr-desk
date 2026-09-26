@@ -2,6 +2,7 @@
 
 import { resolve } from 'node:path'
 import { listBundledTasks, loadDeskConfig } from './config'
+import { explainConfig, explainTasks, showConfig } from './configShow'
 import {
   daemonPid,
   runDaemon,
@@ -23,6 +24,8 @@ function usage(): never {
 
   herdr-desk scan
   herdr-desk validate
+  herdr-desk config show   [--repo DIR]
+  herdr-desk config explain [--repo DIR] [--tasks]
   herdr-desk status
   herdr-desk history [N]
   herdr-desk last
@@ -55,6 +58,21 @@ async function main() {
   if (cmd === 'scan') {
     console.log(formatScan(await discoverDesks()))
     return
+  }
+
+  if (cmd === 'config') {
+    const sub = argv[1]
+    const repo = resolve(arg('--repo', argv) ?? process.cwd())
+    if (sub === 'explain') {
+      console.log(explainConfig(repo))
+      if (argv.includes('--tasks')) console.log(`\n${explainTasks(repo)}`)
+      return
+    }
+    if (sub === 'show' || sub === undefined) {
+      console.log(showConfig(repo))
+      return
+    }
+    usage()
   }
 
   if (cmd === 'validate') {

@@ -1,5 +1,53 @@
 import { describe, expect, test } from 'bun:test'
-import { cronDueToday, cronMatches, cronNext } from './cron'
+import { compileCron, cronDueToday, cronMatches, cronNext } from './cron'
+
+/**
+ * Brute-force reference, deliberately naive: step one minute at a time and ask
+ * `cronMatches`. The optimised implementations must agree with this on every
+ * input, which is the only real proof that field-jumping is safe.
+ */
+function refNext(expr: string, from: Date): Date | null {
+  const cur = new Date(from)
+  cur.setSeconds(0, 0)
+  cur.setMinutes(cur.getMinutes() + 1)
+  for (let i = 0; i < 8 * 24 * 60; i++) {
+    if (cronMatches(expr, cur)) return new Date(cur)
+    cur.setMinutes(cur.getMinutes() + 1)
+  }
+  return null
+}
+
+function refDueToday(expr: string, at: Date): boolean {
+  if (cronMatches(expr, at)) return true
+  const cur = new Date(at)
+  cur.setSeconds(0, 0)
+  const y = cur.getFullYear()
+  const mo = cur.getMonth()
+  const d = cur.getDate()
+  cur.setMinutes(cur.getMinutes() - 1)
+  while (
+    cur.getFullYear() === y &&
+    cur.getMonth() === mo &&
+    cur.getDate() === d
+  ) {
+    if (cronMatches(expr, cur)) return true
+    cur.setMinutes(cur.getMinutes() - 1)
+  }
+  return false
+}
+
+const EXPRS = [
+  '0 7 * * *',
+  '0 8 * * *',
+  '*/15 * * * *',
+  '0 9 * * mon-fri',
+  '30 6 1 * *',
+  '0 0 1 1 *',
+  '15,45 3-5 * * *',
+  '0 0 * * 0',
+  '*/7 */3 * * *',
+  '59 23 31 12 *',
+]
 
 describe('cronMatches', () => {
   test('7:00 daily', () => {
@@ -53,5 +101,92 @@ describe('cronDueToday', () => {
     expect(cronDueToday('0 8 * * *', new Date(2026, 7, 18, 11, 34, 0))).toBe(
       true,
     )
+  })
+})
+
+describe('compileCron', () => {
+  test('rejects the same expressions cronMatches rejects', () => {
+    for (const bad of [
+      '*/q * * * *',
+      '10-2 * * * *',
+      '61 * * * *',
+      '0 7 * *',
+    ]) {
+      expect(compileCron(bad), bad).toBeNull()
+    }
+  })
+
+  test('records which day fields were restricted', () => {
+    // Vixie: when both DOM and DOW are restricted, either may match.
+    const both = compileCron('0 7 13 * 5')
+    expect(both?.domRestricted).toBe(true)
+    expect(both?.dowRestricted).toBe(true)
+    const domOnly = compileCron('0 7 13 * *')
+    expect(domOnly?.domRestricted).toBe(true)
+    expect(domOnly?.dowRestricted).toBe(false)
+    expect(compileCron('0 7 * * *')?.domRestricted).toBe(false)
+  })
+
+  test('expands fields to sorted value lists', () => {
+    const c = compileCron('15,45 3-5 * * *')
+    expect(c?.minutes).toEqual([15, 45])
+    expect(c?.hours).toEqual([3, 4, 5])
+  })
+})
+
+describe('differential vs brute force', () => {
+  // Why: cronNext and cronDueToday were rewritten from minute-stepping to
+  // field-jumping and set-pair enumeration. These assert the optimisation did
+  // not change any answer, across month/year/day boundaries and DST-ish hours.
+  const starts = [
+    new Date(2026, 7, 18, 6, 30, 0),
+    new Date(2026, 7, 18, 7, 0, 0),
+    new Date(2026, 7, 18, 23, 59, 30),
+    new Date(2026, 11, 31, 23, 30, 0),
+    new Date(2026, 0, 1, 0, 0, 0),
+    new Date(2026, 2, 29, 12, 0, 0), // 2026 is not a leap year
+    new Date(2027, 2, 28, 12, 0, 0),
+  ]
+
+  test('cronNext agrees with minute-stepping on every start', () => {
+    for (const expr of EXPRS) {
+      for (const from of starts) {
+        expect(cronNext(expr, from)?.getTime(), `${expr} @ ${from}`).toBe(
+          refNext(expr, from)?.getTime(),
+        )
+      }
+    }
+  })
+
+  test('cronDueToday agrees with walking back through the day', () => {
+    for (const expr of EXPRS) {
+      for (const from of starts) {
+        for (const offsetMin of [0, 1, 59, 60, 7 * 60, 13 * 60]) {
+          const at = new Date(from.getTime() + offsetMin * 60_000)
+          expect(cronDueToday(expr, at), `${expr} @ ${at}`).toBe(
+            refDueToday(expr, at),
+          )
+        }
+      }
+    }
+  })
+
+  test('cronNext never returns a minute that does not match', () => {
+    for (const expr of EXPRS) {
+      for (const from of starts) {
+        const next = cronNext(expr, from)
+        if (!next) continue
+        expect(cronMatches(expr, next), `${expr} @ ${from}`).toBe(true)
+        expect(next.getTime(), `${expr} @ ${from}`).toBeGreaterThan(
+          from.getTime(),
+        )
+      }
+    }
+  })
+
+  test('cronNext returns null for an expression that cannot fire', () => {
+    // 30 February never occurs, so an 8-day horizon can never find one.
+    expect(cronNext('0 0 30 2 *', new Date(2026, 0, 1))).toBeNull()
+    expect(cronNext('*/q * * * *', new Date())).toBeNull()
   })
 })

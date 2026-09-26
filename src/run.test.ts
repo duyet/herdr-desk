@@ -9,6 +9,7 @@ const base: TaskConfig = {
   id: 'desk:github-issues',
   playbook: 'github-issues',
   agentName: 'chm-desk',
+  agent: { ladder: ['grok'], permission: 'default' },
   crons: ['0 7 * * *'],
 }
 
