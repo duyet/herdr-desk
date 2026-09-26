@@ -80,6 +80,41 @@ function validateAgent(raw: unknown, path: string, errors: string[]): void {
   }
 }
 
+/**
+ * Validate a `notify` block.
+ *
+ * `token` is rejected outright. This block lands in a committed repo file, and
+ * Telegram tokens are credentials — a silent strip would leave the user with a
+ * secret already in git history and no idea. Failing loudly is the only safe
+ * response; the host-level `notify.json` is where the token belongs.
+ */
+function validateNotify(raw: unknown, path: string, errors: string[]): void {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    errors.push(`${path}: must be an object`)
+    return
+  }
+  const o = raw as Record<string, unknown>
+  const allowed = new Set(['enabled', 'chatId', 'topicId'])
+  for (const k of Object.keys(o)) {
+    if (k === 'token') {
+      errors.push(
+        `${path}.token: not allowed — a repo config is committed. Put the bot token in notify.json (host) or HERDR_DESK_TELEGRAM_TOKEN`,
+      )
+      continue
+    }
+    if (!allowed.has(k)) errors.push(`${path}: unknown field '${k}'`)
+  }
+  if (o.enabled !== undefined && typeof o.enabled !== 'boolean') {
+    errors.push(`${path}.enabled: must be true or false`)
+  }
+  for (const key of ['chatId', 'topicId'] as const) {
+    const v = o[key]
+    if (v !== undefined && (typeof v !== 'string' || !v.trim())) {
+      errors.push(`${path}.${key}: must be a non-empty string`)
+    }
+  }
+}
+
 export function insideRepo(repo: string, rel: string): boolean {
   const root = resolve(repo)
   const abs = resolve(root, rel)
@@ -107,6 +142,7 @@ export function validateDeskJson(
     'maxChildren',
     'agentName',
     'agent',
+    'notify',
     'kind',
   ])
   for (const k of Object.keys(o)) {
@@ -139,6 +175,7 @@ export function validateDeskJson(
   if (o.schedule !== undefined)
     errors.push(...validateSchedule(o.schedule, `${path}.schedule`))
   if (o.agent !== undefined) validateAgent(o.agent, `${path}.agent`, errors)
+  if (o.notify !== undefined) validateNotify(o.notify, `${path}.notify`, errors)
   if (o.kind !== undefined) {
     if (typeof o.kind !== 'string' || !RUNG.test(o.kind.trim())) {
       errors.push(`${path}.kind: must be a non-empty string`)
@@ -186,6 +223,7 @@ function validateTask(raw: unknown, path: string, repo?: string): string[] {
     'playbook',
     'agentName',
     'agent',
+    'notify',
     'kind',
     'maxChildren',
     'stateDir',
@@ -230,6 +268,7 @@ function validateTask(raw: unknown, path: string, repo?: string): string[] {
   if (o.schedule !== undefined)
     errors.push(...validateSchedule(o.schedule, `${path}.schedule`))
   if (o.agent !== undefined) validateAgent(o.agent, `${path}.agent`, errors)
+  if (o.notify !== undefined) validateNotify(o.notify, `${path}.notify`, errors)
   if (o.kind !== undefined) {
     if (typeof o.kind !== 'string' || !RUNG.test(o.kind.trim())) {
       errors.push(`${path}.kind: must be a non-empty string`)

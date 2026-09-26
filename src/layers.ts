@@ -5,6 +5,7 @@ import {
   CONFIG_NAMES,
   type DeskConfig,
   findConfigPath,
+  type NotifyOverride,
   type Schedule,
 } from './config'
 import { pluginConfigDir } from './paths'
@@ -142,36 +143,6 @@ function groupAt(dir: string): GroupLayer | null {
   return null
 }
 
-/**
- * Flatten the layers that can supply shared settings, lowest priority first.
- *
- * Order matches the documented precedence: global, then group configs from the
- * furthest ancestor to the nearest, so a nearer group overrides a further one.
- * The repo itself is applied by the caller on top, because only the repo's own
- * config may set `name`.
- */
-export function sharedLayers(
-  repo: string,
-  global = loadGlobalConfig(),
-): {
-  layers: DeskConfig[]
-  provenance: Provenance
-} {
-  const provenance: Provenance = {}
-  const layers: DeskConfig[] = []
-
-  if (Object.keys(global).length) {
-    layers.push(global as DeskConfig)
-    provenance.global = 'global'
-  }
-  const groups = findGroupLayers(repo).reverse()
-  for (const g of groups) {
-    layers.push(g.config)
-    provenance[g.path] = 'group'
-  }
-  return { layers, provenance }
-}
-
 function own<T extends object>(...objs: Array<T | undefined>): T {
   return Object.assign({}, ...objs.filter(Boolean)) as T
 }
@@ -204,6 +175,29 @@ function mergeAgentField(
   return next as DeskConfig['agent']
 }
 
+/**
+ * Merge a `notify` block across layers.
+ *
+ * Same deep-merge shape as {@link mergeAgentField}, and for the same reason: a
+ * repo that only overrides `chatId` must keep the inherited `topicId`, or a
+ * dedicated forum topic silently reverts to the general one.
+ *
+ * Only destination fields are copied. A `token` in a layer that is not the host
+ * file is dropped here as well as rejected by the validator, so a committed
+ * secret cannot reach the send path even if validation is bypassed.
+ */
+function mergeNotifyField(
+  base: DeskConfig['notify'],
+  over: DeskConfig['notify'],
+): DeskConfig['notify'] {
+  if (over === undefined) return base
+  const out: NotifyOverride = { ...(base ?? {}) }
+  if (over.enabled !== undefined) out.enabled = over.enabled
+  if (over.chatId !== undefined) out.chatId = over.chatId
+  if (over.topicId !== undefined) out.topicId = over.topicId
+  return out
+}
+
 /** Later layers win. `schedule` and `tasks` are replaced wholesale. */
 export function mergeConfigs(base: DeskConfig, over: DeskConfig): DeskConfig {
   const out: DeskConfig = { ...own(base), ...own(over) }
@@ -211,13 +205,100 @@ export function mergeConfigs(base: DeskConfig, over: DeskConfig): DeskConfig {
   if (over.schedule !== undefined) out.schedule = over.schedule as Schedule
   if (over.tasks !== undefined) out.tasks = over.tasks
   out.agent = mergeAgentField(base.agent, over.agent) as DeskConfig['agent']
+  out.notify = mergeNotifyField(base.notify, over.notify)
+  if (out.notify && Object.keys(out.notify).length === 0) delete out.notify
   return out
 }
 
-export function envOverrides(env = process.env): Record<string, string> {
-  const out: Record<string, string> = {}
-  for (const [k, v] of Object.entries(env)) {
-    if (k.startsWith('HERDR_DESK_') && typeof v === 'string' && v) out[k] = v
-  }
-  return out
+export type ConfigSource = {
+  config: Record<string, unknown>
+  from: Layer
+  origin: string
 }
+
+export type ResolvedConfig = {
+  /** Folded config, before `applyDefaults`. */
+  config: DeskConfig
+  sources: ConfigSource[]
+  /** Which layer supplied each top-level key. */
+  provenance: Provenance
+  /**
+   * Which layer supplied each *sub-field* of a merged object, keyed
+   * `notify.chatId`. A top-level answer is not enough for `notify`: a repo that
+   * overrides only `chatId` must still be able to report that the `topicId`
+   * beside it came from the group, or the explain table lies.
+   */
+  fieldProvenance: Record<string, Layer>
+  /** Key -> layer, for fields set anywhere in the stack. */
+  originOf: (key: string) => Layer | undefined
+}
+
+/**
+ * Fold every layer that applies to a repo, lowest priority first.
+ *
+ * Order is the documented precedence: machine `config.json`, then ancestor
+ * group configs from the furthest to the nearest, then the repo's own file. The
+ * repo is last because only the repo may set `name`.
+ *
+ * This is the single fold. `config show`, `config explain`, and notify all go
+ * through it, so what notify does and what `explain` reports cannot disagree.
+ */
+export function resolveConfig(repo: string): ResolvedConfig {
+  const root = resolve(repo)
+  const sources: ConfigSource[] = []
+
+  const global = loadGlobalConfig()
+  if (Object.keys(global).length) {
+    sources.push({ config: global, from: 'global', origin: globalConfigPath() })
+  }
+  for (const g of findGroupLayers(root).reverse()) {
+    sources.push({
+      config: g.config as Record<string, unknown>,
+      from: 'group',
+      origin: g.path,
+    })
+  }
+  const repoPath = findConfigPath(root)
+  if (repoPath) {
+    try {
+      const own_ = JSON.parse(readFileSync(repoPath, 'utf8'))
+      if (own_ && typeof own_ === 'object' && !Array.isArray(own_)) {
+        sources.push({ config: own_, from: 'repo', origin: repoPath })
+      }
+    } catch {
+      // A malformed repo config is reported by `validate`, not here.
+    }
+  }
+
+  const provenance: Provenance = {}
+  const fieldProvenance: Record<string, Layer> = {}
+  let folded: DeskConfig = {} as DeskConfig
+  for (const s of sources) {
+    folded = mergeConfigs(folded, s.config as DeskConfig)
+    for (const k of Object.keys(s.config)) provenance[k] = s.from
+    // Later layers win, so recording as we go leaves the last writer standing.
+    for (const [parent, sub] of SUBFIELDS) {
+      const block = s.config[parent]
+      if (!block || typeof block !== 'object' || Array.isArray(block)) continue
+      for (const field of sub) {
+        if ((block as Record<string, unknown>)[field] !== undefined) {
+          fieldProvenance[`${parent}.${field}`] = s.from
+        }
+      }
+    }
+  }
+
+  return {
+    config: folded,
+    sources,
+    provenance,
+    fieldProvenance,
+    originOf: (key) => provenance[key],
+  }
+}
+
+/** Merged object blocks whose sub-fields are tracked individually. */
+const SUBFIELDS: Array<[string, string[]]> = [
+  ['notify', ['enabled', 'chatId', 'topicId']],
+  ['agent', ['ladder', 'default', 'permission', 'timeoutMs']],
+]

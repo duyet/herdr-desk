@@ -26,7 +26,7 @@ export function formatSchedule(desks: Discovered[], now = new Date()): string {
       const lastText = last
         ? `${last.ok ? 'ok' : 'fail'} ${last.at.slice(0, 16).replace('T', ' ')}`
         : 'never'
-      const streak = failureStreak(runs, { name: d.config.name, task: t.id })
+      const streak = failureStreak(runs, { repo: d.repo, task: t.id })
       // A non-zero streak is a job that broke, even if a later fire recovered.
       const failText =
         streak.count > 0

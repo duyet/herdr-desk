@@ -22,6 +22,7 @@
     "maxChildren": { "type": "integer", "minimum": 1, "maximum": 8, "default": 5 },
     "agentName": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,31}$" },
     "agent": { "$ref": "#/$defs/agent" },
+    "notify": { "$ref": "#/$defs/notify" },
     "kind": {
       "type": "string",
       "default": "grok",
@@ -35,6 +36,23 @@
     }
   },
   "$defs": {
+    "notify": {
+      "description": "Where this desk's notices go. Destination only: the bot token is a host secret and belongs in notify.json, never in a committed repo config.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Only ever narrows. A layer cannot re-enable what a higher-priority layer turned off."
+        },
+        "chatId": { "type": "string", "minLength": 1 },
+        "topicId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Telegram forum topic id."
+        }
+      }
+    },
     "cron": {
       "type": "string",
       "pattern": "^\\S+\\s+\\S+\\s+\\S+\\s+\\S+\\s+\\S+$"
@@ -105,6 +123,7 @@
         },
         "agentName": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,31}$" },
         "agent": { "$ref": "#/$defs/agent" },
+        "notify": { "$ref": "#/$defs/notify" },
         "kind": { "type": "string", "deprecated": true },
         "maxChildren": { "type": "integer", "minimum": 1, "maximum": 8 },
         "stateDir": { "type": "string" },

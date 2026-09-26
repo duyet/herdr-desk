@@ -217,3 +217,68 @@ describe('agent field', () => {
     ).toBe(true)
   })
 })
+
+describe('notify block', () => {
+  test('accepts a destination override at root and task level', () => {
+    for (const notify of [
+      { chatId: '-100123' },
+      { topicId: '42' },
+      { enabled: false },
+      { chatId: '-100123', topicId: '42' },
+    ]) {
+      expect(
+        validateDeskJson({ name: 'demo', notify }),
+        JSON.stringify(notify),
+      ).toEqual([])
+      expect(
+        validateDeskJson({ name: 'demo', tasks: [{ id: 't', notify }] }),
+        JSON.stringify(notify),
+      ).toEqual([])
+    }
+  })
+
+  test('rejects a token in a repo config, and says where it belongs', () => {
+    // A repo config is committed. Failing loudly is the point: silently
+    // stripping would leave a credential in git history and the user none the
+    // wiser.
+    const errs = validateDeskJson({
+      name: 'demo',
+      notify: { chatId: '-100', token: '123:ABC' },
+    })
+    const hit = errs.find((e) => e.includes('token'))
+    expect(hit).toBeDefined()
+    expect(hit).toContain('notify.json')
+    expect(hit).toContain('HERDR_DESK_TELEGRAM_TOKEN')
+  })
+
+  test('rejects a token on a task too', () => {
+    const errs = validateDeskJson({
+      name: 'demo',
+      tasks: [{ id: 't', notify: { token: '123:ABC' } }],
+    })
+    expect(errs.some((e) => e.includes('notify.token'))).toBe(true)
+  })
+
+  test('rejects a malformed notify block', () => {
+    expect(
+      validateDeskJson({ name: 'demo', notify: 'chat' }).some((e) =>
+        e.includes('notify'),
+      ),
+    ).toBe(true)
+    expect(
+      validateDeskJson({ name: 'demo', notify: { enabled: 'yes' } }).some((e) =>
+        e.includes('enabled'),
+      ),
+    ).toBe(true)
+    expect(
+      validateDeskJson({ name: 'demo', notify: { chatId: '' } }).some((e) =>
+        e.includes('chatId'),
+      ),
+    ).toBe(true)
+    expect(
+      validateDeskJson({ name: 'demo', notify: { nope: 1 } }).some((e) =>
+        e.includes('nope'),
+      ),
+    ).toBe(true)
+  })
+})

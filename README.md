@@ -220,7 +220,39 @@ channel otherwise cannot tell which desk or which box reported:
 ```
 
 Sending is best-effort and never throws, so a failed notice cannot abort a desk
-run. Unconfigured or failing sends print `not sent (<reason>)` and exit 0.
+run, and a failed notice is never recorded as a failed run. Unconfigured or
+failing sends print `not sent (<reason>)` and exit 0.
+
+### Per-desk channels
+
+A repo or task can point somewhere else. **Destination only** — a repo config
+can never set the token, because repo configs are committed:
+
+```json
+{ "name": "anyrouter", "notify": { "chatId": "-1004420104760", "topicId": "7" } }
+```
+
+Precedence, highest first: **task → repo → group → host default.** `enabled`
+only ever narrows: a repo cannot re-enable what the host muted.
+
+```sh
+bun src/cli.ts config explain --repo DIR     # shows which layer chose what
+```
+
+The token is read **only** from `notify.json` or `HERDR_DESK_TELEGRAM_TOKEN`.
+Putting a `token` in a `.herdr-desk.json` is a hard `validate` error, not a
+silent strip — a committed credential in git history with no warning is worse
+than a failed check. Telegram puts the token in the request URL, so every error
+string is token-redacted before it can reach `daemon.log` or the ledger.
+
+Wiring the token:
+
+```sh
+CFG="$(herdr plugin config-dir herdr-desk)"
+printf '{\n  "token": "<paste bot token>",\n  "chatId": "5360801021"\n}\n' > "$CFG/notify.json"
+chmod 600 "$CFG/notify.json"
+bun src/cli.ts notify "test" --repo "$PWD" --label desk:github-issues
+```
 
 ## Actions
 

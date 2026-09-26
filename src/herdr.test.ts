@@ -5,6 +5,7 @@ import {
   namedAgents,
   pickPane,
   projectWorkspaceForRepo,
+  summarizeArgv,
 } from './herdr'
 
 describe('listedWorkspaces', () => {
@@ -180,5 +181,30 @@ describe('isAgentLive', () => {
 
   test('a session with no reported status and an existing cwd is live', () => {
     expect(isAgentLive({ name: 'chm-desk', cwd: '/wt' }, () => true)).toBe(true)
+  })
+})
+
+describe('summarizeArgv', () => {
+  test('a prompt argument is summarised, not echoed', () => {
+    // Regression: `agent prompt <name> <prompt>` passed the whole ~8KB manager
+    // prompt as one argv element and the failure path joined argv verbatim, so
+    // an entire prompt landed in runs.jsonl as `detail`.
+    const prompt = `You are duyetbot, manager for **x**.${' pad'.repeat(2000)}`
+    expect(prompt.length).toBeGreaterThan(8000)
+    const line = summarizeArgv(['agent', 'prompt', 'x-desk', prompt])
+    expect(line).toBe(`agent prompt x-desk <${prompt.length} chars elided>`)
+    expect(line).not.toContain('duyetbot')
+    expect(line.length).toBeLessThan(80)
+  })
+
+  test('short arguments stay readable so errors remain diagnosable', () => {
+    expect(summarizeArgv(['agent', 'start', 'x', '--kind', 'claude'])).toBe(
+      'agent start x --kind claude',
+    )
+  })
+
+  test('a long argument between short ones is still elided', () => {
+    const line = summarizeArgv(['pane', 'read', `${'x'.repeat(500)}`, 'pane'])
+    expect(line).toBe('pane read <500 chars elided> pane')
   })
 })

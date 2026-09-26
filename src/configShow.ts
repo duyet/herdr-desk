@@ -1,69 +1,19 @@
-import { readFileSync } from 'node:fs'
 import { relative, resolve } from 'node:path'
-import { type DeskConfig, findConfigPath, loadDeskConfig } from './config'
+import { type DeskConfig, loadDeskConfig } from './config'
 import { applyDefaults } from './defaults'
 import type { Discovered } from './discover'
-import {
-  findGroupLayers,
-  type Layer,
-  loadGlobalConfig,
-  mergeConfigs,
-} from './layers'
+import { resolveConfig } from './layers'
 import { textTable } from './table'
 
-type Source = { config: Record<string, unknown>; from: Layer; origin: string }
-
 /**
- * Every layer that applies to a repo, lowest priority first.
+ * Effective values after defaults, with no provenance.
  *
- * Shared by `show` and `explain` so both commands fold the config through
- * exactly the same path. A second implementation here would drift, and a
- * drifted fold would report provenance that does not match behaviour.
+ * Folds through `resolveConfig`, the same entry point notify uses, so what
+ * notify does and what `explain` reports cannot disagree.
  */
-export function layerSources(repo: string): Source[] {
-  const root = resolve(repo)
-  const out: Source[] = []
-
-  const global = loadGlobalConfig()
-  if (Object.keys(global).length) {
-    out.push({ config: global, from: 'global', origin: 'config.json' })
-  }
-  for (const g of findGroupLayers(root).reverse()) {
-    out.push({
-      config: g.config as Record<string, unknown>,
-      from: 'group',
-      origin: g.path,
-    })
-  }
-  const repoPath = findConfigPath(root)
-  if (repoPath) {
-    try {
-      const own = JSON.parse(readFileSync(repoPath, 'utf8'))
-      if (own && typeof own === 'object' && !Array.isArray(own)) {
-        out.push({ config: own, from: 'repo', origin: repoPath })
-      }
-    } catch {
-      // A malformed repo config is reported by `validate`, not here.
-    }
-  }
-  return out
-}
-
-function fold(sources: Source[]): DeskConfig {
-  let merged: Record<string, unknown> = {}
-  for (const s of sources) {
-    merged = mergeConfigs(
-      merged as DeskConfig,
-      s.config as DeskConfig,
-    ) as Record<string, unknown>
-  }
-  return merged as DeskConfig
-}
-
-/** Effective values after defaults, with no provenance. */
 export function showConfig(repo: string): string {
   const root = resolve(repo)
-  const merged = fold(layerSources(root))
+  const { config: merged } = resolveConfig(root)
   // `name` is the one field only the repo may set, so fall back for the preview.
   const withName: DeskConfig = {
     ...merged,
@@ -79,6 +29,7 @@ const KEYS = [
   'maxChildren',
   'agentName',
   'agent',
+  'notify',
   'kind',
 ]
 
@@ -96,17 +47,17 @@ function fmt(v: unknown): string {
  */
 export function explainConfig(repo: string): string {
   const root = resolve(repo)
-  const sources = layerSources(root)
+  const { config: folded, sources, provenance } = resolveConfig(root)
   if (sources.length === 0) return `no config found for ${root}`
 
   const rows: string[][] = []
   for (const key of KEYS) {
-    for (let i = sources.length - 1; i >= 0; i--) {
-      const v = sources[i].config[key]
-      if (v === undefined) continue
-      rows.push([key, fmt(v), sources[i].from])
-      break
-    }
+    // Show the *effective* value, not the raw one from the winning layer: a
+    // repo that overrides only `chatId` would otherwise hide the inherited
+    // ladder/topic and read as if it had wiped them.
+    const value = (folded as Record<string, unknown>)[key]
+    if (value === undefined) continue
+    rows.push([key, fmt(value), provenance[key] ?? 'default'])
   }
 
   return [

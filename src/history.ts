@@ -14,13 +14,31 @@ export type RunRecord = {
 
 const MAX = 200
 
+/**
+ * Hard cap on a stored `detail`.
+ *
+ * `detail` carries whatever a caller passed, and a thrown Herdr error once
+ * embedded an entire manager prompt. Truncating at the sink means no future
+ * caller can poison the ledger, notify a whole prompt to a chat, or blow up
+ * `history` — regardless of how the message was built.
+ */
+export const MAX_DETAIL = 300
+
+export function truncateDetail(detail?: string): string | undefined {
+  if (detail === undefined) return undefined
+  if (detail.length <= MAX_DETAIL) return detail
+  return `${detail.slice(0, MAX_DETAIL)}… (${detail.length} chars)`
+}
+
 export function historyPath(): string {
   return join(pluginStateDir(), 'runs.jsonl')
 }
 
 export function appendRun(rec: RunRecord): void {
   mkdirSync(pluginStateDir(), { recursive: true })
-  writeFileSync(historyPath(), `${JSON.stringify(rec)}\n`, { flag: 'a' })
+  const safe: RunRecord = { ...rec, detail: truncateDetail(rec.detail) }
+  if (safe.detail === undefined) delete safe.detail
+  writeFileSync(historyPath(), `${JSON.stringify(safe)}\n`, { flag: 'a' })
 }
 
 export function recordRun(rec: Omit<RunRecord, 'at'> & { at?: string }): void {
@@ -65,12 +83,17 @@ export function formatHistory(runs: RunRecord[]): string {
  * the last fire only, so a job that failed 24 times in a row reads as one red
  * word; the streak is the number that says "this desk went quiet", which is the
  * failure mode that actually cost weeks here.
+ *
+ * Keyed on `{repo, task}`, not `{name, task}`: two different checkouts on one
+ * machine can both be called `chmonitor`, and keying on the display name merged
+ * their streaks into one number that belonged to neither. `repo` is also what
+ * `fireKey` already uses, so a run and its streak now agree on identity.
  */
 export function failureStreak(
   runs: RunRecord[],
-  job: { name: string; task: string },
+  job: { repo: string; task: string },
 ): { count: number; since: string | null; detail: string | null } {
-  const mine = runs.filter((r) => r.name === job.name && r.task === job.task)
+  const mine = runs.filter((r) => r.repo === job.repo && r.task === job.task)
   let count = 0
   let since: string | null = null
   let detail: string | null = null

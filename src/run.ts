@@ -18,13 +18,16 @@ import {
   pickPane,
   projectWorkspaceForRepo,
 } from './herdr'
-import { recordRun } from './history'
+import { recordRun, truncateDetail } from './history'
+import { notify, resolveNotify } from './notify'
 import { assembleManagerPrompt, taskVars } from './prompt'
 
 type RunResult = {
   skipped?: string
   spawned?: boolean
   prompted?: boolean
+  /** Set when the run threw; the message is already ledger-truncated upstream. */
+  error?: string
 }
 
 export function runDirFor(repo: string, task: TaskConfig, day: string): string {
@@ -64,17 +67,66 @@ export async function runTask(opts: {
   const repo = config.repo ?? opts.repo
   const task = resolveTask(config, opts.taskId)
   try {
-    return await execute(config, repo, task)
+    const result = await execute(config, repo, task)
+    await announce(repo, task, result)
+    return result
   } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
     recordRun({
       name: config.name,
       repo,
       task: task.id,
       mode: 'run',
       ok: false,
-      detail: err instanceof Error ? err.message : String(err),
+      detail: message,
     })
+    // A failure is the one thing worth waking someone for, so it is announced
+    // before the error propagates. `announce` never throws, so a broken webhook
+    // cannot replace a real failure with a notification failure.
+    await announce(repo, task, { error: message })
     throw err
+  }
+}
+
+/**
+ * Send a run outcome to the host notice channel.
+ *
+ * Best-effort in the strongest sense: it resolves rather than rejects, and its
+ * result is never recorded as a run outcome. A failed notice must not be able
+ * to turn a successful run into a failed one, because that self-amplifies into
+ * an alert storm where every run reports that reporting is broken.
+ */
+async function announce(
+  repo: string,
+  task: TaskConfig,
+  result: RunResult,
+): Promise<void> {
+  try {
+    const { config: notifyConfig } = resolveNotify({
+      repo,
+      taskNotify: task.notify,
+    })
+    if (!notifyConfig.enabled) return
+    const message = result.error
+      ? `FAILED: ${truncateDetail(result.error)}`
+      : result.skipped
+        ? `skipped: ${result.skipped}`
+        : result.spawned
+          ? 'spawned manager'
+          : result.prompted
+            ? 're-prompted live manager'
+            : 'done'
+    await notify(
+      {
+        message,
+        repo,
+        label: task.id,
+      },
+      notifyConfig,
+    )
+  } catch {
+    // Intentionally silent. Reaching here means notify misbehaved; the run
+    // outcome is already recorded and must not be altered by it.
   }
 }
 

@@ -1,14 +1,24 @@
 import { describe, expect, test } from 'bun:test'
-import { failureStreak, type RunRecord } from './history'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import {
+  appendRun,
+  failureStreak,
+  historyPath,
+  MAX_DETAIL,
+  type RunRecord,
+  truncateDetail,
+} from './history'
 
-const job = { name: 'chmonitor', task: 'desk:github-issues' }
+const job = { repo: '/repo', task: 'desk:github-issues' }
 
 function rec(
   partial: Partial<RunRecord> & { at: string; ok: boolean },
 ): RunRecord {
   return {
-    name: job.name,
-    repo: '/repo',
+    name: 'chmonitor',
+    repo: job.repo,
     task: job.task,
     mode: 'run',
     ...partial,
@@ -79,12 +89,44 @@ describe('failureStreak', () => {
   test('is per job, so one broken repo does not implicate another', () => {
     const runs: RunRecord[] = [
       rec({ at: '2026-09-01T00:00:00.000Z', ok: false, detail: 'boom' }),
-      rec({ at: '2026-09-01T00:00:00.000Z', ok: true, name: 'anyrouter' }),
+      rec({
+        at: '2026-09-01T00:00:00.000Z',
+        ok: true,
+        name: 'anyrouter',
+        repo: '/other',
+      }),
     ]
     expect(failureStreak(runs, job).count).toBe(1)
+    expect(failureStreak(runs, { repo: '/other', task: job.task }).count).toBe(
+      0,
+    )
+  })
+
+  test('two checkouts sharing a display name keep separate streaks', () => {
+    // Regression: keying on `name` merged these into one number belonging to
+    // neither repo. Both are legitimately called `chmonitor`.
+    const runs: RunRecord[] = [
+      ...Array.from({ length: 3 }, (_, i) =>
+        rec({
+          at: `2026-09-0${i + 1}T00:00:00.000Z`,
+          ok: false,
+          detail: 'boom',
+          repo: '/src/chmonitor',
+        }),
+      ),
+      rec({
+        at: '2026-09-04T00:00:00.000Z',
+        ok: false,
+        detail: 'other',
+        repo: '/tmp/chmonitor',
+      }),
+    ]
     expect(
-      failureStreak(runs, { name: 'anyrouter', task: job.task }).count,
-    ).toBe(0)
+      failureStreak(runs, { repo: '/src/chmonitor', task: job.task }).count,
+    ).toBe(3)
+    expect(
+      failureStreak(runs, { repo: '/tmp/chmonitor', task: job.task }).count,
+    ).toBe(1)
   })
 
   test('reports nothing for a job with no records', () => {
@@ -93,5 +135,48 @@ describe('failureStreak', () => {
       since: null,
       detail: null,
     })
+  })
+})
+
+describe('truncateDetail', () => {
+  test('a short detail is untouched', () => {
+    expect(truncateDetail('boom')).toBe('boom')
+    expect(truncateDetail(undefined)).toBeUndefined()
+  })
+
+  test('a multi-kilobyte detail is capped at the sink', () => {
+    // The backstop: even if a caller passes a whole prompt, it cannot reach the
+    // ledger, `history`, or any notification built from a run detail.
+    const huge = `You are duyetbot${' pad'.repeat(2000)}`
+    const out = truncateDetail(huge) as string
+    expect(huge.length).toBeGreaterThan(8000)
+    expect(out.length).toBeLessThanOrEqual(MAX_DETAIL + 24)
+    expect(out).toContain(`(${huge.length} chars)`)
+  })
+
+  test('the cap is enforced on write, not only on display', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'desk-hist-'))
+    const prev = process.env.HERDR_PLUGIN_STATE_DIR
+    process.env.HERDR_PLUGIN_STATE_DIR = dir
+    try {
+      appendRun({
+        at: '2026-09-27T00:00:00.000Z',
+        name: 'x',
+        repo: '/r',
+        task: 't',
+        mode: 'run',
+        ok: false,
+        detail: 'y'.repeat(9000),
+      })
+      const line = readFileSync(historyPath(), 'utf8').trim()
+      expect(line.length).toBeLessThan(600)
+      expect(JSON.parse(line).detail.length).toBeLessThanOrEqual(
+        MAX_DETAIL + 24,
+      )
+    } finally {
+      if (prev === undefined) delete process.env.HERDR_PLUGIN_STATE_DIR
+      else process.env.HERDR_PLUGIN_STATE_DIR = prev
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })
