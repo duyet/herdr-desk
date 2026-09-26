@@ -1,14 +1,17 @@
-import { describe, expect, test } from 'bun:test'
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { afterEach, describe, expect, test } from 'bun:test'
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { hostname, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   formatNotice,
   loadNotifyConfig,
+  MAX_BODY,
   machineName,
   type NotifyConfig,
   notify,
+  redactToken,
   repoName,
+  resolveNotify,
 } from './notify'
 
 function cfg(over: Partial<NotifyConfig> = {}): NotifyConfig {
@@ -190,5 +193,217 @@ describe('notify', () => {
       impl,
     )
     expect(calls[0]?.body.message_thread_id).toBe(42)
+  })
+})
+
+describe('redactToken', () => {
+  // A real token is `\d+:[A-Za-z0-9_-]{35}`, ~46 chars. The short-token cases
+  // below are about not corrupting ordinary text on the way to protecting it.
+  const real = '123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw'
+
+  test('a real-length token is removed from a fetch error', () => {
+    const msg = `TypeError: fetch failed for https://api.telegram.org/bot${real}/sendMessage`
+    const out = redactToken(msg, real)
+    expect(out).not.toContain(real)
+    expect(out).toContain('<redacted>')
+  })
+
+  test('a real token is removed even outside the URL form', () => {
+    const out = redactToken(`token=${real} rejected`, real)
+    expect(out).not.toContain(real)
+  })
+
+  test('the url form is redacted even for a short token', () => {
+    const out = redactToken('POST /bott/sendMessage failed', 't')
+    expect(out).toBe('POST /bot<redacted>/sendMessage failed')
+  })
+
+  test('a short token does not corrupt ordinary words', () => {
+    // Regression: redacting every occurrence of a 1-char token rewrote the `t`
+    // in "telegram", so the failure reason read "<redacted>elegram HTTP 401".
+    expect(redactToken('telegram HTTP 401', 't')).toBe('telegram HTTP 401')
+    expect(redactToken('telegram HTTP 401', '')).toBe('telegram HTTP 401')
+  })
+
+  test('notify never returns a reason containing a real token', async () => {
+    const impl = (async () => {
+      throw new TypeError(
+        `fetch failed: https://api.telegram.org/bot${real}/sendMessage`,
+      )
+    }) as unknown as typeof fetch
+    const result = await notify(
+      { message: 'x', repo: '/r/aidr' },
+      cfg({ token: real }),
+      impl,
+    )
+    expect(result.sent).toBe(false)
+    expect(result.reason).not.toContain(real)
+  })
+})
+
+describe('formatNotice body cap', () => {
+  test('the machine and repo prefix survives a huge body', () => {
+    // The prefix is the reason a host-level channel is usable; capping must
+    // never eat it.
+    const out = formatNotice(
+      {
+        message: 'x'.repeat(5000),
+        repo: '/r/aidr',
+        label: 'desk:github-issues',
+      },
+      'box',
+    )
+    expect(out.startsWith('[box] [aidr] [desk:github-issues] ')).toBe(true)
+    expect(out).toContain('chars)')
+    expect(out.length).toBeLessThan(MAX_BODY + 80)
+  })
+
+  test('a short body is untouched', () => {
+    expect(formatNotice({ message: 'all good', repo: '/r/aidr' }, 'box')).toBe(
+      '[box] [aidr] all good',
+    )
+  })
+
+  test('a whole notice stays inside the telegram limit', () => {
+    const out = formatNotice(
+      { message: 'y'.repeat(MAX_BODY * 2), repo: '/r/aidr' },
+      'a-very-long-hostname-that-goes-on',
+    )
+    expect(out.length).toBeLessThan(4096)
+  })
+})
+
+describe('resolveNotify precedence', () => {
+  const REAL_TOKEN = '123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw'
+  let restore: (() => void) | null = null
+
+  /**
+   * Point both the host notify file and the machine config at a temp dir, so a
+   * test can never read or write the real one.
+   */
+  function sandbox(): string {
+    const dir = mkdtempSync(join(tmpdir(), 'desk-notify-precedence-'))
+    const prevConfig = process.env.HERDR_PLUGIN_CONFIG_DIR
+    const prevState = process.env.HERDR_PLUGIN_STATE_DIR
+    const prevToken = process.env.HERDR_DESK_TELEGRAM_TOKEN
+    process.env.HERDR_PLUGIN_CONFIG_DIR = dir
+    process.env.HERDR_PLUGIN_STATE_DIR = dir
+    delete process.env.HERDR_DESK_TELEGRAM_TOKEN
+    restore = () => {
+      if (prevConfig === undefined) delete process.env.HERDR_PLUGIN_CONFIG_DIR
+      else process.env.HERDR_PLUGIN_CONFIG_DIR = prevConfig
+      if (prevState === undefined) delete process.env.HERDR_PLUGIN_STATE_DIR
+      else process.env.HERDR_PLUGIN_STATE_DIR = prevState
+      if (prevToken === undefined) delete process.env.HERDR_DESK_TELEGRAM_TOKEN
+      else process.env.HERDR_DESK_TELEGRAM_TOKEN = prevToken
+    }
+    return dir
+  }
+
+  afterEach(() => {
+    restore?.()
+    restore = null
+  })
+
+  function host(dir: string, over: Record<string, unknown> = {}): void {
+    writeFileSync(
+      join(dir, 'notify.json'),
+      JSON.stringify({
+        token: REAL_TOKEN,
+        chatId: 'host-chat',
+        topicId: 'host-topic',
+        ...over,
+      }),
+    )
+  }
+
+  test('host chat id is the default for a repo with no notify block', () => {
+    const dir = sandbox()
+    host(dir)
+    writeFileSync(
+      join(dir, '.herdr-desk.json'),
+      JSON.stringify({ name: 'aidr' }),
+    )
+    const { config } = resolveNotify({ repo: dir })
+    expect(config.chatId).toBe('host-chat')
+    expect(config.topicId).toBe('host-topic')
+    expect(config.token).toBe(REAL_TOKEN)
+  })
+
+  test('a repo retargets chatId and keeps the host topicId', () => {
+    const dir = sandbox()
+    host(dir)
+    writeFileSync(
+      join(dir, '.herdr-desk.json'),
+      JSON.stringify({ name: 'aidr', notify: { chatId: 'dedicated-chat' } }),
+    )
+    const { config, provenance } = resolveNotify({ repo: dir })
+    expect(config.chatId).toBe('dedicated-chat')
+    // The inherited topic must survive, or a forum topic silently reverts.
+    expect(config.topicId).toBe('host-topic')
+    expect(provenance.chatId).toBe('repo')
+    expect(provenance.topicId).toBeUndefined()
+  })
+
+  test('a task override beats the repo', () => {
+    const dir = sandbox()
+    host(dir)
+    writeFileSync(
+      join(dir, '.herdr-desk.json'),
+      JSON.stringify({ name: 'aidr', notify: { chatId: 'repo-chat' } }),
+    )
+    const { config, provenance } = resolveNotify({
+      repo: dir,
+      taskNotify: { chatId: 'task-chat' },
+    })
+    expect(config.chatId).toBe('task-chat')
+    expect(provenance.chatId).toBe('task')
+  })
+
+  test('a repo config can never change the token', () => {
+    const dir = sandbox()
+    host(dir)
+    // Even bypassing the validator, the token stays host-owned.
+    writeFileSync(
+      join(dir, '.herdr-desk.json'),
+      JSON.stringify({
+        name: 'aidr',
+        notify: { chatId: 'x', token: 'leaked-token' },
+      }),
+    )
+    expect(resolveNotify({ repo: dir }).config.token).toBe(REAL_TOKEN)
+  })
+
+  test('enabled only ever narrows, never re-enables', () => {
+    const dir = sandbox()
+    host(dir, { enabled: false })
+    writeFileSync(
+      join(dir, '.herdr-desk.json'),
+      JSON.stringify({ name: 'aidr', notify: { enabled: true } }),
+    )
+    expect(resolveNotify({ repo: dir }).config.enabled).toBe(false)
+  })
+
+  test('a group config sets a destination a repo then overrides', () => {
+    const dir = sandbox()
+    host(dir)
+    const group = join(dir, 'fleet')
+    const repo = join(group, 'aidr')
+    mkdirSync(repo, { recursive: true })
+    writeFileSync(
+      join(group, '.herdr-desk.json'),
+      JSON.stringify({
+        name: 'fleet',
+        group: true,
+        notify: { chatId: 'group-chat' },
+      }),
+    )
+    writeFileSync(
+      join(repo, '.herdr-desk.json'),
+      JSON.stringify({ name: 'aidr' }),
+    )
+    const { config, provenance } = resolveNotify({ repo })
+    expect(config.chatId).toBe('group-chat')
+    expect(provenance.chatId).toBe('group')
   })
 })

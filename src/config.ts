@@ -47,6 +47,21 @@ export type AgentInput =
       timeoutMs?: number
     }
 
+/**
+ * Per-desk notification *destination*.
+ *
+ * Deliberately has no `token` field. The bot token is a host secret read only
+ * from `notify.json` or the environment, and a repo config is committed — so the
+ * type itself makes "put the token in a repo" impossible rather than merely
+ * discouraged. A repo may retarget where a notice goes; only the host decides
+ * who it goes as.
+ */
+export type NotifyOverride = {
+  enabled?: boolean
+  chatId?: string
+  topicId?: string
+}
+
 export type TaskConfig = {
   id: string
   label?: string
@@ -54,6 +69,8 @@ export type TaskConfig = {
   agentName: string
   /** Resolved agent selection. Replaces the 0.1.x `kind` field. */
   agent: AgentSpec
+  /** Notification destination for this job, after layering. */
+  notify?: NotifyOverride
   maxChildren?: number
   /** Authoring form (string or list). */
   schedule?: Schedule
@@ -80,17 +97,23 @@ export type DeskConfig = {
   maxChildren?: number
   agentName?: string
   agent?: AgentInput
+  /** Retarget this desk's notices. Cannot set the token. */
+  notify?: NotifyOverride
   /** @deprecated 0.1.x single-rung field. Read as `agent`; still accepted. */
   kind?: string
   tasks?: Array<
     Partial<
-      Omit<TaskConfig, 'crons' | 'playbook' | 'agentName' | 'id' | 'agent'>
+      Omit<
+        TaskConfig,
+        'crons' | 'playbook' | 'agentName' | 'id' | 'agent' | 'notify'
+      >
     > & {
       id?: string
       playbook?: string
       agentName?: string
       schedule?: Schedule
       agent?: AgentInput
+      notify?: NotifyOverride
       /** @deprecated use `agent`. */
       kind?: string
     }

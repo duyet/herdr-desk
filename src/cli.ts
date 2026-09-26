@@ -14,7 +14,7 @@ import { discoverDesks, formatScan } from './discover'
 import { formatHistory, loadRuns } from './history'
 import { stripAllDeskCrons } from './install'
 import { readLastChanges } from './last'
-import { notify } from './notify'
+import { type NotifyProvenance, notify, resolveNotify } from './notify'
 import { runTask } from './run'
 import { scheduleLabel } from './schedule'
 import { SCHEMA_PATH, SCHEMA_URL } from './schema'
@@ -45,6 +45,17 @@ function arg(flag: string, argv: string[]): string | undefined {
   const i = argv.indexOf(flag)
   if (i === -1) return undefined
   return argv[i + 1]
+}
+
+/** Show which layer chose the chat, so "it went to the wrong place" is answerable. */
+function describeDestination(
+  chatId: string,
+  provenance: NotifyProvenance,
+): string {
+  const from = provenance.chatId
+    ? ` (from ${provenance.chatId})`
+    : ' (host default)'
+  return `${chatId}${from}`
 }
 
 async function main() {
@@ -147,9 +158,18 @@ async function main() {
           a !== arg('--label', argv),
       )
       .join(' ')
-    const r = await notify({ message, repo, label })
-    if (r.sent) console.log(`sent [${r.machine}] [${r.repo}] ${message}`)
-    else console.log(`not sent (${r.reason}) [${r.machine}] [${r.repo}]`)
+    // Same layered resolution a real run uses, so testing delivery also proves
+    // the destination is the one a run would pick.
+    const { config: notifyConfig, provenance } = resolveNotify({ repo })
+    const r = await notify({ message, repo, label }, notifyConfig)
+    if (r.sent) {
+      console.log(
+        `sent [${r.machine}] [${r.repo}] to ${describeDestination(notifyConfig.chatId, provenance)}`,
+      )
+    } else {
+      // `reason` is already token-redacted by notify().
+      console.log(`not sent (${r.reason}) [${r.machine}] [${r.repo}]`)
+    }
     return
   }
 
