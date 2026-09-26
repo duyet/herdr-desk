@@ -13,6 +13,7 @@ import { discoverDesks, formatScan } from './discover'
 import { formatHistory, loadRuns } from './history'
 import { stripAllDeskCrons } from './install'
 import { readLastChanges } from './last'
+import { notify } from './notify'
 import { runTask } from './run'
 import { scheduleLabel } from './schedule'
 import { SCHEMA_PATH, SCHEMA_URL } from './schema'
@@ -31,6 +32,7 @@ function usage(): never {
   herdr-desk on-focus
   herdr-desk run [JOB] --repo DIR
   herdr-desk tasks
+  herdr-desk notify MESSAGE [--repo DIR] [--label TEXT]
   herdr-desk uninstall-cron
 `)
   process.exit(2)
@@ -112,6 +114,24 @@ async function main() {
     await discoverDesks()
     const r = startDaemon()
     console.log(r.already ? `daemon pid ${r.pid}` : `started pid ${r.pid}`)
+    return
+  }
+
+  if (cmd === 'notify') {
+    const repo = resolve(arg('--repo', argv) ?? process.cwd())
+    const label = arg('--label', argv)
+    const message = argv
+      .slice(1)
+      .filter(
+        (a) =>
+          !a.startsWith('--') &&
+          a !== arg('--repo', argv) &&
+          a !== arg('--label', argv),
+      )
+      .join(' ')
+    const r = await notify({ message, repo, label })
+    if (r.sent) console.log(`sent [${r.machine}] [${r.repo}] ${message}`)
+    else console.log(`not sent (${r.reason}) [${r.machine}] [${r.repo}]`)
     return
   }
 

@@ -39,6 +39,11 @@ title = "Show today's start-run change summaries"
 command = ["bin/desk", "last"]
 
 [[actions]]
+id = "notify"
+title = "Send a Telegram notice tagged with machine and repo"
+command = ["bin/desk", "notify"]
+
+[[actions]]
 id = "validate"
 title = "Validate discovered repo configs"
 command = ["bin/desk", "validate"]
