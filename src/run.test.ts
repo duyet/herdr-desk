@@ -3,7 +3,12 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { TaskConfig } from './config'
-import { deskWorktreeBranch, runDirFor, writeLatestPointer } from './run'
+import {
+  baseRefFrom,
+  deskWorktreeBranch,
+  runDirFor,
+  writeLatestPointer,
+} from './run'
 
 const base: TaskConfig = {
   id: 'desk:github-issues',
@@ -71,6 +76,33 @@ describe('writeLatestPointer', () => {
       'desk:github-issues/2026-09-27\n',
     )
     rmSync(dir, { recursive: true, force: true })
+  })
+})
+
+describe('baseRefFrom', () => {
+  test('uses the repo default branch when it is not main', () => {
+    // The shape that broke docker-images: every fire died on
+    // `fatal: invalid reference: origin/main` because that repo is master.
+    expect(baseRefFrom('origin/master\n')).toBe('origin/master')
+  })
+
+  test('accepts main and trims the trailing newline git adds', () => {
+    expect(baseRefFrom('origin/main\n')).toBe('origin/main')
+  })
+
+  test('falls back when origin/HEAD is missing or unusable', () => {
+    // A repo with no origin/HEAD (fresh clone, no remote default) must still
+    // get a ref rather than an empty --base argument.
+    expect(baseRefFrom(null)).toBe('origin/main')
+    expect(baseRefFrom(undefined)).toBe('origin/main')
+    expect(baseRefFrom('')).toBe('origin/main')
+    expect(baseRefFrom('refs/remotes/origin/master')).toBe('origin/main')
+    expect(baseRefFrom('HEAD')).toBe('origin/main')
+    expect(baseRefFrom('origin/')).toBe('origin/main')
+  })
+
+  test('honors an explicit fallback', () => {
+    expect(baseRefFrom(null, 'origin/master')).toBe('origin/master')
   })
 })
 
