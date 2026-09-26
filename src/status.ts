@@ -1,7 +1,7 @@
 import { cronNext } from './cron'
 import { describeJob } from './describe'
 import type { Discovered } from './discover'
-import { loadRuns } from './history'
+import { failureStreak, loadRuns } from './history'
 import { scheduleLabel } from './schedule'
 import { textTable } from './table'
 
@@ -26,12 +26,19 @@ export function formatSchedule(desks: Discovered[], now = new Date()): string {
       const lastText = last
         ? `${last.ok ? 'ok' : 'fail'} ${last.at.slice(0, 16).replace('T', ' ')}`
         : 'never'
+      const streak = failureStreak(runs, { name: d.config.name, task: t.id })
+      // A non-zero streak is a job that broke, even if a later fire recovered.
+      const failText =
+        streak.count > 0
+          ? `${streak.count} from ${streak.since?.slice(0, 10)}`
+          : '-'
       rows.push([
         d.config.name,
         t.id,
         scheduleLabel(t.crons),
         fmt(nexts[0] ?? null),
         lastText,
+        failText,
         t.agentName,
         describeJob(d.repo, t),
       ])
@@ -39,7 +46,7 @@ export function formatSchedule(desks: Discovered[], now = new Date()): string {
   }
   if (rows.length === 0) return 'no desks'
   return textTable(
-    ['Repo', 'Job', 'Cron', 'Next', 'Last', 'Agent', 'What'],
+    ['Repo', 'Job', 'Cron', 'Next', 'Last', 'Fails', 'Agent', 'What'],
     rows,
   )
 }

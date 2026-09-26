@@ -55,3 +55,31 @@ export function formatHistory(runs: RunRecord[]): string {
     })
     .join('\n')
 }
+
+/**
+ * Consecutive failed fires for one job, counting back from its most recent
+ * record.
+ *
+ * `since` is the *oldest* failure in the streak (when the break started) and
+ * `detail` is the *newest* error (what it is failing on now). `status` shows
+ * the last fire only, so a job that failed 24 times in a row reads as one red
+ * word; the streak is the number that says "this desk went quiet", which is the
+ * failure mode that actually cost weeks here.
+ */
+export function failureStreak(
+  runs: RunRecord[],
+  job: { name: string; task: string },
+): { count: number; since: string | null; detail: string | null } {
+  const mine = runs.filter((r) => r.name === job.name && r.task === job.task)
+  let count = 0
+  let since: string | null = null
+  let detail: string | null = null
+  for (let i = mine.length - 1; i >= 0; i--) {
+    const r = mine[i]
+    if (r.ok) break
+    count += 1
+    since = r.at
+    detail ??= r.detail ?? null
+  }
+  return { count, since, detail }
+}
