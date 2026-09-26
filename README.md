@@ -142,6 +142,41 @@ herdr plugin log list --plugin herdr-desk --limit 20
 
 State on disk: `~/.local/state/herdr/plugins/herdr-desk/` (`daemon.log`, `runs.jsonl`).
 
+## Notify
+
+Send yourself a Telegram message from any desk. Config is **host-level**, not
+per-repo, so one destination receives notices from every repo on the machine
+and the token is never committed into a `.herdr-desk.json`.
+
+`~/.config/herdr/plugins/herdr-desk/notify.json`:
+
+```json
+{
+  "token": "123456:ABC",
+  "chatId": "-1004420104760",
+  "topicId": "42"
+}
+```
+
+`topicId` is optional (Telegram forum topic). Set `"enabled": false` to mute
+without deleting the token. Environment overrides, useful for a scheduled
+daemon or CI: `HERDR_DESK_TELEGRAM_TOKEN`, `HERDR_DESK_TELEGRAM_CHAT_ID`,
+`HERDR_DESK_TELEGRAM_TOPIC_ID`.
+
+```sh
+bun src/cli.ts notify "desk run finished" --repo /path/to/repo --label desk:github-issues
+```
+
+Every notice is prefixed with the machine and repo, because a host-level
+channel otherwise cannot tell which desk or which box reported:
+
+```
+[duet-ubuntu (duyet)] [aidr] [desk:github-issues] desk run finished
+```
+
+Sending is best-effort and never throws, so a failed notice cannot abort a desk
+run. Unconfigured or failing sends print `not sent (<reason>)` and exit 0.
+
 ## Actions
 
 ```sh
@@ -151,6 +186,7 @@ herdr plugin action invoke herdr-desk.status
 herdr plugin action invoke herdr-desk.list
 herdr plugin action invoke herdr-desk.history
 herdr plugin action invoke herdr-desk.validate
+herdr plugin action invoke herdr-desk.notify
 ```
 
 On-demand (plugin actions take no arguments):
