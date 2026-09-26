@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { mkdtempSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { hostname, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   formatNotice,
@@ -70,7 +70,9 @@ describe('repoName', () => {
 
 describe('machineName', () => {
   test('includes the hostname', () => {
-    expect(machineName()).toContain('duet-ubuntu')
+    // Assert the relationship, not this host's name — CI runners differ.
+    expect(machineName()).toContain(hostname())
+    expect(machineName().length).toBeGreaterThan(0)
   })
 })
 
