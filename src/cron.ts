@@ -184,6 +184,33 @@ export function cronNext(expr: string, from = new Date()): Date | null {
 }
 
 /**
+ * Every `(hour, minute)` slot `expr` matches today, up to and including the
+ * minute of `at`, as `HH:MM` strings in ascending order.
+ *
+ * This is the slot-level primitive. `cronDueToday` collapses it to a boolean,
+ * which is fine for "is there anything to do" but loses *which* slot — and a
+ * day-keyed fire ledger built on that boolean fires any expression at most
+ * once per day, so a half-hourly cron runs 48 times less often than configured.
+ */
+export function cronSlotsToday(expr: string, at = new Date()): string[] {
+  const c = compiled(expr)
+  if (!c) return []
+  if (!dayMatches(c, at)) return []
+  const nowH = at.getHours()
+  const nowM = at.getMinutes()
+  const p = (n: number) => String(n).padStart(2, '0')
+  const out: string[] = []
+  for (const h of c.hours) {
+    if (h > nowH) continue
+    for (const m of c.minutes) {
+      if (h === nowH && m > nowM) continue
+      out.push(`${p(h)}:${p(m)}`)
+    }
+  }
+  return out.sort()
+}
+
+/**
  * True if `expr` matches this minute, or already matched earlier today.
  *
  * Only `(hour, minute)` pairs the expression can actually produce are
@@ -191,19 +218,5 @@ export function cronNext(expr: string, from = new Date()): Date | null {
  * by the 1,440 minutes in a day.
  */
 export function cronDueToday(expr: string, at = new Date()): boolean {
-  const c = compiled(expr)
-  if (!c) return false
-  if (!dayMatches(c, at)) return false
-  const nowH = at.getHours()
-  const nowM = at.getMinutes()
-  for (let i = c.hours.length - 1; i >= 0; i--) {
-    const h = c.hours[i]
-    if (h > nowH) continue
-    if (h < nowH) return true
-    for (let j = c.minutes.length - 1; j >= 0; j--) {
-      if (c.minutes[j] <= nowM) return true
-    }
-    return false
-  }
-  return false
+  return cronSlotsToday(expr, at).length > 0
 }
