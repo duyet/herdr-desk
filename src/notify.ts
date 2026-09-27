@@ -27,11 +27,99 @@ export type Notice = {
   machine?: string
   /** Short label such as a task id, e.g. `desk:github-issues`. */
   label?: string
+  /**
+   * Send the body as Telegram Markdown. Default true.
+   *
+   * Telegram rejects unbalanced `*` or `_` with a 400, and a repo path or issue
+   * title is exactly the kind of text that produces one. So a parse failure is
+   * retried once as plain text rather than losing the notice — see `notify`.
+   */
+  markdown?: boolean
+}
+
+/** Outcome classes, used to pick a tag and a headline. */
+export type NoticeLevel = 'ok' | 'fail' | 'blocked' | 'skip' | 'info'
+
+const LEVEL_TAG: Record<NoticeLevel, string> = {
+  ok: '#ok',
+  fail: '#fail',
+  blocked: '#blocked',
+  skip: '#skip',
+  info: '#info',
+}
+
+/**
+ * Telegram has no colour in message text — `Markdown`, `MarkdownV2`, and
+ * `HTML` cover weight, underline, strike, spoiler, code, links, and quotes, and
+ * nothing else. Emoji are the only marks that render in colour, so a coloured
+ * dot per level is the closest thing to a red/green indicator, and the `#tag`
+ * stays for search. Colour-by-emoji is an approximation, not a substitute for
+ * real status: a screen reader reads "red circle", not "failed".
+ */
+const LEVEL_DOT: Record<NoticeLevel, string> = {
+  ok: '🟢',
+  fail: '🔴',
+  blocked: '🟠',
+  skip: '⚪',
+  info: '🔵',
+}
+
+/**
+ * Escape text that came from outside this file.
+ *
+ * Only `\` `_` `*` `` ` `` `[` `]` are special in Telegram's legacy Markdown,
+ * but an issue title like "fix *auth* in `_middleware`" is enough to make
+ * Telegram reject the whole message with a 400. Escaping untrusted text is what
+ * lets the deliberate formatting below be safe: only the markup this module
+ * emits is ever interpreted.
+ */
+export function escapeMd(text: string): string {
+  return text.replace(/([\\_*`[\]])/g, '\\$1')
+}
+
+/** Bold, with the content escaped. */
+export function mdBold(text: string): string {
+  return `*${escapeMd(text)}*`
+}
+
+/** Inline code, with the content escaped. */
+export function mdCode(text: string): string {
+  return `\`${text.replace(/`/g, '\\`')}\``
+}
+
+/** A `#tag`. Telegram requires `#` then word characters only. */
+export function mdTag(text: string): string {
+  return `#${text.replace(/[^\w]/g, '')}`
+}
+
+/**
+ * Build a notice body from structured parts.
+ *
+ * The shape is deliberate: a bold verdict, optional bullet detail, then tags.
+ * Tags are the point of a busy channel — `#fail` and `#blocked` are searchable,
+ * and a human scanning 20 repos can filter instead of reading every line.
+ */
+export function noticeBody(parts: {
+  level: NoticeLevel
+  headline: string
+  items?: string[]
+  tags?: string[]
+  /** Set false to omit the coloured dot (plain-text transports). */
+  dot?: boolean
+}): string {
+  const dot = parts.dot === false ? '' : `${LEVEL_DOT[parts.level]} `
+  const lines = [`${dot}${mdBold(parts.level)} ${escapeMd(parts.headline)}`]
+  for (const item of parts.items ?? []) {
+    if (item.trim()) lines.push(`• ${escapeMd(item.trim())}`)
+  }
+  const tags = [LEVEL_TAG[parts.level], ...(parts.tags ?? []).map(mdTag)]
+  lines.push(tags.join(' '))
+  return lines.join('\n')
 }
 
 export type NotifyResult = {
   sent: boolean
-  /** Why nothing was sent, when `sent` is false. */
+  /** Why nothing was sent, or a caveat when it was sent degraded. */
   reason?: string
   machine: string
   repo: string
@@ -169,12 +257,14 @@ export async function notify(
     }
   }
 
-  const payload: Record<string, unknown> = {
+  const useMarkdown = n.markdown !== false
+  const base: Record<string, unknown> = {
     chat_id: config.chatId,
     text,
     disable_web_page_preview: true,
   }
-  if (config.topicId) payload.message_thread_id = Number(config.topicId)
+  if (config.topicId) base.message_thread_id = Number(config.topicId)
+  if (useMarkdown) base.parse_mode = 'Markdown'
 
   const fail = (reason: string): NotifyResult => ({
     sent: false,
@@ -185,17 +275,35 @@ export async function notify(
     repo,
   })
 
+  const post = async (body: Record<string, unknown>) =>
+    fetchImpl(`https://api.telegram.org/bot${config.token}/sendMessage`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+
   try {
-    const res = await fetchImpl(
-      `https://api.telegram.org/bot${config.token}/sendMessage`,
-      {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(payload),
-      },
-    )
-    if (!res.ok) return fail(`telegram HTTP ${res.status}`)
-    return { sent: true, machine, repo }
+    const res = await post(base)
+    if (res.ok) return { sent: true, machine, repo }
+
+    // A 400 here is almost always "can't parse entities": an unbalanced `*` or
+    // `_` in a title or path. Retry once as plain text so the notice still
+    // lands. Only 400 is retried — a 403/401 will fail identically, and a 5xx
+    // may have been delivered, so re-sending either risks a duplicate.
+    if (useMarkdown && res.status === 400) {
+      const { parse_mode: _dropped, ...plain } = base
+      const retry = await post(plain)
+      if (retry.ok) {
+        return {
+          sent: true,
+          machine,
+          repo,
+          reason: 'markdown rejected; sent as plain text',
+        }
+      }
+      return fail(`telegram HTTP ${retry.status}`)
+    }
+    return fail(`telegram HTTP ${res.status}`)
   } catch (err) {
     return fail(err instanceof Error ? err.message : String(err))
   }

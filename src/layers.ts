@@ -1,14 +1,8 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
-import {
-  CONFIG_NAMES,
-  type DeskConfig,
-  findConfigPath,
-  type NotifyOverride,
-  type Schedule,
-} from './config'
-import { pluginConfigDir } from './paths'
+import type { DeskConfig, NotifyOverride, Schedule } from './config'
+import { CONFIG_NAMES, findConfigPath, pluginConfigDir } from './paths'
 
 /**
  * Where a resolved value came from. `explain` renders this, which is the only
@@ -274,15 +268,46 @@ export function resolveConfig(repo: string): ResolvedConfig {
   const fieldProvenance: Record<string, Layer> = {}
   let folded: DeskConfig = {} as DeskConfig
   for (const s of sources) {
-    folded = mergeConfigs(folded, s.config as DeskConfig)
+    // Lower this layer's legacy `kind` into this layer's `agent` *before* the
+    // merge. Doing it after would let a global `agent` outrank a repo's
+    // `kind`, because `kind` is only consulted where `agent` is absent — so a
+    // 0.1.x repo would silently get a different agent the moment a global
+    // config appeared. Per-layer, the repo still wins.
+    const layer = normalizeLegacyAgent(s.config)
+    folded = mergeConfigs(folded, layer as DeskConfig)
     for (const k of Object.keys(s.config)) provenance[k] = s.from
+    if (s.config.agent === undefined && s.config.kind !== undefined) {
+      provenance.agent = s.from
+    }
     // Later layers win, so recording as we go leaves the last writer standing.
     for (const [parent, sub] of SUBFIELDS) {
-      const block = s.config[parent]
+      const block = layer[parent]
       if (!block || typeof block !== 'object' || Array.isArray(block)) continue
       for (const field of sub) {
         if ((block as Record<string, unknown>)[field] !== undefined) {
           fieldProvenance[`${parent}.${field}`] = s.from
+        }
+      }
+    }
+    // A task may set `agent`/`notify` too, and `tasks` is replaced wholesale
+    // rather than deep-merged, so a task's block is the effective one. Without
+    // this, `explain` blames the global layer for a ladder the repo's task
+    // actually overrode.
+    const tasks = layer.tasks
+    if (Array.isArray(tasks)) {
+      for (const task of tasks) {
+        if (!task || typeof task !== 'object' || Array.isArray(task)) continue
+        const t = task as Record<string, unknown>
+        const tAgent = normalizeLegacyAgent(t)
+        for (const [parent, sub] of SUBFIELDS) {
+          const block = tAgent[parent]
+          if (!block || typeof block !== 'object' || Array.isArray(block))
+            continue
+          for (const field of sub) {
+            if ((block as Record<string, unknown>)[field] !== undefined) {
+              fieldProvenance[`tasks.${parent}.${field}`] = s.from
+            }
+          }
         }
       }
     }
@@ -295,6 +320,25 @@ export function resolveConfig(repo: string): ResolvedConfig {
     fieldProvenance,
     originOf: (key) => provenance[key],
   }
+}
+
+/**
+ * A layer that still uses the 0.1.x `kind` field contributes it as `agent`.
+ *
+ * Returns a new object; the caller's config is never mutated, so provenance
+ * still reflects what each layer actually wrote to disk.
+ */
+function normalizeLegacyAgent(
+  config: Record<string, unknown>,
+): Record<string, unknown> {
+  const { kind, agent, ...rest } = config
+  if (kind === undefined) return config
+  if (agent !== undefined) {
+    // Both set: `agent` wins, but `kind` must not linger in the fold and
+    // shadow a later layer's `agent`.
+    return { ...rest, agent }
+  }
+  return { ...rest, agent: kind }
 }
 
 /** Merged object blocks whose sub-fields are tracked individually. */

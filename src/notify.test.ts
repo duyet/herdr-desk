@@ -3,11 +3,16 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { hostname, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
+  escapeMd,
   formatNotice,
   loadNotifyConfig,
   MAX_BODY,
   machineName,
+  mdBold,
+  mdCode,
+  mdTag,
   type NotifyConfig,
+  noticeBody,
   notify,
   redactToken,
   repoName,
@@ -19,14 +24,20 @@ function cfg(over: Partial<NotifyConfig> = {}): NotifyConfig {
 }
 
 /** Minimal fetch double that records the request and returns 200. */
-function stubFetch(status = 200) {
+/**
+ * Fetch double. Pass a list of statuses to script a sequence, e.g. `[400, 200]`
+ * to exercise the markdown-then-plain-text retry.
+ */
+function stubFetch(status: number | number[] = 200) {
   const calls: Array<{ url: string; body: Record<string, unknown> }> = []
+  const queue = Array.isArray(status) ? [...status] : null
   const impl = (async (url: string | URL | Request, init?: RequestInit) => {
     calls.push({
       url: String(url),
       body: JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>,
     })
-    return new Response('{}', { status })
+    const code = queue ? (queue.shift() ?? 200) : (status as number)
+    return new Response('{}', { status: code })
   }) as unknown as typeof fetch
   return { calls, impl }
 }
@@ -193,6 +204,110 @@ describe('notify', () => {
       impl,
     )
     expect(calls[0]?.body.message_thread_id).toBe(42)
+  })
+})
+
+describe('markdown formatting', () => {
+  test('escapes characters telegram would treat as markup', () => {
+    // An issue title like this is the whole reason escaping exists: unbalanced
+    // `*` or `_` makes Telegram 400 the entire message.
+    expect(escapeMd('fix *auth* in `_middleware`')).toBe(
+      'fix \\*auth\\* in \\`\\_middleware\\`',
+    )
+    expect(escapeMd('a [b] c \\ d')).toBe('a \\[b\\] c \\\\ d')
+  })
+
+  test('bold and code wrap escaped content', () => {
+    expect(mdBold('3 PRs merged')).toBe('*3 PRs merged*')
+    expect(mdBold('a*b')).toBe('*a\\*b*')
+    expect(mdCode('desk/fix-auth')).toBe('`desk/fix-auth`')
+  })
+
+  test('tags are reduced to hashtag-safe characters', () => {
+    expect(mdTag('desk')).toBe('#desk')
+    expect(mdTag('run-2')).toBe('#run2')
+    expect(mdTag('a b/c')).toBe('#abc')
+  })
+
+  test('a body carries a coloured dot, a bold verdict, bullets, and tags', () => {
+    const out = noticeBody({
+      level: 'ok',
+      headline: '3 PRs merged',
+      items: ['PR #418 merged', '#412 filed'],
+      tags: ['desk'],
+    })
+    expect(out).toBe(
+      '🟢 *ok* 3 PRs merged\n• PR #418 merged\n• #412 filed\n#ok #desk',
+    )
+  })
+
+  test('every level gets a distinct dot and a distinct tag', () => {
+    const levels = ['ok', 'fail', 'blocked', 'skip', 'info'] as const
+    // An emoji is a surrogate pair, so compare whole lines, not `out[0]`.
+    const dots = levels.map((l) =>
+      noticeBody({ level: l, headline: 'x' }).split('*')[0].trim(),
+    )
+    const tags = levels.map((l) =>
+      noticeBody({ level: l, headline: 'x' }).split('\n').pop(),
+    )
+    expect(new Set(dots).size).toBe(5)
+    expect(new Set(tags).size).toBe(5)
+  })
+
+  test('the dot can be omitted for a plain-text transport', () => {
+    const out = noticeBody({ level: 'fail', headline: 'x', dot: false })
+    expect(out.startsWith('*fail*')).toBe(true)
+  })
+
+  test('a hostile headline cannot break out of the markup', () => {
+    const out = noticeBody({ level: 'fail', headline: '*ok* spoofed tag' })
+    // The injected `*` is escaped, so the only bold pair is the deliberate one.
+    expect(out.split('\n')[0]).toBe('🔴 *fail* \\*ok\\* spoofed tag')
+    expect(out.split('\n').pop()).toBe('#fail')
+  })
+
+  test('markdown is requested by default and omitted on request', async () => {
+    const { calls, impl } = stubFetch(200)
+    await notify({ message: 'x', repo: '/r/aidr' }, cfg(), impl)
+    expect(calls[0]?.body.parse_mode).toBe('Markdown')
+
+    const plain = stubFetch(200)
+    await notify(
+      { message: 'x', repo: '/r/aidr', markdown: false },
+      cfg(),
+      plain.impl,
+    )
+    expect(plain.calls[0]?.body.parse_mode).toBeUndefined()
+  })
+
+  test('a parse failure is retried once as plain text, not lost', async () => {
+    const { calls, impl } = stubFetch([400, 200])
+    const result = await notify(
+      { message: '*unbalanced', repo: '/r/aidr' },
+      cfg(),
+      impl,
+    )
+    expect(result.sent).toBe(true)
+    expect(result.reason).toContain('plain text')
+    expect(calls).toHaveLength(2)
+    expect(calls[0]?.body.parse_mode).toBe('Markdown')
+    expect(calls[1]?.body.parse_mode).toBeUndefined()
+    // The retried text is identical, so the message content never changes.
+    expect(calls[1]?.body.text).toBe(calls[0]?.body.text)
+  })
+
+  test('a 403 is not retried — it would fail identically', async () => {
+    const { calls, impl } = stubFetch(403)
+    const result = await notify({ message: 'x', repo: '/r/aidr' }, cfg(), impl)
+    expect(result.sent).toBe(false)
+    expect(calls).toHaveLength(1)
+  })
+
+  test('a failed retry reports the second status, not the first', async () => {
+    const { impl } = stubFetch([400, 401])
+    const result = await notify({ message: 'x', repo: '/r/aidr' }, cfg(), impl)
+    expect(result.sent).toBe(false)
+    expect(result.reason).toBe('telegram HTTP 401')
   })
 })
 
