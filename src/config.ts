@@ -2,6 +2,11 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { applyDefaults } from './defaults'
+import { resolveConfig } from './layers'
+import {
+  CONFIG_NAMES as CONFIG_NAMES_,
+  findConfigPath as findConfigPath_,
+} from './paths'
 import { validateDeskJson } from './schema'
 
 export const DESK_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -124,20 +129,19 @@ export type LoadedDesk = Omit<DeskConfig, 'tasks'> & {
   tasks: TaskConfig[]
 }
 
-export const CONFIG_NAMES = [
-  '.herdr-desk.json',
-  'herdr-desk.json',
-  'ops/desk.json',
-] as const
-
+export const CONFIG_NAMES = CONFIG_NAMES_
 export function findConfigPath(repo: string): string | null {
-  for (const name of CONFIG_NAMES) {
-    const path = join(repo, name)
-    if (existsSync(path)) return path
-  }
-  return null
+  return findConfigPath_(repo)
 }
 
+/**
+ * The one entry point every consumer uses: `run`, `discover`, `config show`,
+ * `config explain`, and notify.
+ *
+ * Validation stays scoped to the repo's own file on purpose. Shared layers are
+ * machine-owned, and a malformed one must not be able to break every repo on
+ * the host at once; `doctor` is where a bad shared layer gets reported.
+ */
 export function loadDeskConfig(repo: string): LoadedDesk {
   const path = findConfigPath(repo)
   if (!path) {
@@ -145,10 +149,11 @@ export function loadDeskConfig(repo: string): LoadedDesk {
       `no herdr-desk config in ${repo} (looked for ${CONFIG_NAMES.join(', ')})`,
     )
   }
-  const raw = JSON.parse(readFileSync(path, 'utf8')) as DeskConfig
-  const errors = validateDeskJson(raw, path, repo)
+  const own = JSON.parse(readFileSync(path, 'utf8')) as DeskConfig
+  const errors = validateDeskJson(own, path, repo)
   if (errors.length) throw new Error(errors.join('\n'))
-  return applyDefaults(raw, repo)
+  const { config } = resolveConfig(repo)
+  return applyDefaults(config, repo)
 }
 
 export function resolveTask(config: LoadedDesk, taskId?: string): TaskConfig {
