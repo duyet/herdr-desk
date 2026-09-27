@@ -3,7 +3,7 @@ import { hostname, userInfo } from 'node:os'
 import { basename, join } from 'node:path'
 import type { NotifyOverride } from './config'
 
-import { esc } from './format'
+import { esc, link } from './format'
 import { type Layer, resolveConfig } from './layers'
 import { pluginConfigDir } from './paths'
 
@@ -46,6 +46,11 @@ export type Notice = {
   machine?: string
   /** Short label such as a task id, e.g. `desk:github-issues`. */
   label?: string
+  /**
+   * Primary link — a PR, issue, run, or doc. Rendered as the headline's anchor
+   * so the message is one tap from the thing it describes.
+   */
+  url?: string
   /**
    * Send the body as Telegram MarkdownV2. Default true.
    *
@@ -116,32 +121,77 @@ export function repoName(repo?: string): string {
  * Every notice carries machine and repo. Without them a message from a fleet of
  * desks is unattributable, which is the whole point of a host-level channel.
  *
- * Only the body is capped, never the prefix: truncating `[repo]` to save
+ * The header is a `·`-separated breadcrumb rather than `[a] [b] [c]`. Brackets
+ * are reserved in MarkdownV2 and force an escape on every notice, and a shared
+ * channel is read by scanning, not parsing: repo is bold because it is the
+ * field a reader with five lanes open actually looks for first.
+ *
+ * Only the body is capped, never the header: truncating the repo to save
  * characters would destroy the one field that makes the message useful.
  *
- * Two forms are produced on purpose. The MarkdownV2 form escapes the prefix,
- * because `[`, `]`, `(` and `)` are reserved and an unescaped prefix makes
- * Telegram reject the whole message. But those same escapes would appear as
- * literal backslashes if the message were sent as plain text, so the plain
- * form is built separately rather than by stripping escapes from the other.
+ * Two forms are produced on purpose. The MarkdownV2 form escapes the header,
+ * because `·` and any punctuation in a repo or task id may be reserved. But
+ * those same escapes would appear as literal backslashes if the message were
+ * sent as plain text, so the plain form is built separately rather than by
+ * stripping escapes from the other.
  */
 export function formatNotice(n: Notice, machine = machineName()): string {
-  return `${prefix(n, machine, esc)} ${body(n)}`
+  return render(n, machine, esc)
 }
 
 /** Unescaped, markup-free text, for the plain-text retry. */
 export function formatNoticePlain(n: Notice, machine = machineName()): string {
-  return `${prefix(n, machine, (s) => s)} ${body(n)}`
+  return render(n, machine, (s) => s)
 }
 
-function prefix(
+/**
+ * Display text for a link: the URL minus its scheme and `www.`.
+ *
+ * `https://github.com/duyet/anyrouter/pull/3651` reads as
+ * `github.com/duyet/anyrouter/pull/3651` — still enough to recognise at a
+ * glance, and short enough not to wrap. A non-URL falls back to the raw string.
+ */
+export function linkLabel(url: string): string {
+  return url.replace(/^https?:\/\//, '').replace(/^www\./, '')
+}
+
+function render(
   n: Notice,
   machine: string,
   safe: (s: string) => string,
 ): string {
-  const parts = [`[${safe(machine)}]`, `[${safe(repoName(n.repo))}]`]
-  if (n.label) parts.push(`[${safe(n.label)}]`)
-  return parts.join(' ')
+  const bold = safe === esc
+  const out = [header(n, machine, safe, bold), body(n)]
+  if (n.url) {
+    const shown = linkLabel(n.url)
+    out.push(bold ? `→ ${link(shown, n.url)}` : `→ ${shown}`)
+  }
+  return out.filter((line) => line !== '').join('\n')
+}
+
+function header(
+  n: Notice,
+  machine: string,
+  safe: (s: string) => string,
+  bold: boolean,
+): string {
+  const parts = [
+    bold ? `*${safe(repoName(n.repo))}*` : safe(repoName(n.repo)),
+    safe(shortMachine(machine)),
+  ]
+  if (n.label) parts.push(bold ? `\`${safe(n.label)}\`` : safe(n.label))
+  return parts.join(' · ')
+}
+
+/**
+ * Drop the `(user)` suffix from `machineName()` for display.
+ *
+ * The user is the same on every host this runs on, so repeating it in every
+ * notice is noise; the hostname is the field that distinguishes a message from
+ * another machine's.
+ */
+function shortMachine(machine: string): string {
+  return machine.replace(/\s*\([^)]*\)\s*$/, '')
 }
 
 function body(n: Notice): string {
