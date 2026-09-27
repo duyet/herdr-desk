@@ -249,10 +249,19 @@ Wiring the token:
 
 ```sh
 CFG="$(herdr plugin config-dir herdr-desk)"
-printf '{\n  "token": "<paste bot token>",\n  "chatId": "5360801021"\n}\n' > "$CFG/notify.json"
+printf '{\n  "token": "<paste bot token>",\n  "chatId": "<real chat id>"\n}\n' > "$CFG/notify.json"
 chmod 600 "$CFG/notify.json"
 bun src/cli.ts notify "test" --repo "$PWD" --label desk:github-issues
 ```
+
+**The bot's own id is not a chat id.** @BotFather shows the bot's numeric id,
+and sending to it fails with `403 Forbidden: the bot can't send messages to the
+bot`. A bot cannot DM you first: message it once in Telegram, then the bot can
+read that conversation and learn the real chat id.
+
+To set this up on another machine, paste
+[`prompts/notify-setup-agent.md`](prompts/notify-setup-agent.md) to a coding
+agent there.
 
 ## Actions
 
