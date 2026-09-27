@@ -151,7 +151,7 @@ async function execute(
   const label = `${config.name} ${task.id}`
   const restart = reusableManagerPane(allAgents, listed, task)
   const child =
-    restart ?? (await spawnDeskWorktree(project.workspaceId, task, label))
+    restart ?? (await spawnDeskWorktree(project.workspaceId, task, label, repo))
   const paneId = child.paneId
   const childWorkspaceId = child.workspaceId
   const workspaceId = project.workspaceId
@@ -235,6 +235,43 @@ function reusableManagerPane(
 }
 
 /**
+ * Base ref for a new manager worktree, from `git symbolic-ref origin/HEAD`.
+ *
+ * The default branch is not always `main`. Hardcoding `origin/main` made every
+ * fire on a `master` repo fail with `fatal: invalid reference: origin/main`
+ * before the manager was ever started.
+ */
+export function baseRefFrom(
+  originHead: string | null | undefined,
+  fallback = 'origin/main',
+): string {
+  const ref = (originHead ?? '').trim()
+  return /^origin\/\S+$/.test(ref) ? ref : fallback
+}
+
+async function resolveBaseRef(repo: string): Promise<string> {
+  try {
+    const proc = Bun.spawn(
+      [
+        'git',
+        '-C',
+        repo,
+        'symbolic-ref',
+        '--short',
+        'refs/remotes/origin/HEAD',
+      ],
+      { stdout: 'pipe', stderr: 'ignore' },
+    )
+    const out = await new Response(proc.stdout).text()
+    const code = await proc.exited
+    if (code === 0) return baseRefFrom(out)
+  } catch {
+    // git missing, or the repo has no origin/HEAD. Fall through.
+  }
+  return baseRefFrom(null)
+}
+
+/**
  * Worktree child of the open project Space — never a sibling workspace.
  *
  * `worktree open` re-attaches an existing branch, so a manager worktree that
@@ -244,8 +281,10 @@ async function spawnDeskWorktree(
   parentWorkspaceId: string,
   task: TaskConfig,
   label: string,
+  repo: string,
 ): Promise<{ paneId: string; workspaceId: string }> {
   const branch = deskWorktreeBranch(task)
+  const base = await resolveBaseRef(repo)
   let created: unknown
   try {
     created = await herdrCall([
@@ -268,7 +307,7 @@ async function spawnDeskWorktree(
       '--branch',
       branch,
       '--base',
-      'origin/main',
+      base,
       '--label',
       label,
       '--no-focus',

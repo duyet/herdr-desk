@@ -1,6 +1,6 @@
 id = "herdr-desk"
 name = "Herdr Desk"
-version = "0.1.3" # x-release-please-version
+version = "0.1.4" # x-release-please-version
 description = "Scheduled repo managers: pick up .herdr-desk.json from open workspaces and fire start/wrap Grok managers"
 min_herdr_version = "0.7.0"
 platforms = ["linux", "macos"]
@@ -37,6 +37,11 @@ command = ["bin/desk", "history"]
 id = "last"
 title = "Show today's start-run change summaries"
 command = ["bin/desk", "last"]
+
+[[actions]]
+id = "notify"
+title = "Send a Telegram notice tagged with machine and repo"
+command = ["bin/desk", "notify"]
 
 [[actions]]
 id = "validate"
