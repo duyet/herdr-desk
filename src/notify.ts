@@ -2,6 +2,8 @@ import { existsSync, readFileSync } from 'node:fs'
 import { hostname, userInfo } from 'node:os'
 import { basename, join } from 'node:path'
 import type { NotifyOverride } from './config'
+
+import { esc } from './format'
 import { type Layer, resolveConfig } from './layers'
 import { pluginConfigDir } from './paths'
 
@@ -18,6 +20,23 @@ export type NotifyConfig = {
   topicId: string
 }
 
+/** Where each destination field came from, for `config explain`. */
+export type NotifyProvenance = {
+  enabled?: string
+  chatId?: string
+  topicId?: string
+}
+
+export const NOTIFY_CONFIG_FILE = 'notify.json'
+
+export type NotifyResult = {
+  sent: boolean
+  /** Why nothing was sent, or a caveat when it was sent degraded. */
+  reason?: string
+  machine: string
+  repo: string
+}
+
 export type Notice = {
   /** Human message. Machine and repo are added automatically. */
   message: string
@@ -28,111 +47,12 @@ export type Notice = {
   /** Short label such as a task id, e.g. `desk:github-issues`. */
   label?: string
   /**
-   * Send the body as Telegram Markdown. Default true.
+   * Send the body as Telegram MarkdownV2. Default true.
    *
-   * Telegram rejects unbalanced `*` or `_` with a 400, and a repo path or issue
-   * title is exactly the kind of text that produces one. So a parse failure is
-   * retried once as plain text rather than losing the notice — see `notify`.
+   * A parse failure is retried once as plain text rather than losing the notice.
    */
   markdown?: boolean
 }
-
-/** Outcome classes, used to pick a tag and a headline. */
-export type NoticeLevel = 'ok' | 'fail' | 'blocked' | 'skip' | 'info'
-
-const LEVEL_TAG: Record<NoticeLevel, string> = {
-  ok: '#ok',
-  fail: '#fail',
-  blocked: '#blocked',
-  skip: '#skip',
-  info: '#info',
-}
-
-/**
- * Telegram has no colour in message text — `Markdown`, `MarkdownV2`, and
- * `HTML` cover weight, underline, strike, spoiler, code, links, and quotes, and
- * nothing else. Emoji are the only marks that render in colour, so a coloured
- * dot per level is the closest thing to a red/green indicator, and the `#tag`
- * stays for search. Colour-by-emoji is an approximation, not a substitute for
- * real status: a screen reader reads "red circle", not "failed".
- */
-const LEVEL_DOT: Record<NoticeLevel, string> = {
-  ok: '🟢',
-  fail: '🔴',
-  blocked: '🟠',
-  skip: '⚪',
-  info: '🔵',
-}
-
-/**
- * Escape text that came from outside this file.
- *
- * Only `\` `_` `*` `` ` `` `[` `]` are special in Telegram's legacy Markdown,
- * but an issue title like "fix *auth* in `_middleware`" is enough to make
- * Telegram reject the whole message with a 400. Escaping untrusted text is what
- * lets the deliberate formatting below be safe: only the markup this module
- * emits is ever interpreted.
- */
-export function escapeMd(text: string): string {
-  return text.replace(/([\\_*`[\]])/g, '\\$1')
-}
-
-/** Bold, with the content escaped. */
-export function mdBold(text: string): string {
-  return `*${escapeMd(text)}*`
-}
-
-/** Inline code, with the content escaped. */
-export function mdCode(text: string): string {
-  return `\`${text.replace(/`/g, '\\`')}\``
-}
-
-/** A `#tag`. Telegram requires `#` then word characters only. */
-export function mdTag(text: string): string {
-  return `#${text.replace(/[^\w]/g, '')}`
-}
-
-/**
- * Build a notice body from structured parts.
- *
- * The shape is deliberate: a bold verdict, optional bullet detail, then tags.
- * Tags are the point of a busy channel — `#fail` and `#blocked` are searchable,
- * and a human scanning 20 repos can filter instead of reading every line.
- */
-export function noticeBody(parts: {
-  level: NoticeLevel
-  headline: string
-  items?: string[]
-  tags?: string[]
-  /** Set false to omit the coloured dot (plain-text transports). */
-  dot?: boolean
-}): string {
-  const dot = parts.dot === false ? '' : `${LEVEL_DOT[parts.level]} `
-  const lines = [`${dot}${mdBold(parts.level)} ${escapeMd(parts.headline)}`]
-  for (const item of parts.items ?? []) {
-    if (item.trim()) lines.push(`• ${escapeMd(item.trim())}`)
-  }
-  const tags = [LEVEL_TAG[parts.level], ...(parts.tags ?? []).map(mdTag)]
-  lines.push(tags.join(' '))
-  return lines.join('\n')
-}
-
-export type NotifyResult = {
-  sent: boolean
-  /** Why nothing was sent, or a caveat when it was sent degraded. */
-  reason?: string
-  machine: string
-  repo: string
-}
-
-/** Where each destination field came from, for `config explain`. */
-export type NotifyProvenance = {
-  enabled?: string
-  chatId?: string
-  topicId?: string
-}
-
-export const NOTIFY_CONFIG_FILE = 'notify.json'
 
 /**
  * Cap on the human message.
@@ -198,16 +118,37 @@ export function repoName(repo?: string): string {
  *
  * Only the body is capped, never the prefix: truncating `[repo]` to save
  * characters would destroy the one field that makes the message useful.
+ *
+ * Two forms are produced on purpose. The MarkdownV2 form escapes the prefix,
+ * because `[`, `]`, `(` and `)` are reserved and an unescaped prefix makes
+ * Telegram reject the whole message. But those same escapes would appear as
+ * literal backslashes if the message were sent as plain text, so the plain
+ * form is built separately rather than by stripping escapes from the other.
  */
 export function formatNotice(n: Notice, machine = machineName()): string {
-  const parts = [`[${machine}]`, `[${repoName(n.repo)}]`]
-  if (n.label) parts.push(`[${n.label}]`)
+  return `${prefix(n, machine, esc)} ${body(n)}`
+}
+
+/** Unescaped, markup-free text, for the plain-text retry. */
+export function formatNoticePlain(n: Notice, machine = machineName()): string {
+  return `${prefix(n, machine, (s) => s)} ${body(n)}`
+}
+
+function prefix(
+  n: Notice,
+  machine: string,
+  safe: (s: string) => string,
+): string {
+  const parts = [`[${safe(machine)}]`, `[${safe(repoName(n.repo))}]`]
+  if (n.label) parts.push(`[${safe(n.label)}]`)
+  return parts.join(' ')
+}
+
+function body(n: Notice): string {
   const raw = n.message.trim() || '(no message)'
-  const body =
-    raw.length > MAX_BODY
-      ? `${raw.slice(0, MAX_BODY)}… (+${raw.length - MAX_BODY} chars)`
-      : raw
-  return `${parts.join(' ')} ${body}`
+  return raw.length > MAX_BODY
+    ? `${raw.slice(0, MAX_BODY)}… (+${raw.length - MAX_BODY} chars)`
+    : raw
 }
 
 /**
@@ -246,6 +187,7 @@ export async function notify(
   const machine = n.machine ?? machineName()
   const repo = repoName(n.repo)
   const text = formatNotice(n, machine)
+  const plainText = formatNoticePlain(n, machine)
 
   if (!config.enabled) return { sent: false, reason: 'disabled', machine, repo }
   if (!config.token || !config.chatId) {
@@ -264,7 +206,7 @@ export async function notify(
     disable_web_page_preview: true,
   }
   if (config.topicId) base.message_thread_id = Number(config.topicId)
-  if (useMarkdown) base.parse_mode = 'Markdown'
+  if (useMarkdown) base.parse_mode = 'MarkdownV2'
 
   const fail = (reason: string): NotifyResult => ({
     sent: false,
@@ -291,7 +233,10 @@ export async function notify(
     // lands. Only 400 is retried — a 403/401 will fail identically, and a 5xx
     // may have been delivered, so re-sending either risks a duplicate.
     if (useMarkdown && res.status === 400) {
+      // Rebuild rather than strip: the markdown text is escaped for MarkdownV2
+      // and those escapes would show as literal backslashes in plain text.
       const { parse_mode: _dropped, ...plain } = base
+      plain.text = plainText
       const retry = await post(plain)
       if (retry.ok) {
         return {
@@ -369,3 +314,6 @@ export function resolveNotify(opts: {
   }
   return { config: out, provenance: p }
 }
+
+/** Re-exported so callers build bodies without importing two modules. */
+export { noticeBody } from './format'

@@ -222,16 +222,28 @@ channel otherwise cannot tell which desk or which box reported:
 #ok #desk
 ```
 
-Bodies are Telegram Markdown. A coloured dot marks the level (`🟢 ok`, `🔴 fail`,
-`🟠 blocked`, `⚪ skip`) and a `#tag` makes it searchable in a busy channel.
-Telegram has **no colour in message text** — `Markdown`, `MarkdownV2`, and
-`HTML` cover weight, underline, strike, spoiler, code, links, and quotes, and
-nothing more — so emoji are the only marks that render in colour.
+Bodies are Telegram **MarkdownV2**: bold, italic, underline, strikethrough,
+spoiler, inline code, fenced code with language highlighting, links, blockquote,
+and expandable blockquote. Telegram has **no colour in message text** — emoji are
+the only marks that render in colour, so a level dot marks the outcome and a
+`#tag` makes it searchable in a busy channel.
+
+```
+[homerep (duyet)] [anyrouter] [desk:github-issues] 🟢 *ok* 3 PRs merged
+• PR #418 merged
+• [run folder](https://example.com/run)
+#ok #desk
+```
+
+MarkdownV2 rather than legacy `Markdown`, because legacy returns **200** for
+`__underline__`, `~strike~`, and `||spoiler||` and then renders them as literal
+characters — a status check cannot tell you the formatting failed.
 
 Everything interpolated into a body is escaped, because an issue title like
 `fix *auth* in _middleware_` would otherwise make Telegram reject the whole
 message with a 400. If that happens anyway, the notice is retried once as plain
-text rather than lost.
+text rather than lost; the plain form is rebuilt separately, so its escapes never
+leak as literal backslashes.
 
 Sending is best-effort and never throws, so a failed notice cannot abort a desk
 run, and a failed notice is never recorded as a failed run. Unconfigured or
