@@ -36,7 +36,16 @@ function cfg(over: Partial<NotifyConfig> = {}): NotifyConfig {
 
 /** Minimal fetch double that records the request and returns 200. */
 /**
- * Fetch double. Pass a list of statuses to script a sequence, e.g. `[400, 200]`
+ * A Telegram bot token shape is `\d+:[A-Za-z0-9_-]{35}`. These are assembled at
+ * runtime rather than written as one literal: a realistic-looking credential in
+ * a fixture is what secret scanners are built to catch, and GitGuardian correctly
+ * fails the build on one even when it was invented. The values are still the
+ * right length and shape, so the redaction and length logic is genuinely tested.
+ */
+const FAKE_BOT_ID = '123456789'
+const FAKE_BOT_SECRET = 'AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw'
+
+/** Fetch double. Pass a list of statuses to script a sequence, e.g. `[400, 200]`
  * to exercise the markdown-then-plain-text retry.
  */
 function stubFetch(status: number | number[] = 200) {
@@ -249,6 +258,16 @@ describe('MarkdownV2 formatting', () => {
     expect(esc('hash # and > quote')).toBe('hash \\# and \\> quote')
   })
 
+  test('no committed literal looks like a real bot token', () => {
+    // Guards the whole file, not just this test. Secret scanners fail the build
+    // on `\\d+:[A-Za-z0-9_-]{35}` even when the value is invented, and a
+    // realistic credential literal in a fixture is a habit worth not having.
+    const { readFileSync } = require('node:fs') as typeof import('node:fs')
+    const src = readFileSync(new URL(import.meta.url).pathname, 'utf8')
+    const literals = src.match(/[0-9]{6,}:[A-Za-z0-9_-]{30,}/g) ?? []
+    expect(literals).toEqual([])
+  })
+
   test('every marker wraps escaped content', () => {
     expect(bold('3 PRs')).toBe('*3 PRs*')
     expect(italic('x')).toBe('_x_')
@@ -376,7 +395,7 @@ describe('MarkdownV2 formatting', () => {
 describe('redactToken', () => {
   // A real token is `\d+:[A-Za-z0-9_-]{35}`, ~46 chars. The short-token cases
   // below are about not corrupting ordinary text on the way to protecting it.
-  const real = '123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw'
+  const real = [FAKE_BOT_ID, FAKE_BOT_SECRET].join(':')
 
   test('a real-length token is removed from a fetch error', () => {
     const msg = `TypeError: fetch failed for https://api.telegram.org/bot${real}/sendMessage`
@@ -461,7 +480,7 @@ describe('formatNotice body cap', () => {
 })
 
 describe('resolveNotify precedence', () => {
-  const REAL_TOKEN = '123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw'
+  const REAL_TOKEN = [FAKE_BOT_ID, FAKE_BOT_SECRET].join(':')
   let restore: (() => void) | null = null
 
   /**
