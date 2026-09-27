@@ -35,6 +35,31 @@ export async function herdrCall(args: string[]): Promise<unknown> {
   return herdrJson(ready.bin, ready.socket, args)
 }
 
+/** Any argument longer than this is summarised instead of echoed. */
+const MAX_ARG_ECHO = 120
+/** Cap on captured child output kept in an error. */
+const MAX_OUTPUT_ECHO = 400
+
+/**
+ * Render argv for an error message without inlining bulk text.
+ *
+ * `agent prompt <name> <prompt>` passes a whole multi-kilobyte manager prompt as
+ * one argument, so joining argv verbatim wrote the entire prompt into the run
+ * ledger. Long arguments collapse to a length marker: enough to diagnose, not
+ * enough to bloat `runs.jsonl` or to carry prompt text (and whatever the prompt
+ * contains) into `history` and any notification built from it.
+ */
+export function summarizeArgv(args: string[]): string {
+  return args
+    .map((a) => (a.length > MAX_ARG_ECHO ? `<${a.length} chars elided>` : a))
+    .join(' ')
+}
+
+function clip(text: string, max = MAX_OUTPUT_ECHO): string {
+  const t = text.trim()
+  return t.length > max ? `${t.slice(0, max)}… (${t.length} chars)` : t
+}
+
 export async function herdrJson(
   bin: string,
   socket: string,
@@ -52,7 +77,7 @@ export async function herdrJson(
   ])
   if (exit !== 0) {
     throw new Error(
-      `herdr ${args.join(' ')} failed (${exit}): ${stderr || stdout}`,
+      `herdr ${summarizeArgv(args)} failed (${exit}): ${clip(stderr || stdout)}`,
     )
   }
   const text = stdout.trim()
@@ -60,7 +85,7 @@ export async function herdrJson(
   try {
     return JSON.parse(text)
   } catch {
-    throw new Error(`herdr ${args.join(' ')}: not JSON: ${text.slice(0, 400)}`)
+    throw new Error(`herdr ${summarizeArgv(args)}: not JSON: ${clip(text)}`)
   }
 }
 

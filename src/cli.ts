@@ -2,6 +2,7 @@
 
 import { resolve } from 'node:path'
 import { listBundledTasks, loadDeskConfig } from './config'
+import { explainConfig, explainTasks, showConfig } from './configShow'
 import {
   daemonPid,
   runDaemon,
@@ -13,7 +14,7 @@ import { discoverDesks, formatScan } from './discover'
 import { formatHistory, loadRuns } from './history'
 import { stripAllDeskCrons } from './install'
 import { readLastChanges } from './last'
-import { notify } from './notify'
+import { type NotifyProvenance, notify, resolveNotify } from './notify'
 import { runTask } from './run'
 import { scheduleLabel } from './schedule'
 import { SCHEMA_PATH, SCHEMA_URL } from './schema'
@@ -24,6 +25,8 @@ function usage(): never {
 
   herdr-desk scan
   herdr-desk validate
+  herdr-desk config show   [--repo DIR]
+  herdr-desk config explain [--repo DIR] [--tasks]
   herdr-desk status
   herdr-desk history [N]
   herdr-desk last
@@ -44,6 +47,17 @@ function arg(flag: string, argv: string[]): string | undefined {
   return argv[i + 1]
 }
 
+/** Show which layer chose the chat, so "it went to the wrong place" is answerable. */
+function describeDestination(
+  chatId: string,
+  provenance: NotifyProvenance,
+): string {
+  const from = provenance.chatId
+    ? ` (from ${provenance.chatId})`
+    : ' (host default)'
+  return `${chatId}${from}`
+}
+
 async function main() {
   const argv = process.argv.slice(2)
   const cmd = argv[0]
@@ -57,6 +71,21 @@ async function main() {
   if (cmd === 'scan') {
     console.log(formatScan(await discoverDesks()))
     return
+  }
+
+  if (cmd === 'config') {
+    const sub = argv[1]
+    const repo = resolve(arg('--repo', argv) ?? process.cwd())
+    if (sub === 'explain') {
+      console.log(explainConfig(repo))
+      if (argv.includes('--tasks')) console.log(`\n${explainTasks(repo)}`)
+      return
+    }
+    if (sub === 'show' || sub === undefined) {
+      console.log(showConfig(repo))
+      return
+    }
+    usage()
   }
 
   if (cmd === 'validate') {
@@ -129,9 +158,18 @@ async function main() {
           a !== arg('--label', argv),
       )
       .join(' ')
-    const r = await notify({ message, repo, label })
-    if (r.sent) console.log(`sent [${r.machine}] [${r.repo}] ${message}`)
-    else console.log(`not sent (${r.reason}) [${r.machine}] [${r.repo}]`)
+    // Same layered resolution a real run uses, so testing delivery also proves
+    // the destination is the one a run would pick.
+    const { config: notifyConfig, provenance } = resolveNotify({ repo })
+    const r = await notify({ message, repo, label }, notifyConfig)
+    if (r.sent) {
+      console.log(
+        `sent [${r.machine}] [${r.repo}] to ${describeDestination(notifyConfig.chatId, provenance)}`,
+      )
+    } else {
+      // `reason` is already token-redacted by notify().
+      console.log(`not sent (${r.reason}) [${r.machine}] [${r.repo}]`)
+    }
     return
   }
 

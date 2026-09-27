@@ -30,7 +30,9 @@ export function taskVars(opts: {
     taskLabel: opts.task.label ?? opts.task.id,
     agentName: opts.task.agentName,
     maxChildren: String(opts.task.maxChildren ?? 5),
-    kind: opts.task.kind ?? 'grok',
+    // `kind` stays in the template vars: existing playbooks interpolate {{kind}},
+    // and it now carries the first rung of the ladder.
+    kind: opts.task.agent.ladder[0],
     identityPath: promptPath('identity'),
     taskPromptPath: bundled,
     taskPromptBody: bundled ? '' : playbook.text,

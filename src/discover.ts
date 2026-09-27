@@ -1,15 +1,17 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { findConfigPath, type LoadedDesk, loadDeskConfig } from './config'
 import { herdrCall, listedWorkspaces } from './herdr'
-import { pluginConfigDir, pluginStateDir } from './paths'
+import { findGroupLayers, globalRepoRoots } from './layers'
+import { pluginStateDir } from './paths'
 
 export type Discovered = {
   repo: string
   configPath: string
   config: LoadedDesk
   source: 'workspace' | 'remembered' | 'plugin-config'
+  /** Ancestor `group: true` configs that also apply, nearest first. */
+  groups?: string[]
 }
 
 function knownPath(): string {
@@ -35,20 +37,6 @@ export function rememberRepos(repos: string[]): void {
   writeFileSync(knownPath(), `${JSON.stringify({ repos: merged }, null, 2)}\n`)
 }
 
-function extraReposFromPluginConfig(): string[] {
-  const dir = pluginConfigDir()
-  const json = join(dir, 'config.json')
-  if (!existsSync(json)) return []
-  try {
-    const raw = JSON.parse(readFileSync(json, 'utf8')) as { repos?: string[] }
-    return (raw.repos ?? []).map((p) =>
-      resolve(p.replace(/^~(?=\/|$)/, homedir())),
-    )
-  } catch {
-    return []
-  }
-}
-
 export async function workspaceRepoRoots(): Promise<string[]> {
   try {
     const listed = listedWorkspaces(await herdrCall(['workspace', 'list']))
@@ -71,7 +59,13 @@ function tryLoad(
   if (!configPath) return null
   try {
     const config = loadDeskConfig(repo)
-    return { repo: config.repo ?? repo, configPath, config, source }
+    return {
+      repo: config.repo ?? repo,
+      configPath,
+      config,
+      source,
+      groups: findGroupLayers(repo).map((g) => g.path),
+    }
   } catch {
     return null
   }
@@ -80,7 +74,7 @@ function tryLoad(
 /** Open workspaces + remembered + plugin config extras. */
 export async function discoverDesks(): Promise<Discovered[]> {
   const live = await workspaceRepoRoots()
-  const extras = extraReposFromPluginConfig()
+  const extras = globalRepoRoots()
   const remembered = loadKnownRepos()
 
   const found: Discovered[] = []
@@ -108,9 +102,14 @@ export function formatScan(desks: Discovered[]): string {
     return 'no desks (no open workspace has .herdr-desk.json)'
   const lines: string[] = []
   for (const d of desks) {
-    lines.push(`${d.config.name}  ${d.repo}  (${d.source})`)
+    const group = d.groups?.length
+      ? `  <- ${d.groups.length} group config(s)`
+      : ''
+    lines.push(`${d.config.name}  ${d.repo}  (${d.source})${group}`)
     for (const t of d.config.tasks) {
-      lines.push(`  ${t.id}  ${t.agentName}  ${t.crons.join(' | ') || '-'}`)
+      lines.push(
+        `  ${t.id}  ${t.agentName}  ${t.crons.join(' | ') || '-'}  ${t.agent.ladder[0]}`,
+      )
     }
   }
   return lines.join('\n')

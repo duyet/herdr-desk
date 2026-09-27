@@ -16,6 +16,105 @@ const AGENT = /^[a-z][a-z0-9_-]{0,31}$/
 /** Job handle: desk: / local: prefixes, no path separators. */
 const TASK_ID = /^[a-z0-9][a-z0-9_.:-]*$/i
 
+/** A rung: a bare Herdr kind, or a command with arguments. */
+const RUNG = /^\S[\s\S]*$/
+
+/**
+ * Validate an `agent` field.
+ *
+ * Returns errors only. A deprecated `kind` on the same object is a warning, not
+ * an error, so a 0.1.x config still passes `validate` unchanged.
+ */
+function validateAgent(raw: unknown, path: string, errors: string[]): void {
+  if (typeof raw === 'string') {
+    if (!RUNG.test(raw.trim())) {
+      errors.push(`${path}: must be an agent kind or command`)
+    }
+    return
+  }
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    errors.push(`${path}: agent kind/command, or an object`)
+    return
+  }
+  const o = raw as Record<string, unknown>
+  const allowed = new Set(['ladder', 'default', 'permission', 'timeoutMs'])
+  for (const k of Object.keys(o)) {
+    if (!allowed.has(k)) errors.push(`${path}: unknown field '${k}'`)
+  }
+  const ladder = o.ladder ?? o.default
+  if (ladder !== undefined) {
+    const list =
+      typeof ladder === 'string'
+        ? [ladder]
+        : Array.isArray(ladder)
+          ? ladder
+          : null
+    if (!list) {
+      errors.push(`${path}.ladder: string or array of strings`)
+    } else if (list.length === 0) {
+      errors.push(`${path}.ladder: must not be empty`)
+    } else {
+      list.forEach((rung, i) => {
+        if (typeof rung !== 'string' || !RUNG.test(rung.trim())) {
+          errors.push(`${path}.ladder[${i}]: must be a non-empty string`)
+        }
+      })
+    }
+  }
+  if (
+    o.permission !== undefined &&
+    (typeof o.permission !== 'string' || !o.permission.trim())
+  ) {
+    errors.push(`${path}.permission: non-empty string`)
+  }
+  if (o.timeoutMs !== undefined) {
+    const n = o.timeoutMs
+    if (
+      typeof n !== 'number' ||
+      !Number.isInteger(n) ||
+      n < 1_000 ||
+      n > 300_000
+    ) {
+      errors.push(`${path}.timeoutMs: integer 1000–300000`)
+    }
+  }
+}
+
+/**
+ * Validate a `notify` block.
+ *
+ * `token` is rejected outright. This block lands in a committed repo file, and
+ * Telegram tokens are credentials — a silent strip would leave the user with a
+ * secret already in git history and no idea. Failing loudly is the only safe
+ * response; the host-level `notify.json` is where the token belongs.
+ */
+function validateNotify(raw: unknown, path: string, errors: string[]): void {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    errors.push(`${path}: must be an object`)
+    return
+  }
+  const o = raw as Record<string, unknown>
+  const allowed = new Set(['enabled', 'chatId', 'topicId'])
+  for (const k of Object.keys(o)) {
+    if (k === 'token') {
+      errors.push(
+        `${path}.token: not allowed — a repo config is committed. Put the bot token in notify.json (host) or HERDR_DESK_TELEGRAM_TOKEN`,
+      )
+      continue
+    }
+    if (!allowed.has(k)) errors.push(`${path}: unknown field '${k}'`)
+  }
+  if (o.enabled !== undefined && typeof o.enabled !== 'boolean') {
+    errors.push(`${path}.enabled: must be true or false`)
+  }
+  for (const key of ['chatId', 'topicId'] as const) {
+    const v = o[key]
+    if (v !== undefined && (typeof v !== 'string' || !v.trim())) {
+      errors.push(`${path}.${key}: must be a non-empty string`)
+    }
+  }
+}
+
 export function insideRepo(repo: string, rel: string): boolean {
   const root = resolve(repo)
   const abs = resolve(root, rel)
@@ -42,6 +141,8 @@ export function validateDeskJson(
     'schedule',
     'maxChildren',
     'agentName',
+    'agent',
+    'notify',
     'kind',
   ])
   for (const k of Object.keys(o)) {
@@ -73,6 +174,15 @@ export function validateDeskJson(
   }
   if (o.schedule !== undefined)
     errors.push(...validateSchedule(o.schedule, `${path}.schedule`))
+  if (o.agent !== undefined) validateAgent(o.agent, `${path}.agent`, errors)
+  if (o.notify !== undefined) validateNotify(o.notify, `${path}.notify`, errors)
+  if (o.kind !== undefined) {
+    if (typeof o.kind !== 'string' || !RUNG.test(o.kind.trim())) {
+      errors.push(`${path}.kind: must be a non-empty string`)
+    } else if (o.agent !== undefined) {
+      errors.push(`${path}.kind: ignored because 'agent' is also set`)
+    }
+  }
   if (o.tasks !== undefined) {
     if (!Array.isArray(o.tasks) || o.tasks.length < 1) {
       errors.push(`${path}.tasks: if set, must be a non-empty array`)
@@ -112,6 +222,8 @@ function validateTask(raw: unknown, path: string, repo?: string): string[] {
     'label',
     'playbook',
     'agentName',
+    'agent',
+    'notify',
     'kind',
     'maxChildren',
     'stateDir',
@@ -155,5 +267,14 @@ function validateTask(raw: unknown, path: string, repo?: string): string[] {
   }
   if (o.schedule !== undefined)
     errors.push(...validateSchedule(o.schedule, `${path}.schedule`))
+  if (o.agent !== undefined) validateAgent(o.agent, `${path}.agent`, errors)
+  if (o.notify !== undefined) validateNotify(o.notify, `${path}.notify`, errors)
+  if (o.kind !== undefined) {
+    if (typeof o.kind !== 'string' || !RUNG.test(o.kind.trim())) {
+      errors.push(`${path}.kind: must be a non-empty string`)
+    } else if (o.agent !== undefined) {
+      errors.push(`${path}.kind: ignored because 'agent' is also set`)
+    }
+  }
   return errors
 }

@@ -8,7 +8,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { join } from 'node:path'
-import { cronDueToday } from './cron'
+import { cronSlotsToday } from './cron'
 import { dayKey } from './day'
 import { discoverDesks } from './discover'
 import { pluginStateDir } from './paths'
@@ -47,10 +47,13 @@ export function daemonPid(): number | null {
 }
 
 function fireDay(key: string): string | null {
-  const i = key.lastIndexOf('::')
-  if (i < 0) return null
-  const day = key.slice(i + 2)
-  return /^\d{4}-\d{2}-\d{2}$/.test(day) ? day : null
+  // Keys end in `::<day>` (legacy) or `::<day>::<HH:MM>` (slot-keyed), so scan
+  // the segments for the date rather than assuming it is last — otherwise every
+  // slot-keyed entry looks dayless and pruneFires drops it on the next write.
+  for (const seg of key.split('::')) {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(seg)) return seg
+  }
+  return null
 }
 
 export function pruneFires(
@@ -69,13 +72,53 @@ export function pruneFires(
   return out
 }
 
+/**
+ * Rewrite legacy day-keyed fire entries into slot keys.
+ *
+ * The old ledger recorded one entry per (repo, task, cron, day) and the daemon
+ * never fired that job again that day. A legacy entry therefore expands into
+ * **every slot of that day**, not just the ones before the recorded stamp:
+ * anything less re-introduces the bug as a stampede — a half-hourly job
+ * recorded at 01:20 would otherwise fire ~30 times on the first tick after the
+ * upgrade. The cost is that the day of the upgrade runs no new slots; the job
+ * is back to normal from the next day, which is the safe trade for unattended
+ * work.
+ */
+export function migrateFires(
+  map: Record<string, string>,
+  now = new Date(),
+): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const [k, v] of Object.entries(map)) {
+    const parts = k.split('::')
+    if (parts.length !== 4 || !/^\d{4}-\d{2}-\d{2}$/.test(parts[3])) {
+      out[k] = v
+      continue
+    }
+    const [repo, taskId, cron, day] = parts
+    // End of that local day, so the whole day is claimed.
+    const endOfDay = new Date(
+      Number(day.slice(0, 4)),
+      Number(day.slice(5, 7)) - 1,
+      Number(day.slice(8, 10)),
+      23,
+      59,
+    )
+    for (const slot of Number.isNaN(endOfDay.getTime())
+      ? cronSlotsToday(cron, now)
+      : cronSlotsToday(cron, endOfDay)) {
+      out[`${repo}::${taskId}::${cron}::${day}::${slot}`] = v
+    }
+  }
+  return out
+}
+
 export function loadFires(): Record<string, string> {
   if (!existsSync(firesPath())) return {}
   try {
-    return JSON.parse(readFileSync(firesPath(), 'utf8')) as Record<
-      string,
-      string
-    >
+    return migrateFires(
+      JSON.parse(readFileSync(firesPath(), 'utf8')) as Record<string, string>,
+    )
   } catch {
     const bak = firesBakPath()
     try {
@@ -108,8 +151,9 @@ function fireKey(
   taskId: string,
   cron: string,
   day: string,
+  slot: string,
 ): string {
-  return `${repo}::${taskId}::${cron}::${day}`
+  return `${repo}::${taskId}::${cron}::${day}::${slot}`
 }
 
 export async function tickOnce(at = new Date()): Promise<number> {
@@ -120,19 +164,25 @@ export async function tickOnce(at = new Date()): Promise<number> {
   for (const d of desks) {
     for (const task of d.config.tasks) {
       for (const expr of task.crons) {
-        if (!expr || !cronDueToday(expr, at)) continue
-        const key = fireKey(d.repo, task.id, expr, day)
-        if (fires[key]) continue
-        log(`fire ${d.config.name}/${task.id} ${expr}`)
-        try {
-          const result = await runTask({ repo: d.repo, taskId: task.id })
-          fires[key] = new Date().toISOString()
-          log(`ok ${JSON.stringify(result)}`)
-          n++
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err)
-          fires[key] = `fail ${new Date().toISOString()}`
-          log(`fail ${d.config.name}/${task.id} ${expr}: ${msg}`)
+        if (!expr) continue
+        // Key on the SLOT, not the day. A day-keyed ledger let the first fire
+        // of the day consume the whole schedule, so `*/30 * * * *` fired once
+        // a day instead of 48 times — and `status` showed nothing wrong,
+        // because the job was never recorded as failing.
+        for (const slot of cronSlotsToday(expr, at)) {
+          const key = fireKey(d.repo, task.id, expr, day, slot)
+          if (fires[key]) continue
+          log(`fire ${d.config.name}/${task.id} ${expr} slot ${slot}`)
+          try {
+            const result = await runTask({ repo: d.repo, taskId: task.id })
+            fires[key] = new Date().toISOString()
+            log(`ok ${JSON.stringify(result)}`)
+            n++
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err)
+            fires[key] = `fail ${new Date().toISOString()}`
+            log(`fail ${d.config.name}/${task.id} ${expr} slot ${slot}: ${msg}`)
+          }
         }
       }
     }

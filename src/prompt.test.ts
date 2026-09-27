@@ -8,6 +8,7 @@ const task: TaskConfig = {
   label: 'GitHub issues and PRs',
   playbook: 'github-issues',
   agentName: 'chm-desk',
+  agent: { ladder: ['grok'], permission: 'default' },
   maxChildren: 3,
   crons: ['0 7 * * *'],
 }
