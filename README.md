@@ -216,8 +216,22 @@ Every notice is prefixed with the machine and repo, because a host-level
 channel otherwise cannot tell which desk or which box reported:
 
 ```
-[duet-ubuntu (duyet)] [aidr] [desk:github-issues] desk run finished
+[homerep (duyet)] [anyrouter] [desk:github-issues] 🟢 *ok* 3 PRs merged
+• PR #418 merged
+• #412 filed
+#ok #desk
 ```
+
+Bodies are Telegram Markdown. A coloured dot marks the level (`🟢 ok`, `🔴 fail`,
+`🟠 blocked`, `⚪ skip`) and a `#tag` makes it searchable in a busy channel.
+Telegram has **no colour in message text** — `Markdown`, `MarkdownV2`, and
+`HTML` cover weight, underline, strike, spoiler, code, links, and quotes, and
+nothing more — so emoji are the only marks that render in colour.
+
+Everything interpolated into a body is escaped, because an issue title like
+`fix *auth* in _middleware_` would otherwise make Telegram reject the whole
+message with a 400. If that happens anyway, the notice is retried once as plain
+text rather than lost.
 
 Sending is best-effort and never throws, so a failed notice cannot abort a desk
 run, and a failed notice is never recorded as a failed run. Unconfigured or
@@ -261,7 +275,8 @@ read that conversation and learn the real chat id.
 
 To set this up on another machine, paste
 [`prompts/notify-setup-agent.md`](prompts/notify-setup-agent.md) to a coding
-agent there.
+agent there. To bring an existing machine up to date and point it at the same
+chat, use [`prompts/sync-machine-agent.md`](prompts/sync-machine-agent.md).
 
 ## Actions
 
