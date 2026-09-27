@@ -339,3 +339,22 @@ bunx tsc --noEmit
 bunx biome check src
 bun scripts/validate-examples.ts
 ```
+
+## Branches
+
+This repo squash-merges, so nothing tells you a branch is spent: `git cherry`
+and patch-id report already-landed branches as unmerged, because a squash
+rewrites every patch-id. Branches then pile up.
+
+```sh
+bun run prune:branches          # report what is spent
+bun run prune:branches:apply    # delete it
+```
+
+A weekly workflow does the second one. The safety is in the script, not the
+workflow — a branch is only deleted if it has at least one **merged** PR, no
+open PR, and is not ahead of `main`. A branch with no PR history is never
+touched, which is what protects work that was pushed but not yet proposed.
+
+It also skips `main`, `release-please--*`, and `desk/*` (the manager worktree
+branches the plugin creates at run time).

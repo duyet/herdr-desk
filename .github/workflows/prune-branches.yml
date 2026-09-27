@@ -1,0 +1,57 @@
+name: prune-branches
+
+# Merged branches accumulate because this repo squash-merges, so nothing tells
+# you a branch is spent. This deletes the ones whose work has landed, weekly.
+#
+# The safety lives in the script, not here: a branch is only a candidate if it
+# has at least one MERGED pull request, has no open PR, and is not ahead of main.
+# A branch with no PR history is never deleted, which is what protects work that
+# was pushed but not yet proposed.
+
+on:
+  schedule:
+    # Mondays, 06:17 UTC. Off the hour on purpose: every scheduled GitHub job
+    # fires at :00 and the queue is worst then.
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: 'Delete, instead of only reporting'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: prune-branches
+  cancel-in-progress: false
+
+jobs:
+  prune:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@7353434bf14f53dea9f30f0b4aadc9f9bd2ee33 # v2.1.0
+        with:
+          bun-version: latest
+
+      - name: Configure git for the push
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+      - name: Prune landed branches
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLY: ${{ inputs.apply == false && '1' || '0' }}
+        run: |
+          if [ "$APPLY" = "0" ]; then
+            bun run prune:branches:apply
+          else
+            bun run prune:branches
+          fi
