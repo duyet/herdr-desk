@@ -149,26 +149,29 @@ async function main() {
   if (cmd === 'notify') {
     const repo = resolve(arg('--repo', argv) ?? process.cwd())
     const label = arg('--label', argv)
+    const url = arg('--url', argv)
     const message = argv
       .slice(1)
       .filter(
         (a) =>
           !a.startsWith('--') &&
           a !== arg('--repo', argv) &&
-          a !== arg('--label', argv),
+          a !== arg('--label', argv) &&
+          a !== arg('--url', argv),
       )
       .join(' ')
     // Same layered resolution a real run uses, so testing delivery also proves
     // the destination is the one a run would pick.
     const { config: notifyConfig, provenance } = resolveNotify({ repo })
-    const r = await notify({ message, repo, label }, notifyConfig)
+    const r = await notify({ message, repo, label, url }, notifyConfig)
+    const who = `${r.repo} · ${r.machine}`
     if (r.sent) {
       console.log(
-        `sent [${r.machine}] [${r.repo}] to ${describeDestination(notifyConfig.chatId, provenance)}`,
+        `sent ${who} to ${describeDestination(notifyConfig.chatId, provenance)}`,
       )
     } else {
       // `reason` is already token-redacted by notify().
-      console.log(`not sent (${r.reason}) [${r.machine}] [${r.repo}]`)
+      console.log(`not sent (${r.reason}) ${who}`)
     }
     return
   }

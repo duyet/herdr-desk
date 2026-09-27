@@ -212,14 +212,32 @@ daemon or CI: `HERDR_DESK_TELEGRAM_TOKEN`, `HERDR_DESK_TELEGRAM_CHAT_ID`,
 bun src/cli.ts notify "desk run finished" --repo /path/to/repo --label desk:github-issues
 ```
 
-Every notice is prefixed with the machine and repo, because a host-level
-channel otherwise cannot tell which desk or which box reported:
+Every notice leads with a one-line header — **repo · machine · task** — because
+a host-level channel is read by scanning, not parsing, and several machines and
+lanes post to the same chat. Repo is bold because it is the field you look for
+first; the user suffix on the machine is dropped because it is the same
+everywhere and the hostname is what tells two boxes apart.
 
 ```
-[homerep (duyet)] [anyrouter] [desk:github-issues] 🟢 *ok* 3 PRs merged
+*anyrouter* · homerep · `desk:github-issues`
+🟢 *ok* 3 PRs merged
 • PR #418 merged
 • #412 filed
 #ok #desk
+```
+
+Pass `--url` to attach the thing the notice is about. It renders as a tappable
+trailing line with the scheme stripped, so the text stays short enough not to
+wrap:
+
+```sh
+bun src/cli.ts notify "PR #3651 opened" --repo /path/to/anyrouter --url https://github.com/duyet/anyrouter/pull/3651
+```
+
+```
+*anyrouter* · homerep
+PR #3651 opened
+→ [github.com/duyet/anyrouter/pull/3651](https://github.com/duyet/anyrouter/pull/3651)
 ```
 
 Bodies are Telegram **MarkdownV2**: bold, italic, underline, strikethrough,
@@ -229,7 +247,8 @@ the only marks that render in colour, so a level dot marks the outcome and a
 `#tag` makes it searchable in a busy channel.
 
 ```
-[homerep (duyet)] [anyrouter] [desk:github-issues] 🟢 *ok* 3 PRs merged
+*anyrouter* · homerep · `desk:github-issues`
+🟢 *ok* 3 PRs merged
 • PR #418 merged
 • [run folder](https://example.com/run)
 #ok #desk

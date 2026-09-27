@@ -19,6 +19,7 @@ import {
 import {
   formatNotice,
   formatNoticePlain,
+  linkLabel,
   loadNotifyConfig,
   MAX_BODY,
   machineName,
@@ -70,37 +71,79 @@ describe('formatNotice', () => {
         { message: 'desk run finished', repo: '/home/duyet/project/aidr' },
         'duet-ubuntu',
       ),
-    ).toBe('[duet-ubuntu] [aidr] desk run finished')
-    // Markdown form escapes the reserved characters but renders identically.
+    ).toBe('aidr · duet-ubuntu\ndesk run finished')
+    // Markdown form bolds the repo and escapes reserved characters, but renders
+    // identically.
     expect(
       formatNotice(
         { message: 'desk run finished', repo: '/r/aidr' },
         'duet-ubuntu',
       ),
-    ).toBe('[duet\\-ubuntu] [aidr] desk run finished')
+    ).toBe('*aidr* · duet\\-ubuntu\ndesk run finished')
   })
 
-  test('optional label sits between repo and message', () => {
+  test('optional label follows the machine', () => {
     const n = {
       message: 'merged PR #12',
       repo: '/r/aidr',
       label: 'desk:github-issues',
     }
     expect(formatNoticePlain(n, 'host')).toBe(
-      '[host] [aidr] [desk:github-issues] merged PR #12',
+      'aidr · host · desk:github-issues\nmerged PR #12',
     )
     expect(formatNotice(n, 'host')).toBe(
-      '[host] [aidr] [desk:github\\-issues] merged PR #12',
+      '*aidr* · host · `desk:github\\-issues`\nmerged PR #12',
     )
+  })
+
+  test('renders a link as a tappable trailing line', () => {
+    const n = {
+      message: 'PR #3651 opened',
+      repo: '/r/anyrouter',
+      url: 'https://github.com/duyet/anyrouter/pull/3651',
+    }
+    expect(formatNoticePlain(n, 'host')).toBe(
+      'anyrouter · host\nPR #3651 opened\n→ github.com/duyet/anyrouter/pull/3651',
+    )
+    // Markdown keeps the visible text scheme-free but links the full URL. The
+    // `.` in the label is escaped because it is reserved in MarkdownV2 —
+    // Telegram renders the escape as a plain dot.
+    expect(formatNotice(n, 'host')).toBe(
+      '*anyrouter* · host\nPR #3651 opened\n' +
+        '→ [github\\.com/duyet/anyrouter/pull/3651](https://github.com/duyet/anyrouter/pull/3651)',
+    )
+  })
+
+  test('a non-http url is shown as text rather than a broken link', () => {
+    expect(
+      formatNoticePlain({ message: 'm', repo: '/r/a', url: 'ftp://x/y' }, 'h'),
+    ).toBe('a · h\nm\n→ ftp://x/y')
+  })
+
+  test('drops the user suffix from the machine so the host stands alone', () => {
+    // The user is identical on every host; the hostname is what distinguishes
+    // one message from another machine's.
+    expect(
+      formatNoticePlain({ message: 'm', repo: '/r/a' }, 'duet (duyet)'),
+    ).toBe('a · duet\nm')
   })
 
   test('tolerates a missing repo and an empty message', () => {
     expect(formatNoticePlain({ message: 'ping' }, 'host')).toBe(
-      '[host] [no-repo] ping',
+      'no-repo · host\nping',
     )
     expect(formatNoticePlain({ message: '   ' }, 'host')).toBe(
-      '[host] [no-repo] (no message)',
+      'no-repo · host\n(no message)',
     )
+  })
+})
+
+describe('linkLabel', () => {
+  test('strips the scheme and www, leaving a scannable path', () => {
+    expect(linkLabel('https://www.github.com/a/b')).toBe('github.com/a/b')
+    expect(linkLabel('http://x.dev')).toBe('x.dev')
+    // A non-URL is returned untouched rather than mangled.
+    expect(linkLabel('not a url')).toBe('not a url')
   })
 })
 
@@ -189,6 +232,8 @@ describe('notify', () => {
       ),
     )
     expect(calls[0]?.body.text).not.toContain('[aidr] [desk')
+    // The repo and machine stay legible as text, not as bracket noise.
+    expect(calls[0]?.body.text).toContain('*aidr* ·')
   })
 
   test('skips when unconfigured and explains why', async () => {
@@ -457,9 +502,9 @@ describe('formatNotice body cap', () => {
           label: 'desk:github-issues',
         },
         'box',
-      ).startsWith('[box] [aidr] [desk:github-issues] '),
+      ).startsWith('aidr · box · desk:github-issues\n'),
     ).toBe(true)
-    expect(out.startsWith('[box] [aidr] [desk:github\\-issues] ')).toBe(true)
+    expect(out.startsWith('*aidr* · box · `desk:github\\-issues`\n')).toBe(true)
     expect(out).toContain('chars)')
     expect(out.length).toBeLessThan(MAX_BODY + 80)
   })
@@ -467,7 +512,7 @@ describe('formatNotice body cap', () => {
   test('a short body is untouched', () => {
     expect(
       formatNoticePlain({ message: 'all good', repo: '/r/aidr' }, 'box'),
-    ).toBe('[box] [aidr] all good')
+    ).toBe('aidr · box\nall good')
   })
 
   test('a whole notice stays inside the telegram limit', () => {
