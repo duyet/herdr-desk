@@ -66,3 +66,90 @@ describe('loadFires', () => {
     expect(readFileSync(join(dir, 'fires.json.bak'), 'utf8')).toBe('{not json')
   })
 })
+
+describe('fireDay with slot-keyed entries', () => {
+  test('finds the day in a slot-keyed key so pruning keeps it', () => {
+    // fireDay used to read the LAST `::` segment, which is `HH:MM` once keys
+    // carry a slot — every entry then looked dayless and pruneFires deleted the
+    // whole ledger on the next write, re-firing every job from scratch.
+    const { pruneFires } = require('./daemon') as typeof import('./daemon')
+    const day = new Date()
+    const today = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`
+    const kept = pruneFires(
+      {
+        [`/repo::task::*/30 * * * *::${today}::09:30`]:
+          '2026-09-27T09:30:00.000Z',
+      },
+      day,
+    )
+    expect(Object.keys(kept)).toHaveLength(1)
+  })
+
+  test('still understands legacy day-only keys', () => {
+    const { pruneFires } = require('./daemon') as typeof import('./daemon')
+    const day = new Date()
+    const today = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`
+    const kept = pruneFires(
+      { [`/repo::task::0 7 * * *::${today}`]: '2026-09-27T07:00:00.000Z' },
+      day,
+    )
+    expect(Object.keys(kept)).toHaveLength(1)
+  })
+})
+
+describe('migrateFires', () => {
+  const day = '2026-09-27'
+
+  test('claims the WHOLE day, so the first tick after upgrade cannot stampede', () => {
+    // The bug this prevents: a half-hourly job recorded at 09:20 under the old
+    // day-keyed ledger would find 30 "unfired" slots on the first tick after
+    // the upgrade and run 30 times in one go.
+    const { migrateFires } = require('./daemon') as typeof import('./daemon')
+    const out = migrateFires({
+      [`/repo::task::*/30 * * * *::${day}`]: new Date(
+        2026,
+        8,
+        27,
+        9,
+        20,
+      ).toISOString(),
+    })
+    const slots = Object.keys(out).filter((k) => k.startsWith('/repo::task'))
+    expect(slots).toHaveLength(48)
+    expect(slots.some((k) => k.endsWith('::00:00'))).toBe(true)
+    expect(slots.some((k) => k.endsWith('::23:30'))).toBe(true)
+  })
+
+  test('a daily cron claims its one slot', () => {
+    const { migrateFires } = require('./daemon') as typeof import('./daemon')
+    const out = migrateFires({
+      [`/repo::task::0 7 * * *::${day}`]: new Date(
+        2026,
+        8,
+        27,
+        7,
+        0,
+      ).toISOString(),
+    })
+    expect(Object.keys(out)).toEqual([`/repo::task::0 7 * * *::${day}::07:00`])
+  })
+
+  test('passes slot-keyed entries through untouched', () => {
+    const { migrateFires } = require('./daemon') as typeof import('./daemon')
+    const key = `/repo::task::0 7 * * *::${day}::07:00`
+    expect(migrateFires({ [key]: 'x' })).toEqual({ [key]: 'x' })
+  })
+
+  test('carries a fail marker through, so the streak survives the migration', () => {
+    const { migrateFires } = require('./daemon') as typeof import('./daemon')
+    const out = migrateFires({
+      [`/repo::task::0 7 * * *::${day}`]: `fail ${new Date(2026, 8, 27, 7, 1).toISOString()}`,
+    })
+    expect(Object.values(out).every((v) => v.startsWith('fail '))).toBe(true)
+  })
+
+  test('ignores a key that is not a legacy day key', () => {
+    const { migrateFires } = require('./daemon') as typeof import('./daemon')
+    expect(migrateFires({ garbage: 'v' })).toEqual({ garbage: 'v' })
+  })
+})

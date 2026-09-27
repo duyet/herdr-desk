@@ -1,5 +1,11 @@
 import { describe, expect, test } from 'bun:test'
-import { compileCron, cronDueToday, cronMatches, cronNext } from './cron'
+import {
+  compileCron,
+  cronDueToday,
+  cronMatches,
+  cronNext,
+  cronSlotsToday,
+} from './cron'
 
 /**
  * Brute-force reference, deliberately naive: step one minute at a time and ask
@@ -188,5 +194,73 @@ describe('differential vs brute force', () => {
     // 30 February never occurs, so an 8-day horizon can never find one.
     expect(cronNext('0 0 30 2 *', new Date(2026, 0, 1))).toBeNull()
     expect(cronNext('*/q * * * *', new Date())).toBeNull()
+  })
+})
+
+describe('cronSlotsToday', () => {
+  const at = (s: string) => new Date(s)
+
+  test('returns every half-hour slot up to now, not one boolean', () => {
+    // The regression: `cronDueToday` was the only primitive, and the daemon
+    // keyed its ledger on (repo, task, cron, day), so the first fire of the day
+    // consumed the whole schedule and `*/30` ran once a day instead of 48.
+    expect(cronSlotsToday('*/30 * * * *', at('2026-09-27T09:20:00'))).toEqual([
+      '00:00',
+      '00:30',
+      '01:00',
+      '01:30',
+      '02:00',
+      '02:30',
+      '03:00',
+      '03:30',
+      '04:00',
+      '04:30',
+      '05:00',
+      '05:30',
+      '06:00',
+      '06:30',
+      '07:00',
+      '07:30',
+      '08:00',
+      '08:30',
+      '09:00',
+    ])
+  })
+
+  test('a two-slot cron yields two keys, so the second one still fires', () => {
+    expect(cronSlotsToday('0,30 * * * *', at('2026-09-27T00:40:00'))).toEqual([
+      '00:00',
+      '00:30',
+    ])
+  })
+
+  test('includes the current minute so an on-time fire is not skipped', () => {
+    expect(cronSlotsToday('*/30 * * * *', at('2026-09-27T00:30:00'))).toEqual([
+      '00:00',
+      '00:30',
+    ])
+  })
+
+  test('a daily cron still yields exactly one slot', () => {
+    expect(cronSlotsToday('0 7 * * *', at('2026-09-27T09:20:00'))).toEqual([
+      '07:00',
+    ])
+  })
+
+  test('returns nothing before the first slot of the day', () => {
+    expect(cronSlotsToday('0 7 * * *', at('2026-09-27T06:59:00'))).toEqual([])
+  })
+
+  test('honours day-of-week, so a weekly job does not fire on other days', () => {
+    // 2026-09-28 is a Monday.
+    expect(cronSlotsToday('0 9 * * 1', at('2026-09-28T10:00:00'))).toEqual([
+      '09:00',
+    ])
+    expect(cronSlotsToday('0 9 * * 1', at('2026-09-27T10:00:00'))).toEqual([])
+  })
+
+  test('cronDueToday stays consistent with the slot list', () => {
+    expect(cronDueToday('*/30 * * * *', at('2026-09-27T09:20:00'))).toBe(true)
+    expect(cronDueToday('0 7 * * *', at('2026-09-27T06:59:00'))).toBe(false)
   })
 })
