@@ -3,6 +3,19 @@
 Versions stay on **0.1.x**. `feat` and `fix` bump the patch. Do not merge a
 1.0 or 0.2 release PR.
 
+## [0.1.5](https://github.com/duyet/herdr-desk/compare/v0.1.4...v0.1.5) (2026-09-27)
+
+
+### Features
+
+* 0.2 desk line — agent ladder, config layers, and Telegram notices ([#24](https://github.com/duyet/herdr-desk/issues/24)) ([22c62e8](https://github.com/duyet/herdr-desk/commit/22c62e8fd6a26911b7481f260fe6a03417a3f232))
+* **notify:** host-level Telegram notices tagged with machine and repo ([#17](https://github.com/duyet/herdr-desk/issues/17)) ([b5ab98c](https://github.com/duyet/herdr-desk/commit/b5ab98c31755fbbaf7224e986b9941cfa85b07e4))
+
+
+### Bug Fixes
+
+* **daemon:** key the fire ledger by slot, not by day ([#21](https://github.com/duyet/herdr-desk/issues/21)) ([e986336](https://github.com/duyet/herdr-desk/commit/e986336aa2de2aa9982088bf1ba17c6a2e261c65))
+
 ## [0.1.4](https://github.com/duyet/herdr-desk/compare/v0.1.3...v0.1.4) (2026-09-27)
 
 
