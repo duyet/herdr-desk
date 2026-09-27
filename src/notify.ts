@@ -2,6 +2,8 @@ import { existsSync, readFileSync } from 'node:fs'
 import { hostname, userInfo } from 'node:os'
 import { basename, join } from 'node:path'
 import type { NotifyOverride } from './config'
+
+import { esc } from './format'
 import { type Layer, resolveConfig } from './layers'
 import { pluginConfigDir } from './paths'
 
@@ -18,6 +20,23 @@ export type NotifyConfig = {
   topicId: string
 }
 
+/** Where each destination field came from, for `config explain`. */
+export type NotifyProvenance = {
+  enabled?: string
+  chatId?: string
+  topicId?: string
+}
+
+export const NOTIFY_CONFIG_FILE = 'notify.json'
+
+export type NotifyResult = {
+  sent: boolean
+  /** Why nothing was sent, or a caveat when it was sent degraded. */
+  reason?: string
+  machine: string
+  repo: string
+}
+
 export type Notice = {
   /** Human message. Machine and repo are added automatically. */
   message: string
@@ -27,24 +46,13 @@ export type Notice = {
   machine?: string
   /** Short label such as a task id, e.g. `desk:github-issues`. */
   label?: string
+  /**
+   * Send the body as Telegram MarkdownV2. Default true.
+   *
+   * A parse failure is retried once as plain text rather than losing the notice.
+   */
+  markdown?: boolean
 }
-
-export type NotifyResult = {
-  sent: boolean
-  /** Why nothing was sent, when `sent` is false. */
-  reason?: string
-  machine: string
-  repo: string
-}
-
-/** Where each destination field came from, for `config explain`. */
-export type NotifyProvenance = {
-  enabled?: string
-  chatId?: string
-  topicId?: string
-}
-
-export const NOTIFY_CONFIG_FILE = 'notify.json'
 
 /**
  * Cap on the human message.
@@ -110,16 +118,37 @@ export function repoName(repo?: string): string {
  *
  * Only the body is capped, never the prefix: truncating `[repo]` to save
  * characters would destroy the one field that makes the message useful.
+ *
+ * Two forms are produced on purpose. The MarkdownV2 form escapes the prefix,
+ * because `[`, `]`, `(` and `)` are reserved and an unescaped prefix makes
+ * Telegram reject the whole message. But those same escapes would appear as
+ * literal backslashes if the message were sent as plain text, so the plain
+ * form is built separately rather than by stripping escapes from the other.
  */
 export function formatNotice(n: Notice, machine = machineName()): string {
-  const parts = [`[${machine}]`, `[${repoName(n.repo)}]`]
-  if (n.label) parts.push(`[${n.label}]`)
+  return `${prefix(n, machine, esc)} ${body(n)}`
+}
+
+/** Unescaped, markup-free text, for the plain-text retry. */
+export function formatNoticePlain(n: Notice, machine = machineName()): string {
+  return `${prefix(n, machine, (s) => s)} ${body(n)}`
+}
+
+function prefix(
+  n: Notice,
+  machine: string,
+  safe: (s: string) => string,
+): string {
+  const parts = [`[${safe(machine)}]`, `[${safe(repoName(n.repo))}]`]
+  if (n.label) parts.push(`[${safe(n.label)}]`)
+  return parts.join(' ')
+}
+
+function body(n: Notice): string {
   const raw = n.message.trim() || '(no message)'
-  const body =
-    raw.length > MAX_BODY
-      ? `${raw.slice(0, MAX_BODY)}… (+${raw.length - MAX_BODY} chars)`
-      : raw
-  return `${parts.join(' ')} ${body}`
+  return raw.length > MAX_BODY
+    ? `${raw.slice(0, MAX_BODY)}… (+${raw.length - MAX_BODY} chars)`
+    : raw
 }
 
 /**
@@ -158,6 +187,7 @@ export async function notify(
   const machine = n.machine ?? machineName()
   const repo = repoName(n.repo)
   const text = formatNotice(n, machine)
+  const plainText = formatNoticePlain(n, machine)
 
   if (!config.enabled) return { sent: false, reason: 'disabled', machine, repo }
   if (!config.token || !config.chatId) {
@@ -169,12 +199,14 @@ export async function notify(
     }
   }
 
-  const payload: Record<string, unknown> = {
+  const useMarkdown = n.markdown !== false
+  const base: Record<string, unknown> = {
     chat_id: config.chatId,
     text,
     disable_web_page_preview: true,
   }
-  if (config.topicId) payload.message_thread_id = Number(config.topicId)
+  if (config.topicId) base.message_thread_id = Number(config.topicId)
+  if (useMarkdown) base.parse_mode = 'MarkdownV2'
 
   const fail = (reason: string): NotifyResult => ({
     sent: false,
@@ -185,17 +217,38 @@ export async function notify(
     repo,
   })
 
+  const post = async (body: Record<string, unknown>) =>
+    fetchImpl(`https://api.telegram.org/bot${config.token}/sendMessage`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+
   try {
-    const res = await fetchImpl(
-      `https://api.telegram.org/bot${config.token}/sendMessage`,
-      {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(payload),
-      },
-    )
-    if (!res.ok) return fail(`telegram HTTP ${res.status}`)
-    return { sent: true, machine, repo }
+    const res = await post(base)
+    if (res.ok) return { sent: true, machine, repo }
+
+    // A 400 here is almost always "can't parse entities": an unbalanced `*` or
+    // `_` in a title or path. Retry once as plain text so the notice still
+    // lands. Only 400 is retried — a 403/401 will fail identically, and a 5xx
+    // may have been delivered, so re-sending either risks a duplicate.
+    if (useMarkdown && res.status === 400) {
+      // Rebuild rather than strip: the markdown text is escaped for MarkdownV2
+      // and those escapes would show as literal backslashes in plain text.
+      const { parse_mode: _dropped, ...plain } = base
+      plain.text = plainText
+      const retry = await post(plain)
+      if (retry.ok) {
+        return {
+          sent: true,
+          machine,
+          repo,
+          reason: 'markdown rejected; sent as plain text',
+        }
+      }
+      return fail(`telegram HTTP ${retry.status}`)
+    }
+    return fail(`telegram HTTP ${res.status}`)
   } catch (err) {
     return fail(err instanceof Error ? err.message : String(err))
   }
@@ -261,3 +314,6 @@ export function resolveNotify(opts: {
   }
   return { config: out, provenance: p }
 }
+
+/** Re-exported so callers build bodies without importing two modules. */
+export { noticeBody } from './format'
