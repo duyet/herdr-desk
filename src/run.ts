@@ -19,7 +19,7 @@ import {
   projectWorkspaceForRepo,
 } from './herdr'
 import { recordRun, truncateDetail } from './history'
-import { notify, resolveNotify } from './notify'
+import { noticeBody, notify, resolveNotify } from './notify'
 import { assembleManagerPrompt, taskVars } from './prompt'
 
 type RunResult = {
@@ -107,23 +107,32 @@ async function announce(
       taskNotify: task.notify,
     })
     if (!notifyConfig.enabled) return
-    const message = result.error
-      ? `FAILED: ${truncateDetail(result.error)}`
-      : result.skipped
-        ? `skipped: ${result.skipped}`
-        : result.spawned
-          ? 'spawned manager'
-          : result.prompted
-            ? 're-prompted live manager'
-            : 'done'
-    await notify(
-      {
-        message,
-        repo,
-        label: task.id,
-      },
-      notifyConfig,
-    )
+    // Structured, so the channel gets a bold verdict and a searchable tag
+    // instead of a flat line. Only the text is escaped; the markup around it is
+    // deliberate, so an issue full of `*` and `_` cannot break the parse.
+    const body =
+      result.error !== undefined
+        ? noticeBody({
+            level: 'fail',
+            headline: truncateDetail(result.error) ?? 'run failed',
+            tags: ['desk'],
+          })
+        : result.skipped !== undefined
+          ? noticeBody({
+              level: 'skip',
+              headline: result.skipped,
+              tags: ['desk'],
+            })
+          : noticeBody({
+              level: 'ok',
+              headline: result.spawned
+                ? 'spawned manager'
+                : result.prompted
+                  ? 're-prompted live manager'
+                  : 'finished',
+              tags: ['desk'],
+            })
+    await notify({ message: body, repo, label: task.id }, notifyConfig)
   } catch {
     // Intentionally silent. Reaching here means notify misbehaved; the run
     // outcome is already recorded and must not be altered by it.
