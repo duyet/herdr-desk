@@ -276,7 +276,12 @@ export async function tickOnce(at = new Date()): Promise<number> {
           // and the queue is what says out loud that it was held, rather than
           // the ledger claiming a fire that never happened.
           hold(
-            { repo: d.repo, task: task.id, slot, reason: verdict.breaches.join(', ') },
+            {
+              repo: d.repo,
+              task: task.id,
+              slot,
+              reason: verdict.breaches.join(', '),
+            },
             at,
           )
           log(
