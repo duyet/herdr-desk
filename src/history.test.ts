@@ -1,11 +1,12 @@
 import { describe, expect, test } from 'bun:test'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   appendRun,
   failureStreak,
   historyPath,
+  loadRuns,
   MAX_DETAIL,
   type RunRecord,
   truncateDetail,
@@ -135,6 +136,53 @@ describe('failureStreak', () => {
       since: null,
       detail: null,
     })
+  })
+
+  test('is not truncated by other jobs filling the shared window', () => {
+    // Regression (#32). The ledger holds every repo and every job, so the last
+    // 200 lines of a busy desk are mostly someone else's fires. Ten of them
+    // land between each pair of this job's, which pushes the first failures of
+    // the streak out of a global window entirely and left `Fails` reporting a
+    // floor instead of a count.
+    const dir = mkdtempSync(join(tmpdir(), 'desk-streak-'))
+    const prev = process.env.HERDR_PLUGIN_STATE_DIR
+    process.env.HERDR_PLUGIN_STATE_DIR = dir
+    try {
+      const base = Date.parse('2026-09-28T08:57:00.000Z')
+      const lines: string[] = []
+      for (let i = 0; i < 31; i++) {
+        const at = base + i * 10_000
+        lines.push(
+          JSON.stringify(
+            rec({ at: new Date(at).toISOString(), ok: false, detail: 'boom' }),
+          ),
+        )
+        for (let j = 0; j < 10; j++) {
+          lines.push(
+            JSON.stringify(
+              rec({
+                at: new Date(at + j * 1000).toISOString(),
+                name: 'anyrouter',
+                repo: '/other',
+                ok: true,
+              }),
+            ),
+          )
+        }
+      }
+      writeFileSync(historyPath(), `${lines.join('\n')}\n`)
+      // The window is crowded enough that a global read misses most of it.
+      expect(failureStreak(loadRuns(200), job).count).toBeLessThan(31)
+      expect(failureStreak(loadRuns(200, job), job)).toEqual({
+        count: 31,
+        since: '2026-09-28T08:57:00.000Z',
+        detail: 'boom',
+      })
+    } finally {
+      if (prev === undefined) delete process.env.HERDR_PLUGIN_STATE_DIR
+      else process.env.HERDR_PLUGIN_STATE_DIR = prev
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })
 

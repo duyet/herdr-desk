@@ -12,6 +12,9 @@ export type RunRecord = {
   detail?: string
 }
 
+/** How a job is identified in the ledger, independent of its display name. */
+export type JobKey = { repo: string; task: string }
+
 const MAX = 200
 
 /**
@@ -45,22 +48,34 @@ export function recordRun(rec: Omit<RunRecord, 'at'> & { at?: string }): void {
   appendRun({ at: rec.at ?? new Date().toISOString(), ...rec })
 }
 
-export function loadRuns(limit = 40): RunRecord[] {
+/**
+ * The newest `limit` records, oldest first, optionally for one job only.
+ *
+ * `job` filters *before* the `MAX` bound, not after. The ledger is shared by
+ * every repo and every job, so bounding the file first handed each job
+ * whatever slice of the global tail happened to survive: a busy desk scrolled a
+ * failure streak off the front of the window, and the streak under-reported the
+ * job it was supposed to describe. `MAX` still caps how far back the scan goes,
+ * it just counts this job's own records now.
+ */
+export function loadRuns(limit = 40, job?: JobKey): RunRecord[] {
   if (!existsSync(historyPath())) return []
   const lines = readFileSync(historyPath(), 'utf8')
     .trim()
     .split('\n')
     .filter(Boolean)
-  const slice = lines.slice(-Math.max(1, Math.min(limit, MAX)))
+  const cap = Math.max(1, Math.min(limit, MAX))
   const out: RunRecord[] = []
-  for (const line of slice) {
+  for (let i = lines.length - 1; i >= 0 && out.length < cap; i--) {
     try {
-      out.push(JSON.parse(line) as RunRecord)
+      const rec = JSON.parse(lines[i]) as RunRecord
+      if (job && (rec.repo !== job.repo || rec.task !== job.task)) continue
+      out.push(rec)
     } catch {
       /* skip bad line */
     }
   }
-  return out
+  return out.reverse()
 }
 
 export function formatHistory(runs: RunRecord[]): string {
@@ -91,7 +106,7 @@ export function formatHistory(runs: RunRecord[]): string {
  */
 export function failureStreak(
   runs: RunRecord[],
-  job: { repo: string; task: string },
+  job: JobKey,
 ): { count: number; since: string | null; detail: string | null } {
   const mine = runs.filter((r) => r.repo === job.repo && r.task === job.task)
   let count = 0
