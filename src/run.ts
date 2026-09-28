@@ -26,10 +26,41 @@ import { assembleManagerPrompt, taskVars } from './prompt'
 
 type RunResult = {
   skipped?: string
+  /**
+   * Withhold the notice while keeping the run recorded.
+   *
+   * A precondition is not something that can be acted on from a phone, and it
+   * recurs on *every* tick for as long as the condition holds — announced, one
+   * closed Herdr Space became a message every 30 minutes, per task, repeating
+   * the same sentence forever. `false` keeps a skip announceable, for a task
+   * whose skip really is worth a message.
+   */
+  quiet?: boolean
   spawned?: boolean
   prompted?: boolean
   /** Set when the run threw; the message is already ledger-truncated upstream. */
   error?: string
+}
+
+/**
+ * Whether a run outcome is worth a channel notice.
+ *
+ * A failure always is. A precondition skip is not, unless it opts back in with
+ * {@link preconditionSkip}'s second argument. `ok` is never a notice either: the
+ * manager's own merged report is the status signal for work that succeeded, and
+ * the hub counts it.
+ */
+export function announceable(result: RunResult): boolean {
+  if (result.error !== undefined) return true
+  return result.skipped !== undefined && result.quiet !== true
+}
+
+/** A run stopped before doing any work. Recorded, and quiet unless overridden. */
+export function preconditionSkip(
+  skipped: string,
+  quiet = true,
+): { skipped: string; quiet: boolean } {
+  return { skipped, quiet }
 }
 
 export function runDirFor(repo: string, task: TaskConfig, day: string): string {
@@ -119,28 +150,55 @@ async function announce(
   task: TaskConfig,
   result: RunResult,
 ): Promise<void> {
-  if (result.error === undefined) return
+  if (!announceable(result)) return
   try {
     const { config: notifyConfig } = resolveNotify({
       repo,
       taskNotify: task.notify,
     })
     if (!notifyConfig.enabled) return
-    // Structured, so the channel gets a bold verdict and a searchable tag
-    // instead of a flat line. Only the text is escaped; the markup around it is
-    // deliberate, so an issue full of `*` and `_` cannot break the parse.
-    // `briefReason`, not `truncateDetail`: the ledger wants the full message
-    // with its path, a phone wants one short line.
-    const body = noticeBody({
-      level: 'fail',
-      headline: briefReason(result.error) || 'run failed',
-      tags: ['desk'],
-    })
-    await notify({ message: body, repo, label: task.id }, notifyConfig)
+    // `announceable` already established there is something to say, so the
+    // body is never null here.
+    await notify(
+      { message: announceBody(result) as string, repo, label: task.id },
+      notifyConfig,
+    )
   } catch {
     // Intentionally silent. Reaching here means notify misbehaved; the run
     // outcome is already recorded and must not be altered by it.
   }
+}
+
+/**
+ * The notice body for a run outcome, or `null` when it is not worth sending.
+ *
+ * Exported so the level and the headline can be asserted without a transport.
+ * Both come from the outcome itself: hardcoding `fail` here would label a
+ * non-quiet skip "run failed" and send a reader hunting for a crash that never
+ * happened.
+ *
+ * `briefReason`, not `truncateDetail`: the ledger wants the full message with
+ * its path, a phone wants one short line. Only the text is escaped; the markup
+ * around it is deliberate, so a message full of `*` and `_` cannot 400.
+ */
+export function announceBody(result: RunResult): string | null {
+  if (!announceable(result)) return null
+  // Branch on the field itself rather than on a `failed` boolean: TypeScript
+  // will not carry the narrowing through a captured value, and reading
+  // `result.error` as `string | undefined` here would be a lie the compiler
+  // correctly refuses.
+  if (result.error !== undefined) {
+    return noticeBody({
+      level: 'fail',
+      headline: briefReason(result.error) || 'run failed',
+      tags: ['desk'],
+    })
+  }
+  return noticeBody({
+    level: 'skip',
+    headline: briefReason(result.skipped ?? '') || 'skipped',
+    tags: ['desk'],
+  })
 }
 
 /**
@@ -199,8 +257,10 @@ async function execute(
   if (!ready.ok) {
     if (ready.reason.includes('socket')) {
       console.log(`${ready.reason} — skip`)
-      settleHub(repo, task.id, config.name, 'skip', ready.reason)
-      return done({ skipped: ready.reason })
+      // Quiet: herdr being down is a machine-level fact that repeats on every
+      // tick, not a per-job problem. The run is still recorded.
+      settleHub(repo, task.id, config.name, 'skip', 'herdr is not running')
+      return done(preconditionSkip(ready.reason))
     }
     throw new Error(ready.reason)
   }
@@ -211,13 +271,23 @@ async function execute(
     name: config.name,
   })
   if (!project) {
+    // The full reason, with the path and the policy, goes to stdout and to
+    // history where it is a diagnosable record. The notice headline and the hub
+    // cell get the verdict alone — 35 characters instead of 108, and a closed
+    // Space is not something a reader can act on from a phone.
     const reason = `no open Herdr session for ${config.name} (${repo}) — skip; will not create a sibling Space`
     console.log(reason)
     // Settled as `skip`, not left running: a repo that is never opened would
     // otherwise be counted as in-flight forever and go stale into a false
     // `stuck` — accusing a job of hanging when it was never allowed to start.
-    settleHub(repo, task.id, config.name, 'skip', reason)
-    return done({ skipped: reason })
+    settleHub(
+      repo,
+      task.id,
+      config.name,
+      'skip',
+      `no open Herdr session for ${config.name}`,
+    )
+    return done(preconditionSkip(reason))
   }
 
   // One long-lived manager session per task. Reuse the session that is already

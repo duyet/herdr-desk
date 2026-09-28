@@ -4,8 +4,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { TaskConfig } from './config'
 import {
+  announceable,
+  announceBody,
   baseRefFrom,
   deskWorktreeBranch,
+  preconditionSkip,
   runDirFor,
   writeLatestPointer,
 } from './run'
@@ -17,6 +20,60 @@ const base: TaskConfig = {
   agent: { ladder: ['grok'], permission: 'default' },
   crons: ['0 7 * * *'],
 }
+
+describe('announceable', () => {
+  test('a precondition skip is never announced', () => {
+    // The exact shape that filled the channel: four anyrouter tasks reporting
+    // "no open Herdr session" every 30 minutes, forever, because a condition
+    // the operator reaches just by closing a Space was treated as news.
+    expect(
+      announceable(preconditionSkip('no open Herdr session for anyrouter')),
+    ).toBe(false)
+  })
+
+  test('a failure is always announced', () => {
+    expect(announceable({ error: 'boom' })).toBe(true)
+  })
+
+  test('a successful run is not announced', () => {
+    // The manager's merged report says what happened; `spawned manager` said
+    // only that something had.
+    expect(announceable({ spawned: true })).toBe(false)
+    expect(announceable({ prompted: true })).toBe(false)
+  })
+
+  test('a skip can opt back in when it is worth a message', () => {
+    expect(announceable(preconditionSkip('manual lock held', false))).toBe(true)
+    expect(announceable({ skipped: 'manual lock held' })).toBe(true)
+  })
+
+  test('a skip is reported as a skip, not as a failure', () => {
+    // `announce` hardcoded level `fail` and the headline `run failed`, so a
+    // non-quiet skip would have gone out reading "run failed" — sending a
+    // reader hunting for a crash that never happened. The compiler caught the
+    // `undefined`; this pins the verdict.
+    expect(announceBody(preconditionSkip('manual lock held', false))).toBe(
+      '⚪ *skip* manual lock held\n#skip #desk',
+    )
+    expect(announceBody({ error: 'boom' })).toContain('*fail*')
+  })
+})
+
+describe('preconditionSkip', () => {
+  test('keeps the reason so history stays diagnosable', () => {
+    // The notice is withheld, not the record: `history` is the only way to tell
+    // "the desk never ran" from "the desk ran and said nothing".
+    expect(preconditionSkip('herdr is not running')).toEqual({
+      skipped: 'herdr is not running',
+      quiet: true,
+    })
+  })
+
+  test('defaults to quiet but stays overridable', () => {
+    expect(preconditionSkip('a').quiet).toBe(true)
+    expect(preconditionSkip('a', false).quiet).toBe(false)
+  })
+})
 
 describe('runDirFor', () => {
   test('joins a relative stateDir inside the repo', () => {

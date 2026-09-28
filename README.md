@@ -233,6 +233,14 @@ counts what every job on the machine is doing.
 Skips and successes are still recorded in `runs.jsonl` and printed to stdout, so
 `status` and `history` still answer "why did this not run".
 
+**The two precondition skips are quiet**: *herdr is not running*, and *no open
+Space for this repo*. A precondition is not something you can act on from a
+phone, and it recurs on every tick for as long as it holds — announcing one
+turned a single closed Space into a message every 30 minutes, per task, forever.
+The run is still recorded in full, so `history` can still tell "the desk never
+ran" from "the desk ran and had nothing to say". A task that needs a skip
+announced can build its result with `preconditionSkip(reason, false)`.
+
 `~/.config/herdr/plugins/herdr-desk/notify.json`:
 
 ```json
