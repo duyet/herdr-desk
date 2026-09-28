@@ -17,6 +17,7 @@ import {
   underline,
 } from './format'
 import {
+  briefReason,
   formatNotice,
   formatNoticePlain,
   linkLabel,
@@ -62,6 +63,48 @@ function stubFetch(status: number | number[] = 200) {
   }) as unknown as typeof fetch
   return { calls, impl }
 }
+
+describe('briefReason', () => {
+  test('collapses a log-grade reason to one readable line', () => {
+    // This is the exact text a skip produced on a real channel: an absolute
+    // path and an internal explanation, repeated for every job on the repo.
+    expect(
+      briefReason(
+        'no open Herdr session for anyrouter (/Users/duyet/project/anyrouter) — skip; will not create a sibling Space',
+      ),
+    ).toBe(
+      'no open Herdr session for anyrouter (anyrouter) — skip; will not create a sibling Space',
+    )
+  })
+
+  test('leaves a URL alone', () => {
+    // A PR link is the one field worth tapping. Shortening a path must not
+    // reduce it to a bare issue number.
+    expect(
+      briefReason(
+        'herdr agent start failed (1): see https://github.com/duyet/anyrouter/pull/418',
+      ),
+    ).toBe(
+      'herdr agent start failed (1): see https://github.com/duyet/anyrouter/pull/418',
+    )
+  })
+
+  test('keeps trailing punctuation attached to the shortened name', () => {
+    expect(briefReason('cannot open (~/project/anyrouter) now')).toBe(
+      'cannot open (anyrouter) now',
+    )
+  })
+
+  test('caps a long reason instead of wrapping the phone', () => {
+    const out = briefReason(`${'x'.repeat(400)}`, 40)
+    expect(out).toHaveLength(40)
+    expect(out.endsWith('…')).toBe(true)
+  })
+
+  test('a short reason is passed through untouched', () => {
+    expect(briefReason('herdr: socket missing')).toBe('herdr: socket missing')
+  })
+})
 
 describe('formatNotice', () => {
   test('always carries machine and repo', () => {

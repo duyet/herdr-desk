@@ -85,6 +85,12 @@ export function applyDefaults(raw: DeskConfig, repo: string): LoadedDesk {
       maxChildren: t.maxChildren ?? raw.maxChildren ?? 5,
       agentName: t.agentName ?? raw.agentName ?? deskSlug(name),
       describe: t.describe,
+      // A task's own `notify` block. It is not an override of the repo's — the
+      // layers fold that separately — so it is carried verbatim and merged at
+      // send time. Dropping it here silently sent every job in a repo to the
+      // same topic, so a desk that routed one job to its own forum topic put
+      // all of them back in the general one.
+      notify: t.notify,
       id,
       playbook,
       extra,

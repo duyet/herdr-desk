@@ -7,6 +7,7 @@ import {
   CONFIG_NAMES as CONFIG_NAMES_,
   findConfigPath as findConfigPath_,
 } from './paths'
+import { approvedPlaybookPath, GH_PREFIX } from './registry'
 import { validateDeskJson } from './schema'
 
 export const DESK_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -170,6 +171,19 @@ export function resolveTask(config: LoadedDesk, taskId?: string): TaskConfig {
 
 export function resolveTaskPromptPath(task: TaskConfig, repo: string): string {
   const playbook = task.playbook
+  // A registry playbook, resolved from the approved cache. This never touches
+  // the network: an unattended run must not depend on GitHub being up, and a
+  // `gh api` call inside prompt assembly would turn an outage into a failed
+  // job. Approval is a separate, explicit step.
+  if (playbook.startsWith(GH_PREFIX)) {
+    const hit = approvedPlaybookPath(playbook)
+    if (!hit) {
+      throw new Error(
+        `playbook '${playbook}' is not approved — run: herdr-desk prompts check && herdr-desk prompts apply --accept`,
+      )
+    }
+    return hit
+  }
   if (
     playbook.endsWith('.md') ||
     playbook.includes('/') ||

@@ -210,6 +210,53 @@ function body(n: Notice): string {
  */
 export const MIN_REDACT_LEN = 12
 
+/** A notice reason is a sentence on a phone, not a log line. */
+export const MAX_REASON = 120
+
+/**
+ * Turn an internal reason into something worth reading on a phone.
+ *
+ * The reasons this plugin generates are written for `daemon.log`, where the
+ * full sentence and the absolute path are exactly what you want. Forwarded
+ * verbatim to a channel they arrive as a paragraph of internal vocabulary:
+ * `no open Herdr session for anyrouter (/Users/duyet/project/anyrouter) — skip;
+ * will not create a sibling Space`. Three lines of the machine talking to
+ * itself, repeated for every job, for a condition that did not change.
+ *
+ * Paths collapse to their last segment, which is usually the thing being named
+ * anyway, and the rest is capped. URLs are protected first: shortening a path
+ * must not reduce a PR link to a bare `#418`.
+ */
+export function briefReason(text: string, max = MAX_REASON): string {
+  const shortened = text
+    .split(/\s+/)
+    .filter(Boolean)
+    .map(shortenPathToken)
+    .join(' ')
+  if (shortened.length <= max) return shortened
+  return `${shortened.slice(0, max - 1).trimEnd()}\u2026`
+}
+
+/**
+ * `/Users/duyet/project/anyrouter` becomes `anyrouter`, keeping trailing
+ * punctuation so `(~/project/anyrouter) - skip` still reads as `(anyrouter)`.
+ *
+ * URLs are left completely alone. A PR link is the most useful thing in the
+ * whole message, and a path-shortening pass that reduced it to `#418` would
+ * destroy the one field worth tapping.
+ */
+function shortenPathToken(word: string): string {
+  if (/^https?:\/\//i.test(word)) return word
+  const cut = word.lastIndexOf('/')
+  if (cut <= 0) return word
+  const head = /^[([{]+/.exec(word)?.[0] ?? ''
+  const tail = /[).,;:!?]+$/.exec(word)?.[0] ?? ''
+  const end = word.length - tail.length
+  // Nothing left between the separators, e.g. a bare `//`.
+  if (end <= cut + 1) return word
+  return head + word.slice(cut + 1, end) + tail
+}
+
 /**
  * Strip the bot token out of any string bound for a log, a ledger, or a chat.
  *

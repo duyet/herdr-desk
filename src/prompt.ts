@@ -1,5 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import {
+  DESK_ROOT,
   type LoadedDesk,
   promptPath,
   resolveTaskPromptPath,
@@ -42,6 +44,12 @@ export function taskVars(opts: {
     workspaceId: opts.workspaceId ?? '',
     paneId: opts.paneId ?? '',
     deskName: opts.config.name,
+    // Absolute path to this plugin's CLI. The manager runs in a worktree with
+    // its own PATH, where `herdr-desk` is usually not on it — a prompt that
+    // says "run herdr-desk report" and cannot resolve the binary teaches the
+    // agent to improvise, and it improvises by pasting the whole run into a
+    // Telegram message itself.
+    deskBin: join(DESK_ROOT, 'bin', 'desk'),
   }
 }
 

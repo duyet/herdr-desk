@@ -70,7 +70,8 @@ export function tag(t: string): string {
 
 export type NoticeLevel = 'ok' | 'fail' | 'blocked' | 'skip' | 'info'
 
-const LEVEL_TAG: Record<NoticeLevel, string> = {
+/** Searchable in a busy channel. Exported so any renderer agrees on the name. */
+export const LEVEL_TAG: Record<NoticeLevel, string> = {
   ok: '#ok',
   fail: '#fail',
   blocked: '#blocked',
@@ -79,7 +80,7 @@ const LEVEL_TAG: Record<NoticeLevel, string> = {
 }
 
 /** Emoji are the only colour available in message text. */
-const LEVEL_DOT: Record<NoticeLevel, string> = {
+export const LEVEL_DOT: Record<NoticeLevel, string> = {
   ok: '🟢',
   fail: '🔴',
   blocked: '🟠',

@@ -7,6 +7,7 @@ import {
   type TaskConfig,
 } from './config'
 import { dayKey } from './day'
+import type { NoticeLevel } from './format'
 import {
   herdrCall,
   herdrReady,
@@ -18,8 +19,9 @@ import {
   pickPane,
   projectWorkspaceForRepo,
 } from './herdr'
-import { recordRun, truncateDetail } from './history'
-import { noticeBody, notify, resolveNotify } from './notify'
+import { recordRun } from './history'
+import { markRunning, markSettled } from './hub'
+import { briefReason, noticeBody, notify, resolveNotify } from './notify'
 import { assembleManagerPrompt, taskVars } from './prompt'
 
 type RunResult = {
@@ -80,6 +82,10 @@ export async function runTask(opts: {
       ok: false,
       detail: message,
     })
+    // The hub has to learn that this job is over, or it keeps counting as
+    // running until it goes stale and reads as stuck — a failure reported as a
+    // hang, which sends whoever reads it looking in the wrong place.
+    settleHub(repo, task.id, config.name, 'fail', message)
     // A failure is the one thing worth waking someone for, so it is announced
     // before the error propagates. `announce` never throws, so a broken webhook
     // cannot replace a real failure with a notification failure.
@@ -89,7 +95,19 @@ export async function runTask(opts: {
 }
 
 /**
- * Send a run outcome to the host notice channel.
+ * Send a run *failure* to the host notice channel.
+ *
+ * Only a failure is worth waking someone for. A success and a skip used to
+ * notify too, and both were noise:
+ *
+ * - `spawned manager` fired on every cron slot for every job and said nothing
+ *   about the outcome. The manager's own merged report is the status signal.
+ * - `skipped` fires when a repo is not open in Herdr, which is a standing
+ *   configuration fact rather than news. Four jobs on one repo produced four
+ *   identical notices in forty minutes, which is how a channel gets muted.
+ *
+ * Skips are still recorded in the ledger and printed to stdout, so `status` and
+ * `history` answer "why did this not run" without a phone alert.
  *
  * Best-effort in the strongest sense: it resolves rather than rejects, and its
  * result is never recorded as a run outcome. A failed notice must not be able
@@ -101,6 +119,7 @@ async function announce(
   task: TaskConfig,
   result: RunResult,
 ): Promise<void> {
+  if (result.error === undefined) return
   try {
     const { config: notifyConfig } = resolveNotify({
       repo,
@@ -110,32 +129,47 @@ async function announce(
     // Structured, so the channel gets a bold verdict and a searchable tag
     // instead of a flat line. Only the text is escaped; the markup around it is
     // deliberate, so an issue full of `*` and `_` cannot break the parse.
-    const body =
-      result.error !== undefined
-        ? noticeBody({
-            level: 'fail',
-            headline: truncateDetail(result.error) ?? 'run failed',
-            tags: ['desk'],
-          })
-        : result.skipped !== undefined
-          ? noticeBody({
-              level: 'skip',
-              headline: result.skipped,
-              tags: ['desk'],
-            })
-          : noticeBody({
-              level: 'ok',
-              headline: result.spawned
-                ? 'spawned manager'
-                : result.prompted
-                  ? 're-prompted live manager'
-                  : 'finished',
-              tags: ['desk'],
-            })
+    // `briefReason`, not `truncateDetail`: the ledger wants the full message
+    // with its path, a phone wants one short line.
+    const body = noticeBody({
+      level: 'fail',
+      headline: briefReason(result.error) || 'run failed',
+      tags: ['desk'],
+    })
     await notify({ message: body, repo, label: task.id }, notifyConfig)
   } catch {
     // Intentionally silent. Reaching here means notify misbehaved; the run
     // outcome is already recorded and must not be altered by it.
+  }
+}
+
+/**
+ * Record a job's end in the hub, and never let that bookkeeping fail a run.
+ *
+ * The hub is a convenience view. A run whose *work* succeeded must not be
+ * reported as a failure because writing one small JSON file went wrong, and the
+ * caller here is often already handling the real error — so a broken hub is
+ * swallowed rather than allowed to replace a failure with a different one.
+ */
+function settleHub(
+  repo: string,
+  taskId: string,
+  desk: string,
+  level: NoticeLevel,
+  headline?: string,
+): void {
+  try {
+    markSettled({
+      repo,
+      task: taskId,
+      desk,
+      level,
+      // The hub line is read on a phone; the full reason, with its absolute
+      // path and internal vocabulary, lives in `runs.jsonl` and the notice.
+      headline: headline ? briefReason(headline, 90) : undefined,
+    })
+  } catch {
+    /* the hub is best-effort */
   }
 }
 
@@ -165,6 +199,7 @@ async function execute(
   if (!ready.ok) {
     if (ready.reason.includes('socket')) {
       console.log(`${ready.reason} — skip`)
+      settleHub(repo, task.id, config.name, 'skip', ready.reason)
       return done({ skipped: ready.reason })
     }
     throw new Error(ready.reason)
@@ -178,6 +213,10 @@ async function execute(
   if (!project) {
     const reason = `no open Herdr session for ${config.name} (${repo}) — skip; will not create a sibling Space`
     console.log(reason)
+    // Settled as `skip`, not left running: a repo that is never opened would
+    // otherwise be counted as in-flight forever and go stale into a false
+    // `stuck` — accusing a job of hanging when it was never allowed to start.
+    settleHub(repo, task.id, config.name, 'skip', reason)
     return done({ skipped: reason })
   }
 
@@ -200,6 +239,10 @@ async function execute(
   })
 
   if (live) {
+    // Marked before the prompt is sent, not after: the work starts when the
+    // manager is prompted, and a run that dies in the prompt call has to look
+    // started-and-failed rather than never having happened.
+    markRunning({ repo, task: task.id, desk: config.name })
     await herdrCall([
       'agent',
       'prompt',
@@ -217,6 +260,7 @@ async function execute(
   const childWorkspaceId = child.workspaceId
   const workspaceId = project.workspaceId
   await Bun.sleep(2000)
+  markRunning({ repo, task: task.id, desk: config.name })
   await herdrCall([
     'agent',
     'start',

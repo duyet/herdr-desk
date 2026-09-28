@@ -158,7 +158,9 @@ export function validateDeskJson(
     errors.push(`${path}.extra: string (inline markdown or a .md path)`)
   }
   if (o.playbook !== undefined && typeof o.playbook !== 'string') {
-    errors.push(`${path}.playbook: bundled id, .md path, or inline markdown`)
+    errors.push(
+      `${path}.playbook: bundled id, .md path, gh:owner/repo/name, or inline markdown`,
+    )
   }
   if (o.maxChildren !== undefined) {
     const n = o.maxChildren
@@ -245,7 +247,9 @@ function validateTask(raw: unknown, path: string, repo?: string): string[] {
     }
   }
   if (o.playbook !== undefined && typeof o.playbook !== 'string') {
-    errors.push(`${path}.playbook: bundled id, .md path, or inline markdown`)
+    errors.push(
+      `${path}.playbook: bundled id, .md path, gh:owner/repo/name, or inline markdown`,
+    )
   }
   if (
     o.agentName !== undefined &&

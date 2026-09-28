@@ -1,15 +1,43 @@
 # herdr-desk
 
-Standalone [Herdr](https://herdr.dev) plugin for unattended repo
-maintenance.
+Give your agent a persistent computer.
 
-The idea: a manager agent should live **inside Herdr**, on `main`, and
-fan real work into isolated worktrees — not a host crontab that hopes
-the terminal multiplexer is up.
+Clone your repos into one machine. Install [Herdr](https://herdr.dev)
+and this plugin. Then get out of the way: every repo keeps a manager
+session that wakes on a cron, triages its own backlog, and works it —
+tomorrow, next week, and every week after, with nobody watching.
 
-Put a **`.herdr-desk.json`** in a repo. Open that repo as a Herdr
-workspace once. The plugin finds the file, remembers the path, and
-fires each job's `schedule` cron by starting a manager agent.
+```
+~/project/                     ← the machine's workspace
+  .herdr-desk.json             ← "group": true — ladder, cron, notify
+  anyrouter/                   ← inherits everything
+  chmonitor/                   ← inherits everything
+  herdr-desk/
+    .herdr-desk.json           ← overrides just the schedule
+```
+
+Three steps, once:
+
+1. **Clone** the repos you care about into one directory.
+2. **Install** the plugin — see [Install](#install) below.
+3. **Open** each repo as a Herdr workspace, once. The desk finds the
+   config, remembers the path, and takes over from there.
+
+Each job's `schedule` cron starts a manager agent **inside Herdr**, in a
+worktree child of the Space that repo is already open in, fanning real
+work into further isolated worktrees. It is a manager, not a crontab: a
+crontab cannot see whether your terminal is up, cannot find the Space a
+repo is open in, and cannot hand work to an agent that already has
+context.
+
+What it does without you:
+
+- picks up open issues and PRs, and decides what is worth doing
+- opens a PR per item, arms auto-merge, and babysits CI
+- merges what is green, leaves what needs a human
+- writes `changes.md` every run, and toasts you the delta
+- reports to Telegram, so the machine is legible from your phone
+
 Prompts are markdown in this plugin (`prompts/`). Repos stay config
 only.
 
@@ -193,6 +221,18 @@ Send yourself a Telegram message from any desk. Config is **host-level**, not
 per-repo, so one destination receives notices from every repo on the machine
 and the token is never committed into a `.herdr-desk.json`.
 
+**What notifies you by default: a job that failed.** That is all. Successes and
+skips are silent, because a channel that says "spawned manager" on every cron
+slot and "no open Herdr session" once per job is a channel you mute — and a
+muted channel reports nothing at all, including the failure. Four jobs on one
+repo once produced four identical notices in forty minutes for a condition that
+had not changed. The real status of a run is the **merged report** below, written
+by the manager once it has actually done the work, and the **hub** above, which
+counts what every job on the machine is doing.
+
+Skips and successes are still recorded in `runs.jsonl` and printed to stdout, so
+`status` and `history` still answer "why did this not run".
+
 `~/.config/herdr/plugins/herdr-desk/notify.json`:
 
 ```json
@@ -268,6 +308,99 @@ Sending is best-effort and never throws, so a failed notice cannot abort a desk
 run, and a failed notice is never recorded as a failed run. Unconfigured or
 failing sends print `not sent (<reason>)` and exit 0.
 
+### The hub: one count for the whole machine
+
+A merged report answers *"what happened to this repo"*, and only once a job has
+finished. Nothing answered *"what is happening right now, across everything"* —
+which is why the only mid-run notices that used to arrive were the useless ones:
+`spawned manager` on every slot, `re-prompted live manager` on every tick, four
+times a day per job, saying only that something happened.
+
+Counting is the signal. **`herdr-desk hub`** is the state of every job on the
+machine, and the daemon sends it to the host channel when it changes:
+
+```
+🔵 11 running · 1 done · 1 blocked
+• anyrouter/local:deps — upgrade needs a human on the lockfile
+• repo10/local:collect  44m · repo9/local:collect  40m · … · +5 more
+#info #desk #hub #attention
+```
+
+Eleven `running` jobs are one line. The jobs that need a human get a line each,
+with the reason the manager itself reported.
+
+```sh
+herdr-desk hub            # the table
+herdr-desk hub --json     # machine-readable
+herdr-desk hub --send     # send it now, ignoring the gates
+```
+
+**Three states a job can be in**, and only the third is an emergency:
+
+| state | meaning |
+| --- | --- |
+| `running` | fired, no report yet |
+| `ok` / `info` / `skip` / `blocked` / `fail` | settled from the job's own `status.md` |
+| `stuck` | still `running` after 45 min — a manager that died or hung |
+
+A report settles a job; it does not announce it. The per-repo notice below
+already says what happened, so `report` only writes hub state — which means a
+job that finished while you were asleep reads as **done**, not as a run that has
+been going for eight hours.
+
+**Three gates, and the order is the point.** Unchanged state is never re-sent —
+the daemon ticks every 20s, so without this a single job produces 180 identical
+messages an hour. A routine change (2 running → 3 running) waits for a 30-minute
+quiet window, because that is not news. A job that needs a human — `stuck`,
+`blocked`, or `fail` — **does not wait**. That bypass is the whole cost of the
+throttling, and the reason the two rules above are safe to have.
+
+The claim is written *before* the send and released if the send fails. Two jobs
+that finish in the same second would otherwise both see "not yet sent" and both
+send; and a send that never left the machine must not be recorded as delivered,
+or the failure is never reported at all.
+
+### One notice per project, not one per job
+
+A repo usually has several jobs, and they can finish within seconds of each
+other. Each manager writes a small `status.md` into its run dir, then hands it
+to one command:
+
+```sh
+bun src/cli.ts report --repo /path/to/anyrouter --dry-run   # preview
+bun src/cli.ts report --repo /path/to/anyrouter --settle 45 # send
+```
+
+```
+🟠 blocked 2 jobs · 1 ok · 1 blocked
+• desk:github-issues — 3 PRs merged, 1 blocked on a schema call
+  • PR #418 merged
+  • #412 filed
+• local:merge-queue — queue drained, needs a human on the squash policy
+  • waiting on decision for docs/*
+• [changes.md](https://example.com/run/changes.md)
+#blocked #desk
+```
+
+Three things make that one message rather than four:
+
+- **`--settle` waits before reading.** Jobs that finish together are merged by
+  the time anyone looks.
+- **The body is fingerprinted.** Whoever sends first records the hash; the
+  others find it unchanged and stand down. A send is recorded *after* it
+  succeeds — claiming first would let a crash mid-send swallow the notice
+  silently, and a quiet desk is worse than a repeated one.
+- **Jobs are split by destination.** Two jobs routed to different topics stay
+  two notices, so merging never puts an outcome in a channel that job did not
+  choose.
+
+The worst level wins the dot, so one blocked job is visible without opening
+anything. `level` is `ok` / `info` / `skip` / `blocked` / `fail`.
+
+`status.md` is written by the manager, so keep it to one line of insight and
+three bullets. The full delta stays in `changes.md`; the notice is what you
+read on a phone.
+
 ### Per-desk channels
 
 A repo or task can point somewhere else. **Destination only** — a repo config
@@ -309,6 +442,67 @@ To set this up on another machine, paste
 agent there. To bring an existing machine up to date and point it at the same
 chat, use [`prompts/sync-machine-agent.md`](prompts/sync-machine-agent.md).
 
+## Prompts as a registry
+
+A repo can keep its own playbooks, and a **GitHub repo can be a shared library**
+of them — a team writes one triage playbook and every repo on the machine uses
+it, without copying it into each one.
+
+Configure it host-level, in `registry.json` beside `notify.json`:
+
+```json
+{
+  "allow": ["duyet/herdr-desk-prompts"],
+  "registries": [{ "repo": "duyet/herdr-desk-prompts", "ref": "main" }]
+}
+```
+
+Then point a job at it:
+
+```json
+{ "id": "desk:triage", "playbook": "gh:duyet/herdr-desk-prompts/triage.md" }
+```
+
+A registry holds playbooks under `tasks/` (or `prompts/tasks/`, so a repo can
+just copy this plugin's `prompts/`). `herdr-desk tasks` lists what is
+available.
+
+```sh
+bun src/cli.ts prompts list              # registries, allowlist, approved sha
+bun src/cli.ts prompts check             # what upstream changed (read-only)
+bun src/cli.ts prompts apply --accept    # approve it
+bun src/cli.ts prompts pin REPO SHA      # freeze one registry to a commit
+```
+
+**Two independent trust layers.** Either alone leaves a gap:
+
+1. **`allow` is an allowlist and fails closed.** A repo not listed can never be
+   fetched, whatever any other file says. Removing a repo from `allow` also
+   stops it being referenceable, so it really goes out of service.
+2. **Content is locked by sha256.** The first `apply` records the commit and a
+   hash per file. After that, `check` reports drift and `apply` **refuses**
+   without `--accept`. An upstream edit cannot silently rewrite the
+   instructions your agent runs.
+
+Other things that make this safe rather than merely convenient:
+
+- **A registry may only supply `tasks/*.md`.** The manager envelope, the
+  identity rules, and the child prompt stay local, because those decide who the
+  agent is allowed to be. A remote that could change them would be a remote
+  code-execution channel, not a prompt library.
+- **Path traversal, absolute paths, and non-`.md` files are refused**, and each
+  file is capped at 256 KB.
+- **Runs never touch the network.** Resolution reads the approved cache only —
+  an unattended 07:00 job must not depend on GitHub being up.
+- **`gh` is the transport**, so the plugin holds no GitHub token and private
+  registries work with the credentials you already have.
+- **Nothing is executed.** A playbook is text interpolated into a prompt, the
+  same as a repo's own `.md`. The cache is re-verified against the lock on
+  every read, so a hand-edited cache is treated as unapproved.
+
+`check` is read-only and safe to run on a timer. Approving is always a separate,
+explicit step.
+
 ## Actions
 
 ```sh
@@ -319,12 +513,14 @@ herdr plugin action invoke herdr-desk.list
 herdr plugin action invoke herdr-desk.history
 herdr plugin action invoke herdr-desk.validate
 herdr plugin action invoke herdr-desk.notify
+herdr plugin action invoke herdr-desk.prompts   # registries and what is approved
 ```
 
 On-demand (plugin actions take no arguments):
 
 ```sh
 bun src/cli.ts run desk:github-issues --repo /path/to/repo
+bun src/cli.ts report --repo /path/to/repo --settle 45   # merged status notice
 ```
 
 A successful run finds the **already-open** Herdr Space for that repo

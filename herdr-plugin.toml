@@ -19,6 +19,11 @@ title = "Stop the desk daemon"
 command = ["bin/desk", "stop"]
 
 [[actions]]
+id = "hub"
+title = "Show what every job on the machine is doing"
+command = ["bin/desk", "hub"]
+
+[[actions]]
 id = "status"
 title = "Show daemon, cron slots, last/next fire"
 command = ["bin/desk", "status"]
@@ -47,6 +52,11 @@ command = ["bin/desk", "notify"]
 id = "validate"
 title = "Validate discovered repo configs"
 command = ["bin/desk", "validate"]
+
+[[actions]]
+id = "prompts"
+title = "Show prompt/task registries and what is approved"
+command = ["bin/desk", "prompts", "list"]
 
 [[events]]
 on = "workspace.focused"

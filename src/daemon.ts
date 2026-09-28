@@ -11,6 +11,8 @@ import { join } from 'node:path'
 import { cronSlotsToday } from './cron'
 import { dayKey } from './day'
 import { discoverDesks } from './discover'
+import { publish } from './hub'
+import { loadNotifyConfig } from './notify'
 import { pluginStateDir } from './paths'
 import { runTask } from './run'
 
@@ -161,6 +163,9 @@ export async function tickOnce(at = new Date()): Promise<number> {
   const fires = loadFires()
   const day = dayKey(at)
   let n = 0
+  // Set when any fire was a problem, so the hub is published immediately rather
+  // than waiting for the next tick to notice.
+  let needsHub = false
   for (const d of desks) {
     for (const task of d.config.tasks) {
       for (const expr of task.crons) {
@@ -182,13 +187,37 @@ export async function tickOnce(at = new Date()): Promise<number> {
             const msg = err instanceof Error ? err.message : String(err)
             fires[key] = `fail ${new Date().toISOString()}`
             log(`fail ${d.config.name}/${task.id} ${expr} slot ${slot}: ${msg}`)
+            needsHub = true
           }
         }
       }
     }
   }
   saveFires(fires)
+  if (n > 0 || needsHub) await publishHub()
   return n
+}
+
+/**
+ * One hub message per tick, at most.
+ *
+ * The hub is published from the tick rather than from each run, so N jobs
+ * starting in the same tick produce one "N running" line instead of N messages.
+ * `publish` applies the change and window gates; this only has to make sure a
+ * hub failure is logged and swallowed, because a reporting problem must never
+ * stop the next tick from firing work.
+ */
+async function publishHub(): Promise<void> {
+  try {
+    // The host config, not a repo layer resolved from whatever directory the
+    // daemon happens to have been started in. The hub is about the machine, so
+    // it goes where every machine-level notice goes — and a repo's committed
+    // config must not be able to retarget where the whole machine reports to.
+    const result = await publish({ dest: loadNotifyConfig() })
+    if (result.sent) log(`hub sent (${result.body.split('\n')[0]})`)
+  } catch (err) {
+    log(`hub ${err instanceof Error ? err.message : String(err)}`)
+  }
 }
 
 export async function runDaemon(): Promise<void> {

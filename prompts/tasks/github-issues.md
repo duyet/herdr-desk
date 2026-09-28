@@ -14,6 +14,7 @@ All under `{{runDir}}`:
 | `workers.md` | Child worktrees, agent names, PR links |
 | `summary.md` / `SUMMARY.md` | Start-of-run plan + running log |
 | `changes.md` | **After the run:** what actually changed (PRs, merges, skips) |
+| `status.md` | **After the run:** the one-line insight that gets notified |
 | `research-<n>.md` | Write-up when the right output is a note, not a PR |
 | `run.json` | Machine-readable snapshot if you want one |
 
@@ -51,9 +52,12 @@ herdr agent prompt <name> <child prompt>
 6. Fill workers + summary (counts, spawned, skipped + why).
 7. Stay up. Watch children. Pull `main` when a PR merges. Tell remaining
    children to rebase. **Do not close** workspaces you still need. Once a
-   child's PR has merged and nothing remains for it, remove its worktree
-   (`git worktree remove <path>`, after confirming the branch is merged)
-   rather than letting worktrees accumulate across runs.
+   child's PR has merged and nothing remains for it, close its worktree
+   with `herdr worktree remove --workspace <id>` — that reclaims both the
+   checkout and the Herdr Space — then delete the merged branch with
+   `git branch -d <branch>`. Plain `git worktree remove <path>` leaves a
+   Space behind in Herdr, so do not use it. Worktrees are disk, and a desk
+   that leaks one per run stops being navigable within a week.
 8. **When the run is done** (children settled, or you are not
    starting more), write `changes.md` — the human-facing delta:
 
@@ -67,7 +71,13 @@ herdr agent prompt <name> <child prompt>
 - Skipped + why:
 ```
 
-Keep it short. This is what status/`last` shows. Also toast:
+Keep it short. This is what status/`last` shows. Then report the run
+in one line of insight — see **Report** in the manager prompt: write
+`{{runDir}}/status.md` and send it with
+`{{deskBin}} report --repo {{repo}} --settle 45`. Every job on this repo
+merges into one notice, so do not send a second one yourself.
+
+A local toast is still fine for a human at the terminal:
 `herdr notification show "{{deskName}} done" --body "{{runDir}}/changes.md"`
 
 Do not wait until later to write `changes.md`.
