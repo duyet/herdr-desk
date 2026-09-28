@@ -3,6 +3,20 @@
 Versions stay on **0.1.x**. `feat` and `fix` bump the patch. Do not merge a
 1.0 or 0.2 release PR.
 
+## [0.1.6](https://github.com/duyet/herdr-desk/compare/v0.1.5...v0.1.6) (2026-09-28)
+
+
+### Features
+
+* **notify:** one hub for the machine, and reports that mean something ([643b668](https://github.com/duyet/herdr-desk/commit/643b668b0474055f60591fa478ee286f2e5f50d8))
+* **notify:** one-line breadcrumb header, tappable link, health runbook ([#26](https://github.com/duyet/herdr-desk/issues/26)) ([45a0b9a](https://github.com/duyet/herdr-desk/commit/45a0b9a0288143ef35f1327e878ad8bbd1b34222))
+
+
+### Bug Fixes
+
+* **desk:** this repo's job is herdr-desk, not chmonitor ([#30](https://github.com/duyet/herdr-desk/issues/30)) ([74b2b63](https://github.com/duyet/herdr-desk/commit/74b2b63c2c14cc2501102294eac07a16519eed8b))
+* **notify:** keep precondition skips out of the notice channel ([e05bf81](https://github.com/duyet/herdr-desk/commit/e05bf815401fcadcb5f51b3a2789ccf8468edddf))
+
 ## [0.1.5](https://github.com/duyet/herdr-desk/compare/v0.1.4...v0.1.5) (2026-09-27)
 
 
