@@ -320,12 +320,7 @@ async function execute(
   }
 
   const label = `${config.name} ${task.id}`
-  const child = await spawnDeskWorktree(
-    project.workspaceId,
-    task,
-    label,
-    repo,
-  )
+  const child = await spawnDeskWorktree(project.workspaceId, task, label, repo)
   const paneId = child.paneId
   const childWorkspaceId = child.workspaceId
   const workspaceId = project.workspaceId

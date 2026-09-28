@@ -184,9 +184,10 @@ describe('isManagerCheckout', () => {
   const babysit: TaskConfig = { ...base, id: 'local:babysit' }
 
   test('matches the dashed directory Herdr actually creates', () => {
-    // The live shape: branch `desk/local-babysit`, directory `desk-local-babysit`.
-    // The old check compared the branch against the path, never matched, and
-    // every finished manager then hit `agent_name_taken` on every fire.
+    // The live shape: branch `desk/local-babysit`, directory
+    // `desk-local-babysit`. The old check compared the branch against the path,
+    // never matched, and every finished manager then hit `agent_name_taken` on
+    // every fire.
     expect(
       isManagerCheckout(
         '/home/duyet/.herdr/worktrees/chmonitor/desk-local-babysit',
@@ -231,7 +232,7 @@ describe('canPromptManager', () => {
     cwd: '/home/duyet/.herdr/worktrees/chmonitor/desk-local-prod',
   }
 
-  test('prompts a registered-but-unlisted manager instead of starting one', () => {
+  test('prompts a registered-but-unlisted manager, never starts one', () => {
     expect(canPromptManager([registered], [], prod)).toBe(true)
   })
 
