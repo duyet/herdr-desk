@@ -16,6 +16,12 @@ function cells(row: string): string[] {
     .map((c) => c.trim())
 }
 
+/** The `Last` cell of the first data row. */
+function lastCell(out: string): string {
+  const [row = ''] = out.split('\n').slice(2)
+  return cells(row)[LAST] ?? ''
+}
+
 function withLedger(write: () => void, run: () => void): void {
   const dir = mkdtempSync(join(tmpdir(), 'desk-last-'))
   const prev = process.env.HERDR_PLUGIN_STATE_DIR
@@ -43,11 +49,24 @@ function desk(repo: string, name: string, task: string): Discovered {
       },
     ],
   }
-  return { repo, configPath: join(repo, '.herdr-desk.json'), config, source: 'workspace' }
+  return {
+    repo,
+    configPath: join(repo, '.herdr-desk.json'),
+    config,
+    source: 'workspace',
+  }
 }
 
-function rec(partial: Partial<RunRecord> & { at: string; ok: boolean }): RunRecord {
-  return { name: 'anyrouter', repo: '/src/anyrouter', task: 'local:prod-health', mode: 'run', ...partial }
+function rec(
+  partial: Partial<RunRecord> & { at: string; ok: boolean },
+): RunRecord {
+  return {
+    name: 'anyrouter',
+    repo: '/src/anyrouter',
+    task: 'local:prod-health',
+    mode: 'run',
+    ...partial,
+  }
 }
 
 describe('formatSchedule Last column', () => {
@@ -61,7 +80,9 @@ describe('formatSchedule Last column', () => {
     withLedger(
       () => {
         const lines = [
-          JSON.stringify(rec({ at: '2026-09-27T17:13:15.602Z', ok: false, detail: 'boom' })),
+          JSON.stringify(
+            rec({ at: '2026-09-27T17:13:15.602Z', ok: false, detail: 'boom' }),
+          ),
         ]
         const base = Date.parse('2026-09-28T09:48:10.555Z')
         for (let i = 0; i < 250; i++) {
@@ -82,11 +103,20 @@ describe('formatSchedule Last column', () => {
       () => {
         // A global read cannot see the record, so the test cannot pass for the
         // wrong reason on this path.
-        expect(loadRuns(200).some((r) => r.task === 'local:prod-health')).toBe(false)
-        expect(loadRuns(200, { repo: '/src/anyrouter', task: 'local:prod-health' })).toHaveLength(1)
+        expect(loadRuns(200).some((r) => r.task === 'local:prod-health')).toBe(
+          false,
+        )
+        expect(
+          loadRuns(200, { repo: '/src/anyrouter', task: 'local:prod-health' }),
+        ).toHaveLength(1)
 
-        const row = cells(formatSchedule([desk('/src/anyrouter', 'anyrouter', 'local:prod-health')]).split('\n')[2]!)
-        expect(row[LAST]).toBe('fail 2026-09-27 17:13')
+        expect(
+          lastCell(
+            formatSchedule([
+              desk('/src/anyrouter', 'anyrouter', 'local:prod-health'),
+            ]),
+          ),
+        ).toBe('fail 2026-09-27 17:13')
       },
     )
   })
@@ -100,8 +130,13 @@ describe('formatSchedule Last column', () => {
         )
       },
       () => {
-        const row = cells(formatSchedule([desk('/src/anyrouter', 'anyrouter', 'local:prod-health')]).split('\n')[2]!)
-        expect(row[LAST]).toBe('never')
+        expect(
+          lastCell(
+            formatSchedule([
+              desk('/src/anyrouter', 'anyrouter', 'local:prod-health'),
+            ]),
+          ),
+        ).toBe('never')
       },
     )
   })
