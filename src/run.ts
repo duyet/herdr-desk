@@ -1,5 +1,5 @@
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
-import { dirname, join, resolve, sep } from 'node:path'
+import { basename, dirname, join, resolve, sep } from 'node:path'
 import {
   type LoadedDesk,
   loadDeskConfig,
@@ -7,6 +7,7 @@ import {
   type TaskConfig,
 } from './config'
 import { dayKey } from './day'
+import { clearFailures, noteFailure } from './failures'
 import type { NoticeLevel } from './format'
 import {
   herdrCall,
@@ -38,6 +39,8 @@ type RunResult = {
   quiet?: boolean
   spawned?: boolean
   prompted?: boolean
+  /** Prompted an existing finished session rather than starting a new one. */
+  reused?: boolean
   /** Set when the run threw; the message is already ledger-truncated upstream. */
   error?: string
 }
@@ -101,6 +104,10 @@ export async function runTask(opts: {
   const task = resolveTask(config, opts.taskId)
   try {
     const result = await execute(config, repo, task)
+    // A job that got as far as prompting its manager is no longer broken in the
+    // way it was. Clearing here means the *next* real failure announces again,
+    // instead of being suppressed as a "repeat" of a fault that is over.
+    if (result.spawned || result.prompted) clearFailures(repo, task.id)
     await announce(repo, task, result)
     return result
   } catch (err) {
@@ -157,8 +164,18 @@ async function announce(
       taskNotify: task.notify,
     })
     if (!notifyConfig.enabled) return
-    // `announceable` already established there is something to say, so the
-    // body is never null here.
+    // A fault that cannot fix itself produced the identical message on every
+    // tick — four copies of `agent_name_taken` arrived before the first could be
+    // read. The first one announces; the repeats are recorded and counted, and
+    // the hub is where a persistent fault is reported from.
+    const verdict = noteFailure(
+      repo,
+      task.id,
+      result.error ?? result.skipped ?? '',
+    )
+    if (!verdict.announce) return
+    // `announceable` already established there is something to say, so the body
+    // is never null here.
     await notify(
       { message: announceBody(result) as string, repo, label: task.id },
       notifyConfig,
@@ -329,6 +346,29 @@ async function execute(
   const paneId = child.paneId
   const childWorkspaceId = child.workspaceId
   const workspaceId = project.workspaceId
+
+  // A session that exists under this name but is *not* live — typically `done`,
+  // because the previous run finished and the process is still registered.
+  //
+  // `agent start` cannot be used on it: the name is already taken, and Herdr
+  // rejects the call with `agent_name_taken`. That failure recurred on every
+  // tick, forever, for any job whose manager had ever completed — the error
+  // named a session that was sitting right there in its own pane. Prompting
+  // revives the same session, which is what the "reused across ticks" design
+  // intends anyway.
+  if (restart) {
+    markRunning({ repo, task: task.id, desk: config.name })
+    await herdrCall([
+      'agent',
+      'prompt',
+      task.agentName,
+      assembleManagerPrompt(
+        taskVars({ config, task, repo, day, runDir, workspaceId, paneId }),
+      ),
+    ])
+    return done({ prompted: true, reused: true })
+  }
+
   await Bun.sleep(2000)
   markRunning({ repo, task: task.id, desk: config.name })
   await herdrCall([
@@ -375,8 +415,31 @@ async function execute(
  * daily tick reuses one checkout instead of creating a new worktree per day.
  */
 export function deskWorktreeBranch(task: TaskConfig): string {
-  const slug = task.id.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-|-$/g, '')
-  return `desk/${slug}`
+  return `desk/${taskSlug(task)}`
+}
+
+/** Filesystem-safe form of a task id: `local:babysit` -> `local-babysit`. */
+function taskSlug(task: TaskConfig): string {
+  return task.id.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-|-$/g, '')
+}
+
+/**
+ * Does this path belong to `task`'s manager worktree?
+ *
+ * The branch is `desk/local-babysit` but Herdr names the checkout directory
+ * after the same slug with dashes (`desk-local-babysit`). Matching the branch
+ * string against the path therefore never fired, so every finished manager
+ * fell through to `agent start` and failed on `agent_name_taken` — 31
+ * consecutive chmonitor fires for `local:babysit` and `local:prod` before the
+ * run stopped. Accept either spelling.
+ */
+export function isManagerCheckout(path: string, task: TaskConfig): boolean {
+  if (!path) return false
+  const slug = taskSlug(task)
+  const branch = `desk/${slug}`
+  if (path.includes(branch)) return true
+  const dir = basename(path)
+  return dir === `desk-${slug}` || dir === slug
 }
 
 /**
@@ -391,17 +454,16 @@ function reusableManagerPane(
   workspaces: ListedWorkspace[],
   task: TaskConfig,
 ): { paneId: string; workspaceId: string } | undefined {
-  const branch = deskWorktreeBranch(task)
   for (const agent of agents) {
     if (agent.name !== task.agentName) continue
     if (isAgentLive(agent)) continue
     if (!agent.paneId || !agent.workspaceId) continue
     const ws = workspaces.find((w) => w.workspaceId === agent.workspaceId)
-    // The checkout must still exist and still be this task's manager branch.
+    // The checkout must still exist and still be this task's manager worktree.
     // A deleted worktree means the pane is gone too.
     if (ws) {
-      if (!(ws.checkoutPath ?? '').includes(branch)) continue
-    } else if (!agent.cwd?.includes(branch)) {
+      if (!isManagerCheckout(ws.checkoutPath ?? '', task)) continue
+    } else if (!isManagerCheckout(agent.cwd ?? '', task)) {
       continue
     }
     return { paneId: agent.paneId, workspaceId: agent.workspaceId }

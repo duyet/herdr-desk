@@ -228,13 +228,51 @@ export const MAX_REASON = 120
  * must not reduce a PR link to a bare `#418`.
  */
 export function briefReason(text: string, max = MAX_REASON): string {
-  const shortened = text
+  const shortened = humanizeHerdr(text)
     .split(/\s+/)
     .filter(Boolean)
     .map(shortenPathToken)
     .join(' ')
   if (shortened.length <= max) return shortened
   return `${shortened.slice(0, max - 1).trimEnd()}\u2026`
+}
+
+/**
+ * Herdr's own error code, when the message carries one.
+ *
+ * `agent start` rejects a taken name with a machine-shaped message —
+ * `{"error":{"code":"agent_name_taken","message":"agent name chm-babysit is
+ * already used; candidates: terminal_id=…"}}` — which truncated on a phone
+ * reads as a wall of escaped punctuation and tells the reader nothing. The
+ * `code` is the one field that names the fault in a word, so it is lifted to
+ * the front and the raw payload is dropped.
+ */
+const HERDR_ERROR = /"code"\s*:\s*"([a-z0-9_]+)"/
+const HERDR_MESSAGE = /"message"\s*:\s*"((?:[^"\\]|\\.)*)"/
+
+/**
+ * Turn a Herdr failure into one readable line.
+ *
+ * Only the shape Herdr actually produces is rewritten. Anything else is passed
+ * through untouched, because this runs on messages that are already prose and a
+ * clever guess would only corrupt the cases that were fine.
+ *
+ * The trailing `candidates:` dump is dropped: it lists every terminal, pane and
+ * workspace on the machine, which is what pushed the useful part past the cap.
+ * The pane and session that matter are in the full error in `daemon.log`.
+ */
+export function humanizeHerdr(text: string): string {
+  const brace = text.indexOf('{')
+  if (brace === -1) return text
+  const body = text.slice(brace)
+  const code = HERDR_ERROR.exec(body)?.[1]
+  if (!code) return text
+  const detail = HERDR_MESSAGE.exec(body)?.[1]
+  const cleaned = (detail ?? '')
+    .replace(/\\"/g, '"')
+    .replace(/;?\s*candidates:.*$/i, '')
+    .trim()
+  return cleaned ? `${code}: ${cleaned}` : code
 }
 
 /**

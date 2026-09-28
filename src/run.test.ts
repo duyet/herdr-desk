@@ -8,6 +8,7 @@ import {
   announceBody,
   baseRefFrom,
   deskWorktreeBranch,
+  isManagerCheckout,
   preconditionSkip,
   runDirFor,
   writeLatestPointer,
@@ -174,5 +175,40 @@ describe('deskWorktreeBranch', () => {
     // every tick. The manager is long-lived, so its branch must not move.
     expect(deskWorktreeBranch(base)).toBe(deskWorktreeBranch(base))
     expect(deskWorktreeBranch(base)).not.toContain('2026')
+  })
+})
+
+describe('isManagerCheckout', () => {
+  const babysit: TaskConfig = { ...base, id: 'local:babysit' }
+
+  test('matches the dashed directory Herdr actually creates', () => {
+    // The live shape: branch `desk/local-babysit`, directory `desk-local-babysit`.
+    // The old check compared the branch against the path, never matched, and
+    // every finished manager then hit `agent_name_taken` on every fire.
+    expect(
+      isManagerCheckout(
+        '/home/duyet/.herdr/worktrees/chmonitor/desk-local-babysit',
+        babysit,
+      ),
+    ).toBe(true)
+  })
+
+  test('matches a checkout that keeps the branch spelling', () => {
+    expect(
+      isManagerCheckout(
+        '/home/duyet/.herdr/worktrees/chmonitor/desk/local-babysit',
+        babysit,
+      ),
+    ).toBe(true)
+  })
+
+  test('rejects another task’s worktree and an empty path', () => {
+    expect(
+      isManagerCheckout(
+        '/home/duyet/.herdr/worktrees/chmonitor/desk-local-prod',
+        babysit,
+      ),
+    ).toBe(false)
+    expect(isManagerCheckout('', babysit)).toBe(false)
   })
 })
