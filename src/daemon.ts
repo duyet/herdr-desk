@@ -11,11 +11,13 @@ import { join } from 'node:path'
 import { cronSlotsToday } from './cron'
 import { dayKey } from './day'
 import { discoverDesks } from './discover'
+import { check, readHealth } from './health'
 import { defaultHerdrBin } from './herdr'
 import { publish } from './hub'
 import { loadNotifyConfig, notify } from './notify'
 import { pluginStateDir } from './paths'
 import { isPaused, loadPaused, type PauseState } from './pause'
+import { hold, requeue, view } from './queue'
 import { runTask } from './run'
 import { maybeAutoUpdate, updateLockHeld } from './update'
 
@@ -262,6 +264,26 @@ export async function tickOnce(at = new Date()): Promise<number> {
         const slot = plan.run
         if (!slot) continue
         const key = fireKey(d.repo, task.id, expr, day, slot)
+        // Checked immediately before the fire, not once at the top of the
+        // tick: a tick can run for minutes, and a host that was comfortable
+        // when the tick began may be saturated by the time this job is
+        // reached. `docs/machine-health.md` says "check before starting, not
+        // after", and this is that check.
+        const verdict = check(readHealth())
+        if (!verdict.ok) {
+          // Held, not dropped. `key` is deliberately NOT written to `fires`, so
+          // the slot stays due and the same job is offered on a later tick —
+          // and the queue is what says out loud that it was held, rather than
+          // the ledger claiming a fire that never happened.
+          hold(
+            { repo: d.repo, task: task.id, slot, reason: verdict.breaches.join(', ') },
+            at,
+          )
+          log(
+            `hold ${d.config.name}/${task.id} slot ${slot}: ${verdict.breaches.join(', ')}`,
+          )
+          continue
+        }
         log(`fire ${d.config.name}/${task.id} ${expr} slot ${slot}`)
         try {
           const result = await runTask({ repo: d.repo, taskId: task.id })
@@ -279,9 +301,43 @@ export async function tickOnce(at = new Date()): Promise<number> {
       }
     }
   }
+  // A held job is retried *after* the scheduled ones, so the queue can never
+  // starve a job that was actually due.
+  if (await retryHeld(at)) n++
   saveFires(fires)
   if (n > 0 || needsHub) await publishHub()
   return n
+}
+
+/**
+ * Retry one held job, if the host now has room.
+ *
+ * One per tick, and only the oldest. Draining the whole queue the moment the
+ * load dips would reproduce the exact stack-up the gate exists to prevent —
+ * the host looks idle for one tick and gets handed every deferred job at once.
+ *
+ * A retry that fails goes back with the age it already had, so a job that can
+ * never run is eventually given up on rather than circling the queue forever.
+ */
+async function retryHeld(at: Date): Promise<boolean> {
+  const { jobs, expired } = view(at)
+  for (const gone of expired) {
+    log(`give up ${gone.task}: held since ${gone.since} without running`)
+  }
+  const next_ = jobs[0]
+  if (!next_) return false
+  const health = readHealth()
+  if (!check(health).ok) return false
+  try {
+    const result = await runTask({ repo: next_.repo, taskId: next_.task })
+    log(`held ran ${next_.task}: ${JSON.stringify(result)}`)
+    return true
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    requeue(next_, msg)
+    log(`held failed ${next_.task}: ${msg}`)
+    return false
+  }
 }
 
 /**
