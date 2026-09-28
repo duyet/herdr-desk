@@ -1,5 +1,5 @@
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
-import { dirname, join, resolve, sep } from 'node:path'
+import { basename, dirname, join, resolve, sep } from 'node:path'
 import {
   type LoadedDesk,
   loadDeskConfig,
@@ -290,15 +290,12 @@ async function execute(
     return done(preconditionSkip(reason))
   }
 
-  // One long-lived manager session per task. Reuse the session that is already
-  // running; restart it in its existing pane if it finished; only fork a new
-  // worktree when there is nothing to reuse. The manager's branch is also
-  // stable across days, so a daily tick re-prompts the same session instead of
-  // stacking a new workspace + pane per run.
+  // One long-lived manager session per task. Prompt the session that is already
+  // registered — running or finished — and only fork a new worktree when
+  // nothing is registered to prompt. The manager's branch is also stable across
+  // days, so a daily tick re-prompts the same session instead of stacking a new
+  // workspace + pane per run.
   const allAgents = namedAgents(await herdrCall(['agent', 'list']))
-  const live = allAgents.find(
-    (a) => a.name === task.agentName && isAgentLive(a),
-  )
   const vars = taskVars({
     config,
     task,
@@ -308,10 +305,10 @@ async function execute(
     workspaceId: project.workspaceId,
   })
 
-  if (live) {
-    // Marked before the prompt is sent, not after: the work starts when the
-    // manager is prompted, and a run that dies in the prompt call has to look
-    // started-and-failed rather than never having happened.
+  // Marked before the prompt is sent, not after: the work starts when the
+  // manager is prompted, and a run that dies in the prompt call has to look
+  // started-and-failed rather than never having happened.
+  if (canPromptManager(allAgents, listed, task)) {
     markRunning({ repo, task: task.id, desk: config.name })
     await herdrCall([
       'agent',
@@ -323,9 +320,12 @@ async function execute(
   }
 
   const label = `${config.name} ${task.id}`
-  const restart = reusableManagerPane(allAgents, listed, task)
-  const child =
-    restart ?? (await spawnDeskWorktree(project.workspaceId, task, label, repo))
+  const child = await spawnDeskWorktree(
+    project.workspaceId,
+    task,
+    label,
+    repo,
+  )
   const paneId = child.paneId
   const childWorkspaceId = child.workspaceId
   const workspaceId = project.workspaceId
@@ -360,7 +360,6 @@ async function execute(
         workspaceId,
         childWorkspaceId,
         paneId,
-        reusedWorktree: Boolean(restart),
         startedAt: new Date().toISOString(),
       },
       null,
@@ -375,38 +374,59 @@ async function execute(
  * daily tick reuses one checkout instead of creating a new worktree per day.
  */
 export function deskWorktreeBranch(task: TaskConfig): string {
-  const slug = task.id.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-|-$/g, '')
-  return `desk/${slug}`
+  return `desk/${taskSlug(task)}`
+}
+
+/** Filesystem-safe form of a task id: `local:babysit` -> `local-babysit`. */
+function taskSlug(task: TaskConfig): string {
+  return task.id.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-|-$/g, '')
 }
 
 /**
- * Pane of a finished manager session whose worktree is still open.
+ * Does this path belong to `task`'s manager worktree?
  *
- * Restarting there keeps the workspace count flat. `agent start` on a pane
- * whose agent already exited would otherwise stack a new session, so this is
- * only used when the session is not live.
+ * The branch is `desk/local-babysit`, but Herdr names the checkout *directory*
+ * after the same slug with dashes: `desk-local-babysit`. Comparing the branch
+ * against the path therefore never fired, so a finished manager was never
+ * recognised as reusable and every run reached `agent start` — which Herdr
+ * refuses, because it still holds the name. Accept either spelling.
  */
-function reusableManagerPane(
+export function isManagerCheckout(path: string, task: TaskConfig): boolean {
+  if (!path) return false
+  const slug = taskSlug(task)
+  const dir = basename(path)
+  return dir === `desk-${slug}` || dir === slug
+}
+
+/**
+ * Must this run prompt its manager rather than start a new session?
+ *
+ * A name Herdr already holds cannot be started twice: `agent start` is refused
+ * with `agent_name_taken`, and the refusal names the very pane and checkout
+ * holding it. On 2026-09-28 that cost 20 `chmonitor local:prod` fires in 95
+ * seconds, during a live origin outage — the manager was registered the whole
+ * time. So a session is promptable whenever it is still there, running or
+ * finished, and `agent start` is reachable only for a name nobody holds.
+ */
+export function canPromptManager(
   agents: ListedAgent[],
   workspaces: ListedWorkspace[],
   task: TaskConfig,
-): { paneId: string; workspaceId: string } | undefined {
-  const branch = deskWorktreeBranch(task)
+): boolean {
   for (const agent of agents) {
     if (agent.name !== task.agentName) continue
-    if (isAgentLive(agent)) continue
+    // A running session is promptable by name; it needs no checkout match,
+    // because a prompt does not need the worktree to be open.
+    if (isAgentLive(agent)) return true
     if (!agent.paneId || !agent.workspaceId) continue
     const ws = workspaces.find((w) => w.workspaceId === agent.workspaceId)
-    // The checkout must still exist and still be this task's manager branch.
-    // A deleted worktree means the pane is gone too.
-    if (ws) {
-      if (!(ws.checkoutPath ?? '').includes(branch)) continue
-    } else if (!agent.cwd?.includes(branch)) {
-      continue
-    }
-    return { paneId: agent.paneId, workspaceId: agent.workspaceId }
+    // A finished one only counts while its checkout is still on disk and still
+    // this task's manager worktree. A deleted worktree means the pane is gone
+    // too, and there is nothing left to prompt.
+    const checkout = ws ? (ws.checkoutPath ?? '') : (agent.cwd ?? '')
+    if (isManagerCheckout(checkout, task)) return true
   }
-  return undefined
+  return false
 }
 
 /**

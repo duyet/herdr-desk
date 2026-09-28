@@ -3,11 +3,14 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { TaskConfig } from './config'
+import type { ListedAgent } from './herdr'
 import {
   announceable,
   announceBody,
   baseRefFrom,
+  canPromptManager,
   deskWorktreeBranch,
+  isManagerCheckout,
   preconditionSkip,
   runDirFor,
   writeLatestPointer,
@@ -174,5 +177,80 @@ describe('deskWorktreeBranch', () => {
     // every tick. The manager is long-lived, so its branch must not move.
     expect(deskWorktreeBranch(base)).toBe(deskWorktreeBranch(base))
     expect(deskWorktreeBranch(base)).not.toContain('2026')
+  })
+})
+
+describe('isManagerCheckout', () => {
+  const babysit: TaskConfig = { ...base, id: 'local:babysit' }
+
+  test('matches the dashed directory Herdr actually creates', () => {
+    // The live shape: branch `desk/local-babysit`, directory `desk-local-babysit`.
+    // The old check compared the branch against the path, never matched, and
+    // every finished manager then hit `agent_name_taken` on every fire.
+    expect(
+      isManagerCheckout(
+        '/home/duyet/.herdr/worktrees/chmonitor/desk-local-babysit',
+        babysit,
+      ),
+    ).toBe(true)
+  })
+
+  test('matches a checkout that keeps the branch spelling', () => {
+    expect(
+      isManagerCheckout(
+        '/home/duyet/.herdr/worktrees/chmonitor/desk/local-babysit',
+        babysit,
+      ),
+    ).toBe(true)
+  })
+
+  test('rejects another task’s worktree and an empty path', () => {
+    expect(
+      isManagerCheckout(
+        '/home/duyet/.herdr/worktrees/chmonitor/desk-local-prod',
+        babysit,
+      ),
+    ).toBe(false)
+    expect(isManagerCheckout('', babysit)).toBe(false)
+  })
+})
+
+describe('canPromptManager', () => {
+  const prod: TaskConfig = { ...base, id: 'local:prod', agentName: 'chm-prod' }
+
+  // The shape that lost 20 `chmonitor local:prod` fires in 95 seconds on
+  // 2026-09-28: `chm-prod` is registered and finished, its worktree is
+  // `desk-local-prod` because Herdr dashes the branch's slash, and the
+  // workspace list no longer carries it. Nothing matched, so every run reached
+  // `agent start` on a name Herdr was already holding.
+  const registered: ListedAgent = {
+    name: 'chm-prod',
+    status: 'done',
+    paneId: 'wAY:p1',
+    workspaceId: 'wAY',
+    cwd: '/home/duyet/.herdr/worktrees/chmonitor/desk-local-prod',
+  }
+
+  test('prompts a registered-but-unlisted manager instead of starting one', () => {
+    expect(canPromptManager([registered], [], prod)).toBe(true)
+  })
+
+  test('prompts a manager that is still working', () => {
+    // `cwd` is left off: `isAgentLive` calls a session whose cwd is gone dead,
+    // and no checkout at that path exists on a CI runner.
+    expect(
+      canPromptManager([{ name: 'chm-prod', status: 'working' }], [], prod),
+    ).toBe(true)
+  })
+
+  test('starts a session only for a name nobody holds', () => {
+    // The other half of the rule. Without it the test above could pass for the
+    // wrong reason — by answering true no matter what Herdr reported.
+    expect(canPromptManager([], [], prod)).toBe(false)
+  })
+
+  test('starts when the registered manager’s worktree is gone', () => {
+    // Its pane went with the checkout, so there is nothing left to prompt.
+    expect(canPromptManager([{ ...registered, cwd: '' }], [], prod)).toBe(false)
   })
 })
