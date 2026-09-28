@@ -20,13 +20,14 @@ export function formatSchedule(desks: Discovered[], now = new Date()): string {
         .map((expr) => cronNext(expr, now))
         .filter((x): x is Date => x !== null)
         .sort((a, b) => a.getTime() - b.getTime())
+      const job = { repo: d.repo, task: t.id }
       const last = [...runs]
         .reverse()
         .find((r) => r.name === d.config.name && r.task === t.id)
       const lastText = last
         ? `${last.ok ? 'ok' : 'fail'} ${last.at.slice(0, 16).replace('T', ' ')}`
         : 'never'
-      const streak = failureStreak(runs, { repo: d.repo, task: t.id })
+      const streak = failureStreak(loadRuns(200, job), job)
       // A non-zero streak is a job that broke, even if a later fire recovered.
       const failText =
         streak.count > 0
