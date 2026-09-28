@@ -4,8 +4,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { TaskConfig } from './config'
 import {
+  announceable,
   baseRefFrom,
   deskWorktreeBranch,
+  preconditionSkip,
   runDirFor,
   writeLatestPointer,
 } from './run'
@@ -17,6 +19,49 @@ const base: TaskConfig = {
   agent: { ladder: ['grok'], permission: 'default' },
   crons: ['0 7 * * *'],
 }
+
+describe('announceable', () => {
+  test('a quiet precondition skip is never announced', () => {
+    // The exact shape that filled the channel: four anyrouter tasks reported
+    // "no open Herdr session" every 30 minutes, forever, because a precondition
+    // the operator reaches just by closing a Space was being treated as news.
+    expect(
+      announceable(preconditionSkip('no open Herdr session for anyrouter')),
+    ).toBe(false)
+  })
+
+  test('a failure is always announced', () => {
+    expect(announceable({ error: 'boom' })).toBe(true)
+  })
+
+  test('a real run outcome is announced', () => {
+    expect(announceable({ spawned: true })).toBe(true)
+    expect(announceable({ prompted: true })).toBe(true)
+  })
+
+  test('a non-quiet skip stays announceable', () => {
+    // A future task must be able to surface a skip the operator really needs,
+    // so silencing is opt-in per skip rather than blanket for the level.
+    expect(announceable(preconditionSkip('manual lock held', false))).toBe(true)
+    expect(announceable({ skipped: 'manual lock held' })).toBe(true)
+  })
+})
+
+describe('preconditionSkip', () => {
+  test('keeps the reason so history stays diagnosable', () => {
+    // The notice is withheld, not the record: `desk history` is the only way to
+    // tell "the desk never ran" from "the desk ran and said nothing".
+    expect(preconditionSkip('herdr is not running')).toEqual({
+      skipped: 'herdr is not running',
+      quiet: true,
+    })
+  })
+
+  test('defaults to quiet but stays overridable', () => {
+    expect(preconditionSkip('a').quiet).toBe(true)
+    expect(preconditionSkip('a', false).quiet).toBe(false)
+  })
+})
 
 describe('runDirFor', () => {
   test('joins a relative stateDir inside the repo', () => {

@@ -314,6 +314,18 @@ starts the manager there. It will not open a sibling Space at the same
 level. If that project is not open, the run skips. Children are further
 worktrees of the same parent. Writes under `stateDir/<YYYY-MM-DD>/`.
 
+### Precondition skips are recorded but not announced
+
+The two skips that stop a run before any work happens — herdr not running, and
+no open Space for the repo — are **quiet**: the run is written to history and
+to the run dir, but nothing is sent to the notice channel.
+
+A precondition is not something you can act on from a phone, and it recurs on
+*every* tick for as long as it holds. Announcing it turns one closed Space into
+a message every 30 minutes, per task, repeating the same sentence. Real
+outcomes are unaffected: `ok` and `fail` always notify, and a task that needs a
+skip announced can build its result with `preconditionSkip(reason, false)`.
+
 ## New repo
 
 1. Add `.herdr-desk.json` (and optional `.herdr-desk/extra.md`).

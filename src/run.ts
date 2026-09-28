@@ -24,10 +24,29 @@ import { assembleManagerPrompt, taskVars } from './prompt'
 
 type RunResult = {
   skipped?: string
+  /** See {@link preconditionSkip}. Never set alongside {@link error}. */
+  quiet?: boolean
   spawned?: boolean
   prompted?: boolean
   /** Set when the run threw; the message is already ledger-truncated upstream. */
   error?: string
+}
+
+/**
+ * A run that never started because an unmet precondition stopped it.
+ *
+ * `quiet` is the whole point. A precondition is not something the operator can
+ * act on from a phone, and it recurs on *every* tick for as long as the
+ * condition holds. Announcing it turned one closed Herdr Space into a channel
+ * message every 30 minutes — four tasks, forever, all repeating the same
+ * sentence. The run is still written to history, so `desk history` and the
+ * run-dir ledger keep full fidelity; only the notice is withheld.
+ */
+export function preconditionSkip(
+  skipped: string,
+  quiet = true,
+): { skipped: string; quiet: boolean } {
+  return { skipped, quiet }
 }
 
 export function runDirFor(repo: string, task: TaskConfig, day: string): string {
@@ -89,6 +108,17 @@ export async function runTask(opts: {
 }
 
 /**
+ * Whether a run outcome is worth a channel notice.
+ *
+ * A failure always is. A precondition skip is not — see
+ * {@link preconditionSkip}. A skip that is *not* quiet stays announceable, so a
+ * future task can surface a skip the operator genuinely needs to see.
+ */
+export function announceable(result: RunResult): boolean {
+  return result.quiet !== true
+}
+
+/**
  * Send a run outcome to the host notice channel.
  *
  * Best-effort in the strongest sense: it resolves rather than rejects, and its
@@ -107,6 +137,7 @@ async function announce(
       taskNotify: task.notify,
     })
     if (!notifyConfig.enabled) return
+    if (!announceable(result)) return
     // Structured, so the channel gets a bold verdict and a searchable tag
     // instead of a flat line. Only the text is escaped; the markup around it is
     // deliberate, so an issue full of `*` and `_` cannot break the parse.
@@ -165,7 +196,7 @@ async function execute(
   if (!ready.ok) {
     if (ready.reason.includes('socket')) {
       console.log(`${ready.reason} — skip`)
-      return done({ skipped: ready.reason })
+      return done(preconditionSkip('herdr is not running'))
     }
     throw new Error(ready.reason)
   }
@@ -176,9 +207,13 @@ async function execute(
     name: config.name,
   })
   if (!project) {
-    const reason = `no open Herdr session for ${config.name} (${repo}) — skip; will not create a sibling Space`
+    // Deliberately not a channel notice. This is the shape that spammed
+    // `local:collect`, `local:model-hunt`, `local:prod-health` and
+    // `local:merge-queue` every 30 minutes for as long as no anyrouter Space
+    // was open — a state the operator reaches just by closing a window.
+    const reason = `no open Herdr session for ${config.name}`
     console.log(reason)
-    return done({ skipped: reason })
+    return done(preconditionSkip(reason))
   }
 
   // One long-lived manager session per task. Reuse the session that is already
