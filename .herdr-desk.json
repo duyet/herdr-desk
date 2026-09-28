@@ -1,11 +1,11 @@
 {
   "$schema": "https://raw.githubusercontent.com/duyet/herdr-desk/main/herdr-desk.schema.json",
-  "name": "chmonitor",
+  "name": "herdr-desk",
   "tasks": [
     {
       "id": "desk:github-issues",
       "playbook": "github-issues",
-      "agentName": "chm-desk",
+      "agentName": "hd-desk",
       "kind": "opencode",
       "maxChildren": 5,
       "schedule": "0 * * * *",
