@@ -95,12 +95,14 @@ export function writeLatestPointer(
 export async function runTask(opts: {
   repo: string
   taskId?: string
+  /** Recorded so a manual fire is told apart from a cron slot. */
+  trigger?: 'manual'
 }): Promise<RunResult> {
   const config = loadDeskConfig(opts.repo)
   const repo = config.repo ?? opts.repo
   const task = resolveTask(config, opts.taskId)
   try {
-    const result = await execute(config, repo, task)
+    const result = await execute(config, repo, task, opts.trigger)
     await announce(repo, task, result)
     return result
   } catch (err) {
@@ -112,6 +114,7 @@ export async function runTask(opts: {
       mode: 'run',
       ok: false,
       detail: message,
+      trigger: opts.trigger,
     })
     // The hub has to learn that this job is over, or it keeps counting as
     // running until it goes stale and reads as stuck — a failure reported as a
@@ -235,6 +238,7 @@ async function execute(
   config: LoadedDesk,
   repo: string,
   task: TaskConfig,
+  trigger?: 'manual',
 ): Promise<RunResult> {
   const day = dayKey()
   const runDir = runDirFor(repo, task, day)
@@ -249,6 +253,7 @@ async function execute(
       mode: 'run',
       ok: true,
       detail: JSON.stringify(result),
+      trigger,
     })
     return result
   }

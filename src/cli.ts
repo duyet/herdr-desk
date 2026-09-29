@@ -8,7 +8,7 @@ import {
   formatResult,
   planCleanup,
 } from './cleanup'
-import { listBundledTasks, loadDeskConfig } from './config'
+import { listBundledTasks, loadDeskConfig, resolveTask } from './config'
 import { explainConfig, explainTasks, showConfig } from './configShow'
 import {
   daemonPid,
@@ -29,6 +29,15 @@ import {
   notify,
   resolveNotify,
 } from './notify'
+import {
+  describePause,
+  loadPaused,
+  parseUntil,
+  pauseKey,
+  savePaused,
+  withoutPause,
+  withPause,
+} from './pause'
 import {
   approve,
   approvedContent,
@@ -53,7 +62,7 @@ import { scheduleLabel } from './schedule'
 import { SCHEMA_PATH, SCHEMA_URL } from './schema'
 import { formatSchedule } from './status'
 import { textTable } from './table'
-import { formatAgenda } from './timeline'
+import { formatAgenda, formatNext } from './timeline'
 
 function usage(): never {
   console.log(`herdr-desk — Herdr plugin. Each repo is .herdr-desk.json; the daemon picks them up.
@@ -64,6 +73,10 @@ function usage(): never {
   herdr-desk config explain [--repo DIR] [--tasks]
   herdr-desk status
   herdr-desk agenda [DAYS]
+  herdr-desk next [N]
+  herdr-desk trigger [JOB] --repo DIR
+  herdr-desk pause JOB|--all [--repo DIR] [--until DATE]
+  herdr-desk resume JOB|--all [--repo DIR]
   herdr-desk history [N]
   herdr-desk cleanup [--dry-run]
   herdr-desk last
@@ -300,14 +313,71 @@ async function main() {
   if (cmd === 'status') {
     const pid = daemonPid()
     console.log(`daemon: ${pid ? `running (pid ${pid})` : 'stopped'}`)
-    console.log(formatSchedule(await discoverDesks()))
+    console.log(formatSchedule(await discoverDesks(), new Date(), loadPaused()))
     return
   }
 
   if (cmd === 'agenda') {
     const n = Number(argv[1])
     const days = Number.isInteger(n) && n > 0 && n <= 7 ? n : 7
-    console.log(formatAgenda(await discoverDesks(), new Date(), days))
+    console.log(
+      formatAgenda(await discoverDesks(), new Date(), days, loadPaused()),
+    )
+    return
+  }
+
+  if (cmd === 'next') {
+    const n = Number(argv[1])
+    const count = Number.isInteger(n) && n > 0 ? Math.min(n, 100) : 5
+    console.log(
+      formatNext(await discoverDesks(), count, new Date(), loadPaused()),
+    )
+    return
+  }
+
+  if (cmd === 'pause' || cmd === 'resume') {
+    const all = argv.includes('--all')
+    const repo = resolve(arg('--repo', argv) ?? process.cwd())
+    const until = arg('--until', argv)
+    const skip = new Set([arg('--repo', argv), until])
+    const job = argv.slice(1).find((a) => !a.startsWith('--') && !skip.has(a))
+    if (!all && !job) {
+      console.log(
+        `usage: herdr-desk ${cmd} JOB|--all [--repo DIR]${cmd === 'pause' ? ' [--until DATE]' : ''}`,
+      )
+      process.exit(2)
+    }
+    if (job && !all) resolveTask(loadDeskConfig(repo), job) // unknown job -> error
+    const target = all ? 'all' : pauseKey(repo, job as string)
+    const state = loadPaused()
+    if (cmd === 'pause') {
+      const next = withPause(
+        state,
+        target,
+        until ? parseUntil(until) : undefined,
+      )
+      savePaused(next)
+      const entry = target === 'all' ? next.all : next.jobs[target]
+      console.log(`${all ? 'all jobs' : job}: ${describePause(entry ?? {})}`)
+      return
+    }
+    const next = withoutPause(state, target)
+    savePaused(next)
+    console.log(`${all ? 'all jobs' : job}: resumed`)
+    if (!all && next.all) {
+      console.log('note: all jobs are still paused (herdr-desk resume --all)')
+    }
+    return
+  }
+
+  if (cmd === 'trigger') {
+    const repo = resolve(arg('--repo', argv) ?? process.cwd())
+    const job = argv
+      .slice(1)
+      .find((a) => !a.startsWith('--') && a !== arg('--repo', argv))
+    console.log(
+      JSON.stringify(await runTask({ repo, taskId: job, trigger: 'manual' })),
+    )
     return
   }
 

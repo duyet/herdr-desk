@@ -2,6 +2,7 @@ import { cronNext } from './cron'
 import { describeJob } from './describe'
 import type { Discovered } from './discover'
 import { failureStreak, loadRuns } from './history'
+import { describePause, emptyPause, type PauseState, pausedNow } from './pause'
 import { scheduleLabel } from './schedule'
 import { textTable } from './table'
 
@@ -11,7 +12,11 @@ function fmt(d: Date | null): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
 }
 
-export function formatSchedule(desks: Discovered[], now = new Date()): string {
+export function formatSchedule(
+  desks: Discovered[],
+  now = new Date(),
+  paused: PauseState = emptyPause(),
+): string {
   const rows: string[][] = []
   for (const d of desks) {
     for (const t of d.config.tasks) {
@@ -20,6 +25,7 @@ export function formatSchedule(desks: Discovered[], now = new Date()): string {
         .filter((x): x is Date => x !== null)
         .sort((a, b) => a.getTime() - b.getTime())
       const job = { repo: d.repo, task: t.id }
+      const hold = pausedNow(paused, d.repo, t.id, now)
       // One read, scoped to this job. A global tail answers "did anything run
       // recently", not "did *this* job run" — so on a busy desk the `Last`
       // column fell out of the window and rendered `never` for jobs that had
@@ -40,7 +46,7 @@ export function formatSchedule(desks: Discovered[], now = new Date()): string {
         d.config.name,
         t.id,
         scheduleLabel(t.crons),
-        fmt(nexts[0] ?? null),
+        hold ? describePause(hold) : fmt(nexts[0] ?? null),
         lastText,
         failText,
         t.agentName,

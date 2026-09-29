@@ -2,7 +2,13 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { catchUpPlan, loadFires, pruneFires, saveFires } from './daemon'
+import {
+  catchUpPlan,
+  loadFires,
+  pruneFires,
+  saveFires,
+  skipPausedSlots,
+} from './daemon'
 
 const prevState = process.env.HERDR_PLUGIN_STATE_DIR
 
@@ -182,5 +188,31 @@ describe('catchUpPlan', () => {
     const plan = catchUpPlan(half, (slot) => slot === '02:10')
     expect(plan.run).toBe('01:40')
     expect(plan.stale).toEqual(['00:10', '00:40', '01:10'])
+  })
+})
+
+describe('skipPausedSlots', () => {
+  test('paused slots are consumed, so resuming does not replay them', () => {
+    const fires: Record<string, string> = {}
+    const slots = ['07:00', '07:30', '08:00']
+    const cron = '*/30 * * * *'
+    expect(skipPausedSlots(fires, '/r', 't', cron, '2026-09-30', slots)).toBe(3)
+    expect(Object.values(fires).every((v) => v.startsWith('skip paused'))).toBe(
+      true,
+    )
+    // After resume the catch-up plan sees every slot as fired: nothing runs.
+    const plan = catchUpPlan(slots, (slot) =>
+      Boolean(fires[`/r::t::${cron}::2026-09-30::${slot}`]),
+    )
+    expect(plan).toEqual({ run: undefined, stale: [] })
+  })
+
+  test('a slot that already fired keeps its real record', () => {
+    const key = '/r::t::0 7 * * *::2026-09-30::07:00'
+    const fires = { [key]: '2026-09-30T07:00:01Z' }
+    expect(
+      skipPausedSlots(fires, '/r', 't', '0 7 * * *', '2026-09-30', ['07:00']),
+    ).toBe(0)
+    expect(fires[key]).toBe('2026-09-30T07:00:01Z')
   })
 })
