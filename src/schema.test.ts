@@ -152,13 +152,11 @@ describe('validateDeskJson', () => {
 })
 
 describe('agent field', () => {
-  test('accepts a bare rung, a command, and a ladder', () => {
+  test('accepts a bare rung and a ladder that reaches a Herdr kind', () => {
     for (const agent of [
       'claude',
-      'opencode2',
-      'anyr claude --yolo',
-      './scripts/desk-agent.sh --fast',
       { ladder: ['opencode2', 'opencode', 'claude'] },
+      { ladder: ['./scripts/desk-agent.sh --fast', 'codex'] },
       { default: 'pi' },
       { permission: 'yolo' },
       { ladder: 'codex', permission: 'yolo', timeoutMs: 60_000 },
@@ -171,6 +169,21 @@ describe('agent field', () => {
         validateDeskJson({ name: 'demo', tasks: [{ id: 't', agent }] }),
         JSON.stringify(agent),
       ).toEqual([])
+    }
+  })
+
+  test('rejects an agent with no rung Herdr can start', () => {
+    // run.ts launches via `herdr agent start --kind`, so a command-only ladder
+    // would fail every fire; `validate` must say so up front.
+    for (const agent of [
+      'opencode2',
+      'anyr claude --yolo',
+      { ladder: ['opencode2'] },
+    ]) {
+      expect(
+        validateDeskJson({ name: 'demo', agent }).length,
+        JSON.stringify(agent),
+      ).toBe(1)
     }
   })
 
@@ -300,5 +313,24 @@ describe('notify block', () => {
         e.includes('nope'),
       ),
     ).toBe(true)
+  })
+})
+
+describe('agent kind', () => {
+  // A ladder with no rung Herdr can start must fail `validate`, not every
+  // scheduled run.
+  test('rejects a kind Herdr does not support', () => {
+    const cfg = { ...good, tasks: [{ ...good.tasks[0], kind: 'opencode2' }] }
+    expect(validateDeskJson(cfg).join('\n')).toMatch(/opencode2/)
+  })
+
+  test('accepts a ladder with at least one supported kind', () => {
+    const cfg = {
+      ...good,
+      tasks: [
+        { ...good.tasks[0], agent: { ladder: ['opencode2', 'opencode'] } },
+      ],
+    }
+    expect(validateDeskJson(cfg)).toEqual([])
   })
 })

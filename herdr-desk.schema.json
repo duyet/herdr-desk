@@ -75,7 +75,7 @@
     "rung": {
       "type": "string",
       "minLength": 1,
-      "description": "One rung of the agent ladder. A bare Herdr kind (claude, codex, opencode, …) or a command (anyr claude --yolo, opencode2, ./scripts/desk-agent.sh)."
+      "description": "One rung of the agent ladder. A bare Herdr kind (claude, codex, opencode, …) or a command (anyr claude --yolo, opencode2, ./scripts/desk-agent.sh). The daemon launches the first rung that is a Herdr kind; a ladder with none fails validate."
     },
     "agent": {
       "description": "Which local coding agent runs this job. A bare rung, or a block. The ladder is tried in order; a failure escalates down it.",

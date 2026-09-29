@@ -23,6 +23,7 @@ import { recordRun } from './history'
 import { markRunning, markSettled } from './hub'
 import { briefReason, noticeBody, notify, resolveNotify } from './notify'
 import { assembleManagerPrompt, taskVars } from './prompt'
+import { HERDR_AGENT_KINDS } from './schema'
 
 type RunResult = {
   skipped?: string
@@ -90,6 +91,21 @@ export function writeLatestPointer(
   const pointer = join(stateDir, 'LATEST')
   rmSync(pointer, { recursive: true, force: true })
   writeFileSync(pointer, `${taskId}/${day}\n`)
+}
+
+/**
+ * First ladder rung `herdr agent start --kind` accepts. Command rungs and
+ * unknown names are skipped; a ladder with none throws before any worktree is
+ * spawned, naming the rungs, instead of failing inside Herdr.
+ */
+export function launchKind(ladder: string[]): string {
+  const kind = ladder.find((rung) => HERDR_AGENT_KINDS.has(rung.trim()))
+  if (kind === undefined) {
+    throw new Error(
+      `agent ladder [${ladder.join(', ')}] has no Herdr agent kind; use one of: ${[...HERDR_AGENT_KINDS].join(', ')}`,
+    )
+  }
+  return kind.trim()
 }
 
 export async function runTask(opts: {
@@ -324,6 +340,7 @@ async function execute(
     return done({ prompted: true })
   }
 
+  const kind = launchKind(task.agent.ladder)
   const label = `${config.name} ${task.id}`
   const child = await spawnDeskWorktree(project.workspaceId, task, label, repo)
   const paneId = child.paneId
@@ -336,7 +353,7 @@ async function execute(
     'start',
     task.agentName,
     '--kind',
-    task.agent.ladder[0],
+    kind,
     '--pane',
     paneId,
     '--timeout',

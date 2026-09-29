@@ -19,6 +19,49 @@ const TASK_ID = /^[a-z0-9][a-z0-9_.:-]*$/i
 /** A rung: a bare Herdr kind, or a command with arguments. */
 const RUNG = /^\S[\s\S]*$/
 
+/** Kinds `herdr agent start --kind` accepts (from `herdr agent start --help`). */
+export const HERDR_AGENT_KINDS: ReadonlySet<string> = new Set([
+  'pi',
+  'claude',
+  'codex',
+  'gemini',
+  'cursor',
+  'devin',
+  'agy',
+  'cline',
+  'omp',
+  'mastracode',
+  'opencode',
+  'copilot',
+  'kimi',
+  'kiro',
+  'droid',
+  'amp',
+  'grok',
+  'hermes',
+  'kilo',
+  'qodercli',
+  'qwen',
+  'maki',
+  'muse',
+])
+
+/**
+ * The run path launches the first rung Herdr can `agent start`; a ladder with
+ * none can never run, so it is an error here rather than at every fire.
+ */
+function requireHerdrKind(
+  ladder: string[],
+  path: string,
+  errors: string[],
+): void {
+  if (!ladder.some((rung) => HERDR_AGENT_KINDS.has(rung.trim()))) {
+    errors.push(
+      `${path}: [${ladder.join(', ')}] has no Herdr agent kind (${[...HERDR_AGENT_KINDS].join(', ')})`,
+    )
+  }
+}
+
 /**
  * Validate an `agent` field.
  *
@@ -29,6 +72,8 @@ function validateAgent(raw: unknown, path: string, errors: string[]): void {
   if (typeof raw === 'string') {
     if (!RUNG.test(raw.trim())) {
       errors.push(`${path}: must be an agent kind or command`)
+    } else {
+      requireHerdrKind([raw], path, errors)
     }
     return
   }
@@ -59,6 +104,9 @@ function validateAgent(raw: unknown, path: string, errors: string[]): void {
           errors.push(`${path}.ladder[${i}]: must be a non-empty string`)
         }
       })
+      if (list.every((rung) => typeof rung === 'string')) {
+        requireHerdrKind(list, `${path}.ladder`, errors)
+      }
     }
   }
   if (
@@ -187,6 +235,8 @@ export function validateDeskJson(
       errors.push(`${path}.kind: must be a non-empty string`)
     } else if (o.agent !== undefined) {
       errors.push(`${path}.kind: ignored because 'agent' is also set`)
+    } else {
+      requireHerdrKind([o.kind], `${path}.kind`, errors)
     }
   }
   if (o.tasks !== undefined) {
@@ -282,6 +332,8 @@ function validateTask(raw: unknown, path: string, repo?: string): string[] {
       errors.push(`${path}.kind: must be a non-empty string`)
     } else if (o.agent !== undefined) {
       errors.push(`${path}.kind: ignored because 'agent' is also set`)
+    } else {
+      requireHerdrKind([o.kind], `${path}.kind`, errors)
     }
   }
   return errors
