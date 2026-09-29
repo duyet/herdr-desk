@@ -11,11 +11,13 @@ import { join } from 'node:path'
 import { cronSlotsToday } from './cron'
 import { dayKey } from './day'
 import { discoverDesks } from './discover'
+import { defaultHerdrBin } from './herdr'
 import { publish } from './hub'
-import { loadNotifyConfig } from './notify'
+import { loadNotifyConfig, notify } from './notify'
 import { pluginStateDir } from './paths'
 import { isPaused, loadPaused, type PauseState } from './pause'
 import { runTask } from './run'
+import { maybeAutoUpdate } from './update'
 
 const TICK_MS = 20_000
 /** Keep fire keys whose day is within this many days of today (cronNext horizon). */
@@ -324,7 +326,37 @@ export async function runDaemon(): Promise<void> {
     } catch (err) {
       log(`tick ${err instanceof Error ? err.message : err}`)
     }
+    await autoUpdateStep()
     await Bun.sleep(TICK_MS)
+  }
+}
+
+/**
+ * Once a day, check for a release and apply it when `autoUpdate` is on.
+ *
+ * The daemon cannot run `desk update` itself — that stops the daemon, which
+ * would be this process. So after a successful reinstall it drops its pid file,
+ * asks Herdr to start the (new) plugin, and exits. A failure only logs and
+ * notifies: the next tick must still fire work.
+ */
+async function autoUpdateStep(): Promise<void> {
+  try {
+    const outcome = await maybeAutoUpdate({
+      log,
+      notify: async (message) => {
+        await notify({ message, label: 'update' }, loadNotifyConfig())
+      },
+    })
+    if (outcome !== 'updated') return
+    if (existsSync(pidPath())) unlinkSync(pidPath())
+    Bun.spawn(
+      [defaultHerdrBin(), 'plugin', 'action', 'invoke', 'herdr-desk.start'],
+      { stdin: 'ignore', stdout: 'ignore', stderr: 'ignore', env: process.env },
+    ).unref()
+    log('restarting on the updated plugin')
+    process.exit(0)
+  } catch (err) {
+    log(`update ${err instanceof Error ? err.message : String(err)}`)
   }
 }
 

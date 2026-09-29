@@ -145,9 +145,13 @@ export function validateDeskJson(
     'agent',
     'notify',
     'kind',
+    'autoUpdate',
   ])
   for (const k of Object.keys(o)) {
     if (!allowed.has(k)) errors.push(`${path}: unknown field '${k}'`)
+  }
+  if (o.autoUpdate !== undefined && typeof o.autoUpdate !== 'boolean') {
+    errors.push(`${path}.autoUpdate: must be a boolean`)
   }
   if (typeof o.name !== 'string' || !o.name.trim()) {
     errors.push(`${path}.name: required string`)

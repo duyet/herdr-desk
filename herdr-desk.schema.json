@@ -33,6 +33,11 @@
       "deprecated": true,
       "description": "Deprecated: use agent. Read as a one-rung agent ladder."
     },
+    "autoUpdate": {
+      "type": "boolean",
+      "default": true,
+      "description": "Machine config.json only; ignored in repo files. When true, the daemon applies a newer GitHub release (checked at most once a day) by reinstalling the plugin."
+    },
     "tasks": {
       "type": "array",
       "minItems": 1,

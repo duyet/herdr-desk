@@ -88,6 +88,16 @@ id = "prompts"
 title = "Show prompt/task registries and what is approved"
 command = ["bin/desk", "prompts", "list"]
 
+[[actions]]
+id = "update-check"
+title = "Check GitHub for a newer herdr-desk release"
+command = ["bin/desk", "update", "--check"]
+
+[[actions]]
+id = "update"
+title = "Upgrade herdr-desk to the latest release and restart the daemon"
+command = ["bin/desk", "update"]
+
 [[events]]
 on = "workspace.focused"
 command = ["bin/desk", "on-focus"]
