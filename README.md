@@ -33,7 +33,7 @@ context.
 What it does without you:
 
 - picks up open issues and PRs, and decides what is worth doing
-- opens a PR per item, arms auto-merge, and babysits CI
+- opens a PR per item, then babysits CI before merging
 - merges what is green, leaves what needs a human
 - writes `changes.md` every run, and toasts you the delta
 - reports to Telegram, so the machine is legible from your phone
