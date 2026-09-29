@@ -1,0 +1,4 @@
+[
+  {"sessionId":"m-1","messageId":0,"type":"user","message":"Explain the cron parser","timestamp":"2026-09-27T10:00:00.000Z"},
+  {"sessionId":"m-1","messageId":1,"type":"user","message":"and its tests","timestamp":"2026-09-27T10:05:00.000Z"}
+]

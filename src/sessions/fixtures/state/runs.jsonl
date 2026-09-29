@@ -1,0 +1,2 @@
+{"at":"2026-09-29T07:00:00.000Z","name":"alpha","repo":"/work/alpha","task":"github-issues","mode":"run","ok":true}
+{"at":"2026-09-29T11:00:00.000Z","name":"beta","repo":"/work/beta","task":"deps","mode":"run","ok":false,"detail":"no agent"}

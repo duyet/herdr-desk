@@ -64,6 +64,15 @@ import { collectReports, REPORT_FILE, sendReports } from './report'
 import { runTask } from './run'
 import { scheduleLabel } from './schedule'
 import { SCHEMA_PATH, SCHEMA_URL } from './schema'
+import { writeContext } from './sessions/context'
+import {
+  filterSessions,
+  formatIndexStats,
+  formatSessions,
+  indexSessions,
+  loadSessions,
+  parseSince,
+} from './sessions/index'
 import { formatSchedule } from './status'
 import { textTable } from './table'
 import { termOpts } from './term'
@@ -105,6 +114,9 @@ function usage(): never {
   herdr-desk history [N]
   herdr-desk cleanup [--dry-run]
   herdr-desk last
+  herdr-desk sessions index
+  herdr-desk sessions [--repo DIR] [--agent NAME] [--since 7d]
+  herdr-desk context --repo DIR
   herdr-desk start | stop | daemon
   herdr-desk tick
   herdr-desk on-focus
@@ -529,6 +541,36 @@ async function main() {
   if (cmd === 'history') {
     const n = Number(argv[1])
     console.log(formatHistory(loadRuns(Number.isFinite(n) && n > 0 ? n : 40)))
+    return
+  }
+
+  if (cmd === 'sessions') {
+    if (argv[1] === 'index') {
+      console.log(formatIndexStats(indexSessions()))
+      return
+    }
+    const sinceText = arg('--since', argv)
+    const since = sinceText ? parseSince(sinceText) : undefined
+    if (since === null) {
+      console.error(`--since wants 7d, 12h or 30m, got ${sinceText}`)
+      process.exit(2)
+    }
+    const repo = arg('--repo', argv)
+    const rows = filterSessions(loadSessions(), {
+      repo: repo ? resolve(repo) : undefined,
+      agent: arg('--agent', argv),
+      since,
+    })
+    console.log(formatSessions(rows))
+    return
+  }
+
+  if (cmd === 'context') {
+    const repo = arg('--repo', argv)
+    if (!repo) usage()
+    indexSessions()
+    const { path, text } = writeContext(resolve(repo), loadSessions())
+    console.log(`${path}\n\n${text}`)
     return
   }
 

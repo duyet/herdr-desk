@@ -79,6 +79,16 @@ title = "Write a static HTML board to the state dir"
 command = ["bin/desk", "board", "--html"]
 
 [[actions]]
+id = "sessions-index"
+title = "Index local agent sessions (Claude, Codex, Gemini, Grok, desk runs)"
+command = ["bin/desk", "sessions", "index"]
+
+[[actions]]
+id = "sessions"
+title = "Show recent agent sessions across repos"
+command = ["bin/desk", "sessions"]
+
+[[actions]]
 id = "list"
 title = "List desks picked up from repos"
 command = ["bin/desk", "scan"]
