@@ -14,6 +14,7 @@ import {
   pruneFires,
   saveFires,
   skipPausedSlots,
+  stopOn,
   tickOnce,
 } from './daemon'
 import { loadRuns } from './history'
@@ -245,6 +246,41 @@ describe('skipPausedSlots', () => {
       skipPausedSlots(fires, '/r', 't', '0 7 * * *', '2026-09-30', ['07:00']),
     ).toBe(0)
     expect(fires[key]).toBe('2026-09-30T07:00:01Z')
+  })
+})
+
+describe('a daemon that is asked to stop', () => {
+  test('the stop is logged and the pid file goes', () => {
+    // The 2026-09-28 outage: earlyoom sent SIGTERM and `daemon.log` had no end
+    // to the hole. Without this line the desk cannot tell a machine killing it
+    // from a person stopping it — the log reads the same either way, which is
+    // to say it says nothing.
+    const dir = stateDir()
+    writeFileSync(join(dir, 'daemon.pid'), `${process.pid}\n`)
+    const codes: number[] = []
+
+    stopOn('SIGTERM', (code) => codes.push(code))
+
+    const written = readFileSync(join(dir, 'daemon.log'), 'utf8')
+    expect(written).toContain('SIGTERM')
+    expect(written).toContain(`pid=${process.pid}`)
+    expect(existsSync(join(dir, 'daemon.pid'))).toBe(false)
+    // Asked to stop is not a crash. A supervisor that read it as one would
+    // restart the daemon into whatever was pressuring it.
+    expect(codes).toEqual([0])
+  })
+
+  test('a terminal stop and an outside stop do not read the same', () => {
+    // They are different incidents. One line for both makes the 3am read
+    // "the desk stopped" when the answer is "something killed the desk".
+    const dir = stateDir()
+    stopOn('SIGINT', () => {})
+    stopOn('SIGTERM', () => {})
+    const lines = readFileSync(join(dir, 'daemon.log'), 'utf8')
+      .split('\n')
+      .filter(Boolean)
+    expect(lines).toHaveLength(2)
+    expect(lines[0]).not.toBe(lines[1])
   })
 })
 

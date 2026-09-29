@@ -394,20 +394,49 @@ async function publishHub(): Promise<void> {
   }
 }
 
+/** The signals the daemon answers. */
+export type StopSignal = 'SIGTERM' | 'SIGINT'
+
+/**
+ * Record the stop, drop the pid file, exit clean.
+ *
+ * The line is the only trace a stop leaves. Without it a daemon killed by
+ * earlyoom under memory pressure left a hole in `daemon.log` with no end and
+ * no sign the process had been there — `daemon start` was the last line of one
+ * run and the first of the next (duyet/herdr-desk#60). `log` stamps it, so the
+ * hole gets an end even when the cause does not.
+ *
+ * SIGINT reads differently from SIGTERM because the events differ. SIGINT
+ * comes from a terminal; SIGTERM also comes from `desk stop`, a supervisor or
+ * the memory watchdog, and the daemon cannot tell those apart, so the line
+ * says the sender is not recorded here.
+ *
+ * Exit code 0, unchanged. A supervisor that read a requested stop as a crash
+ * would restart the daemon into the same pressure.
+ */
+export function stopOn(
+  signal: StopSignal,
+  exit: (code: number) => void = process.exit,
+): void {
+  log(
+    signal === 'SIGINT'
+      ? `daemon stop pid=${process.pid} on SIGINT: at a terminal`
+      : `daemon stop pid=${process.pid} on ${signal}: asked to stop, sender not in this log`,
+  )
+  try {
+    if (existsSync(pidPath())) unlinkSync(pidPath())
+  } catch {
+    /* ignore */
+  }
+  exit(0)
+}
+
 export async function runDaemon(): Promise<void> {
   mkdirSync(pluginStateDir(), { recursive: true })
   writeFileSync(pidPath(), `${process.pid}\n`)
   log(`daemon start pid=${process.pid}`)
-  const stop = () => {
-    try {
-      if (existsSync(pidPath())) unlinkSync(pidPath())
-    } catch {
-      /* ignore */
-    }
-    process.exit(0)
-  }
-  process.on('SIGTERM', stop)
-  process.on('SIGINT', stop)
+  process.on('SIGTERM', () => stopOn('SIGTERM'))
+  process.on('SIGINT', () => stopOn('SIGINT'))
   for (;;) {
     try {
       await tickOnce()
