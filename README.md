@@ -198,6 +198,10 @@ herdr plugin action invoke herdr-desk.agenda    # upcoming fires per slot, next 
 herdr plugin action invoke herdr-desk.next      # the next 5 fires, soonest first
 herdr plugin action invoke herdr-desk.history   # recent runs (runs.jsonl)
 herdr plugin action invoke herdr-desk.cleanup-dry-run  # what cleanup would remove; `cleanup` removes exactly that
+herdr plugin action invoke herdr-desk.timeline  # one lane per job, next 7 days
+herdr plugin action invoke herdr-desk.heatmap   # 7x24 cron density (heatmap-actual: from the ledger)
+herdr plugin action invoke herdr-desk.analytics # success rate, skip/failure causes, last 30 days
+herdr plugin action invoke herdr-desk.board     # static HTML board in the state dir
 herdr plugin action invoke herdr-desk.last      # today's changes.md from each repo
 herdr plugin action invoke herdr-desk.list      # discovered repos
 bun src/cli.ts config explain --repo DIR        # which layer supplied what
@@ -208,6 +212,10 @@ Or:
 ```sh
 bun src/cli.ts status
 bun src/cli.ts history
+bun src/cli.ts heatmap --actual --since 14d
+bun src/cli.ts analytics --since 7d
+bun src/cli.ts calendar --ics ~/desk.ics    # writes a file only with --ics
+bun src/cli.ts board --html /tmp/board.html # no scripts, no network
 ```
 
 Manage jobs without editing JSON (a job is `JOB --repo DIR`, like `run`):
@@ -224,6 +232,11 @@ Pauses live in `paused.json` in the state dir, never in the committed
 `.herdr-desk.json`. A paused slot is recorded as skipped, so resuming does not
 replay it. `status`, `agenda` and `next` show what is paused. `trigger` runs
 even a paused job, since you asked for it.
+
+Terminal views fit `$COLUMNS` (narrow terminals get one mark per day or merged
+hour buckets) and drop color when piped or when `NO_COLOR` is set. `analytics`
+and `board` also count sessions per agent when `sessions.jsonl` exists in the
+state dir.
 
 Host-level plugin command log (start / focus hooks, not the schedule itself):
 
