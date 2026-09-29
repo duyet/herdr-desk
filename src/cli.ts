@@ -70,8 +70,8 @@ import {
   formatIndexStats,
   formatSessions,
   indexSessions,
-  loadSessions,
-  parseSince,
+  loadSessions as loadSessionIndex,
+  parseSince as parseSessionSince,
 } from './sessions/index'
 import { formatSchedule } from './status'
 import { textTable } from './table'
@@ -550,13 +550,13 @@ async function main() {
       return
     }
     const sinceText = arg('--since', argv)
-    const since = sinceText ? parseSince(sinceText) : undefined
+    const since = sinceText ? parseSessionSince(sinceText) : undefined
     if (since === null) {
       console.error(`--since wants 7d, 12h or 30m, got ${sinceText}`)
       process.exit(2)
     }
     const repo = arg('--repo', argv)
-    const rows = filterSessions(loadSessions(), {
+    const rows = filterSessions(loadSessionIndex(), {
       repo: repo ? resolve(repo) : undefined,
       agent: arg('--agent', argv),
       since,
@@ -569,7 +569,7 @@ async function main() {
     const repo = arg('--repo', argv)
     if (!repo) usage()
     indexSessions()
-    const { path, text } = writeContext(resolve(repo), loadSessions())
+    const { path, text } = writeContext(resolve(repo), loadSessionIndex())
     console.log(`${path}\n\n${text}`)
     return
   }
