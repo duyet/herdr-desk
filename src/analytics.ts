@@ -1,61 +1,7 @@
-import { existsSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
 import type { RunRecord } from './history'
-import { pluginStateDir } from './paths'
+import type { SessionRow } from './sessions/types'
 import { textTable } from './table'
 import { paint, type TermOpts } from './term'
-
-/**
- * One row of `sessions.jsonl`, the P2 session index.
- *
- * That index is built by another command and its format may still grow, so
- * only `agent` and `started` are required; everything else is optional.
- */
-export type SessionRow = {
-  agent: string
-  started: string
-  repo?: string
-  ended?: string
-  title?: string
-}
-
-export function sessionsPath(): string {
-  return join(pluginStateDir(), 'sessions.jsonl')
-}
-
-/** Rows at or after `since`; a missing file or a bad line is not an error. */
-export function loadSessions(since?: Date): SessionRow[] {
-  if (!existsSync(sessionsPath())) return []
-  const str = (v: unknown) => (typeof v === 'string' ? v : undefined)
-  const out: SessionRow[] = []
-  for (const line of readFileSync(sessionsPath(), 'utf8').split('\n')) {
-    if (!line.trim()) continue
-    try {
-      const r = JSON.parse(line) as Record<string, unknown>
-      if (typeof r.agent !== 'string' || typeof r.started !== 'string') continue
-      const t = Date.parse(r.started)
-      if (!Number.isFinite(t) || (since && t < since.getTime())) continue
-      out.push({
-        agent: r.agent,
-        started: r.started,
-        repo: str(r.repo),
-        ended: str(r.ended),
-        title: str(r.title),
-      })
-    } catch {
-      /* skip bad line */
-    }
-  }
-  return out
-}
-
-/** `30d`, `12h`, `2w` -> a Date that far before `now`; null when unparsable. */
-export function parseSince(spec: string, now = new Date()): Date | null {
-  const m = /^(\d+)([hdw])$/.exec(spec.trim())
-  if (!m) return null
-  const hours = { h: 1, d: 24, w: 168 }[m[2] as 'h' | 'd' | 'w']
-  return new Date(now.getTime() - Number(m[1]) * hours * 3_600_000)
-}
 
 /**
  * What one ledger record means.

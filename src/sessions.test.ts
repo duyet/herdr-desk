@@ -22,11 +22,11 @@ import {
   gitRoot,
   indexSessions,
   loadSessions,
-  parseSince,
   type SessionRow,
   sessionsPath,
 } from './sessions/index'
 import { titleLine } from './sessions/types'
+import { parseSince } from './since'
 
 const FIXTURES = join(import.meta.dir, 'sessions', 'fixtures')
 // Strings that only appear in message bodies or model-written summaries.
@@ -263,19 +263,14 @@ describe('filters', () => {
       filterSessions(rows, f).map((r) => r.id)
     expect(ids({ repo: '/work/alpha' })).toEqual(['a', 'b'])
     expect(ids({ agent: 'codex' })).toEqual(['b', 'c'])
-    expect(ids({ since: parseSince('7d', now) ?? 0 })).toEqual(['a', 'c'])
+    expect(ids({ since: parseSince('7d', now) })).toEqual(['a', 'c'])
     expect(
       ids({
         repo: '/work/alpha',
         agent: 'codex',
-        since: parseSince('7d', now) ?? 0,
+        since: parseSince('7d', now),
       }),
     ).toEqual([])
-  })
-
-  test('parseSince rejects anything but Nd / Nh / Nm', () => {
-    expect(parseSince('2h', now)).toBe(now - 7_200_000)
-    expect(parseSince('week')).toBeNull()
   })
 
   test('the table shows When, Agent, Repo, Length, Title', () => {

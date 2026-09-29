@@ -2,7 +2,7 @@
 
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { formatAnalytics, loadSessions, parseSince, rollup } from './analytics'
+import { formatAnalytics, rollup } from './analytics'
 import { formatBoard } from './board'
 import {
   applyCleanup,
@@ -70,9 +70,10 @@ import {
   formatIndexStats,
   formatSessions,
   indexSessions,
-  loadSessions as loadSessionIndex,
-  parseSince as parseSessionSince,
+  loadSessions,
 } from './sessions/index'
+import type { SessionRow } from './sessions/types'
+import { parseSince } from './since'
 import { formatSchedule } from './status'
 import { textTable } from './table'
 import { termOpts } from './term'
@@ -138,15 +139,24 @@ function arg(flag: string, argv: string[]): string | undefined {
   return argv[i + 1]
 }
 
-/** `--since 30d`, default 30 days; a bad value is a usage error, not a guess. */
-function sinceArg(argv: string[]): Date {
-  const spec = arg('--since', argv) ?? '30d'
-  const since = parseSince(spec)
-  if (!since) {
-    console.log(`bad --since ${spec}: use e.g. 12h, 30d, 2w`)
+/** `--since 30d` as epoch ms; a bad value is a usage error, not a guess. */
+function sinceMs(text: string): number {
+  try {
+    return parseSince(text)
+  } catch (e) {
+    console.error((e as Error).message)
     process.exit(2)
   }
-  return since
+}
+
+/** `--since`, default 30 days, as a Date. */
+function sinceArg(argv: string[]): Date {
+  return new Date(sinceMs(arg('--since', argv) ?? '30d'))
+}
+
+/** Index rows that started at or after `since`, skipping rows with no usable start. */
+function sessionsSince(since: Date): SessionRow[] {
+  return loadSessions().filter((s) => Date.parse(s.started) >= since.getTime())
 }
 
 /** Show which layer chose the chat, so "it went to the wrong place" is answerable. */
@@ -491,7 +501,7 @@ async function main() {
     const since = sinceArg(argv)
     console.log(
       formatAnalytics(
-        rollup(loadRunsSince(since), loadSessions(since), since),
+        rollup(loadRunsSince(since), sessionsSince(since), since),
         termOpts(),
         argv.includes('--wide'),
       ),
@@ -524,7 +534,7 @@ async function main() {
     )
     const now = new Date()
     const since = sinceArg(argv)
-    const sessions = loadSessions(since)
+    const sessions = sessionsSince(since)
     const html = formatBoard({
       now,
       days: 7,
@@ -550,13 +560,9 @@ async function main() {
       return
     }
     const sinceText = arg('--since', argv)
-    const since = sinceText ? parseSessionSince(sinceText) : undefined
-    if (since === null) {
-      console.error(`--since wants 7d, 12h or 30m, got ${sinceText}`)
-      process.exit(2)
-    }
+    const since = sinceText ? sinceMs(sinceText) : undefined
     const repo = arg('--repo', argv)
-    const rows = filterSessions(loadSessionIndex(), {
+    const rows = filterSessions(loadSessions(), {
       repo: repo ? resolve(repo) : undefined,
       agent: arg('--agent', argv),
       since,
@@ -569,7 +575,7 @@ async function main() {
     const repo = arg('--repo', argv)
     if (!repo) usage()
     indexSessions()
-    const { path, text } = writeContext(resolve(repo), loadSessionIndex())
+    const { path, text } = writeContext(resolve(repo), loadSessions())
     console.log(`${path}\n\n${text}`)
     return
   }

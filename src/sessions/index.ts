@@ -222,16 +222,6 @@ export function filterSessions(
   )
 }
 
-/** `7d`, `12h`, `30m` → epoch ms that long before `now`; null when invalid. */
-export function parseSince(text: string, now = Date.now()): number | null {
-  const m = /^(\d+)([dhm])$/.exec(text.trim())
-  if (!m) return null
-  const unit = { d: 86_400_000, h: 3_600_000, m: 60_000 }[
-    m[2] as 'd' | 'h' | 'm'
-  ]
-  return now - Number(m[1]) * unit
-}
-
 export function formatDuration(ms: number): string {
   const min = Math.max(0, Math.round(ms / 60_000))
   if (min < 60) return `${min}m`

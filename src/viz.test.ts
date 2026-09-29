@@ -1,18 +1,12 @@
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { describe, expect, test } from 'bun:test'
 import { join } from 'node:path'
-import {
-  formatAnalytics,
-  loadSessions,
-  outcomeOf,
-  parseSince,
-  rollup,
-} from './analytics'
+import { formatAnalytics, outcomeOf, rollup } from './analytics'
 import { formatBoard } from './board'
 import type { LoadedDesk } from './config'
 import type { Discovered } from './discover'
 import type { RunRecord } from './history'
+import type { SessionRow } from './sessions/types'
+import { parseSince } from './since'
 import {
   formatHeatmap,
   formatTimeline,
@@ -43,6 +37,16 @@ function desk(name: string, jobs: Record<string, string[]>): Discovered {
 
 // Wed 2026-09-30 10:00 local.
 const NOW = new Date(2026, 8, 30, 10, 0)
+
+const sess = (agent: SessionRow['agent'], started: string): SessionRow => ({
+  agent,
+  id: agent,
+  repo: null,
+  started,
+  ended: started,
+  title: '',
+  path: '',
+})
 const plain = { width: 100, color: false }
 
 const run = (
@@ -162,10 +166,10 @@ describe('analytics', () => {
   })
 
   test('rollup: skips are not attempts, so they do not lower the rate', () => {
-    const since = parseSince('30d', NOW) ?? NOW
+    const since = new Date(parseSince('30d', NOW.getTime()))
     const r = rollup(
       LEDGER,
-      [{ agent: 'claude', started: '2026-09-29T00:00:00Z' }],
+      [sess('claude', '2026-09-29T00:00:00Z')],
       since,
       NOW,
     )
@@ -181,7 +185,12 @@ describe('analytics', () => {
   })
 
   test('format degrades to one line per job when the table is too wide', () => {
-    const r = rollup(LEDGER, [], parseSince('30d', NOW) ?? NOW, NOW)
+    const r = rollup(
+      LEDGER,
+      [],
+      new Date(parseSince('30d', NOW.getTime())),
+      NOW,
+    )
     const wide = formatAnalytics(r, plain)
     expect(wide).toContain('| JOB')
     const narrow = formatAnalytics(r, { width: 30, color: false })
@@ -196,7 +205,7 @@ describe('analytics', () => {
     const r = rollup(
       [run('t', false, `${base}/a.json`), run('t', false, `${base}/b.json`)],
       [],
-      parseSince('30d', NOW) ?? NOW,
+      new Date(parseSince('30d', NOW.getTime())),
       NOW,
     )
     const out = formatAnalytics(r, { width: 40, color: false })
@@ -207,64 +216,17 @@ describe('analytics', () => {
     const wide = formatAnalytics(r, { width: 40, color: false }, true)
     expect(wide).toContain(`${base}/a.json`)
   })
-
-  test('parseSince rejects junk', () => {
-    expect(parseSince('soon')).toBeNull()
-    expect(parseSince('2w', NOW)?.getTime()).toBe(
-      NOW.getTime() - 14 * 86_400_000,
-    )
-  })
-})
-
-describe('loadSessions', () => {
-  let dir: string
-  const prev = process.env.HERDR_PLUGIN_STATE_DIR
-  beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'desk-sessions-'))
-    process.env.HERDR_PLUGIN_STATE_DIR = dir
-  })
-  afterEach(() => {
-    rmSync(dir, { recursive: true, force: true })
-    if (prev === undefined) delete process.env.HERDR_PLUGIN_STATE_DIR
-    else process.env.HERDR_PLUGIN_STATE_DIR = prev
-  })
-
-  test('missing file is empty, not an error', () => {
-    expect(loadSessions()).toEqual([])
-  })
-
-  test('skips bad lines and rows without agent/started; keeps extra fields out', () => {
-    writeFileSync(
-      join(dir, 'sessions.jsonl'),
-      [
-        '{"agent":"codex","started":"2026-09-29T01:00:00Z","repo":"/r/a","title":"fix","extra":1}',
-        'not json',
-        '{"agent":"claude"}',
-        '{"agent":"grok","started":"yesterday"}',
-        '{"agent":"claude","started":"2026-01-01T00:00:00Z"}',
-      ].join('\n'),
-    )
-    expect(loadSessions(new Date('2026-09-01T00:00:00Z'))).toEqual([
-      {
-        agent: 'codex',
-        started: '2026-09-29T01:00:00Z',
-        repo: '/r/a',
-        ended: undefined,
-        title: 'fix',
-      },
-    ])
-  })
 })
 
 describe('formatBoard', () => {
-  const since = parseSince('30d', NOW) ?? NOW
+  const since = new Date(parseSince('30d', NOW.getTime()))
   const html = formatBoard({
     now: NOW,
     days: 7,
     fires: upcomingFires([desk('a', { triage: ['0 12 * * *'] })], NOW),
     runs: [...LEDGER, run('x', false, '<script>alert(1)</script>')],
     rollup: rollup(LEDGER, [], since, NOW),
-    sessions: [{ agent: 'codex', started: '2026-09-29T01:00:00Z' }],
+    sessions: [sess('codex', '2026-09-29T01:00:00Z')],
   })
 
   test('renders with no network: no script, no external href/src', () => {
