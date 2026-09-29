@@ -569,6 +569,9 @@ Merge that PR yourself — do not auto-merge it.
 
 There is no `herdr plugin update` in Herdr v1, so upgrading means reinstalling.
 Config and state live outside the plugin checkout, so a reinstall keeps both.
+`desk update [--check]` does the reinstall against the latest GitHub release,
+and the daemon does it once a day unless the machine `config.json` sets
+`"autoUpdate": false`. See [docs/setup.md](docs/setup.md#upgrading).
 `bun src/cli.ts status` reports the installed version.
 
 ## Dev

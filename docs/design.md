@@ -150,7 +150,8 @@ are **per-machine, not per-repo**. They belong in
     ]
   },
 
-  "features": { "selfUpgrade": "check", "issues": false, "notify": true },
+  "features": { "issues": false, "notify": true },
+  "autoUpdate": true,
   "defaults": { "schedule": "0 7 * * *", "maxChildren": 16 },
   "limits":  { "concurrentChildren": 8, "perRung": 3, "issuesPerRun": 6 }
 }
@@ -204,12 +205,11 @@ wants without editing code:
 | `sidebar` | on | `agent.view.set` + the overlay pane |
 | `notify` | off | needs targets anyway |
 | `issues` | off | files real GitHub issues, so per-machine opt-in |
-| `selfUpgrade` | `check` | `off` \| `check` \| `auto` |
-
-`selfUpgrade` is three-state on purpose. **Checking is always automatic** — the
-daemon compares the installed commit against the remote on every tick and says
-so in `status`. *Applying* an upgrade is separate, because a plugin that
-rewrites its own checkout with no consent is not a good default. `auto` opts in.
+Self-upgrade is not a feature flag: it is the top-level `autoUpdate` boolean in
+the machine `config.json` (default `true`). The daemon checks the latest GitHub
+release at most once a day; `autoUpdate` only gates *applying* it. A committed
+repo file cannot turn it on or off — the schema accepts the key, the daemon
+reads it only from the machine config.
 
 ### 3.5 Group config: one file for a tree of repos
 
@@ -575,14 +575,16 @@ Reinstall replaces the managed checkout, and is refused over a local link.
   `version` — that is how the desk discovers what it is
 - **local links never auto-upgrade.** `source.kind == "local"` is a hard skip
   with a log line. A dev owns that tree
-- `github` kind: `git fetch` the managed root, compare `resolved_commit`,
-  and if behind, **stop daemon → `herdr plugin install <source> --yes` → start**
+- `github` kind: compare the manifest `version` with the latest GitHub release
+  tag, and if behind, **stop daemon → `herdr plugin install <source> --yes` → start**
 - reinstall, not `git pull`: only reinstall re-registers the manifest, and a new
   release adds new `[[actions]]`. A pull would leave the registered manifest stale
 - honour a pinned `requested_ref` — never silently move a user off their pin
 - the restart must happen *after* the swap, not before
 
-`desk upgrade [--check]` runs this; `--check` is read-only. Changelog: read
+`desk update [--check]` runs this; `--check` is read-only. The daemon runs the
+same check once a day and, with `autoUpdate` on, reinstalls, drops its pid
+file, asks Herdr to start the new plugin, and exits. Changelog: read
 `CHANGELOG.md` from the installed plugin root and show what changed since the
 running version, and surface it in the status output after an upgrade.
 
