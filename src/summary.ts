@@ -40,18 +40,6 @@ const RUN_FILES = ['changes.md', 'status.md']
 export const MAX_RUN_LINES = 300
 export const MAX_FILE_CHARS = 2000
 
-/** `30m`, `12h`, `7d` → milliseconds. `null` for anything else. */
-export function parseSince(text: string): number | null {
-  const m = /^(\d+)([mhd])$/.exec(text.trim())
-  if (!m) return null
-  const n = Number(m[1])
-  if (n <= 0) return null
-  const unit = { m: 60_000, h: 3_600_000, d: 86_400_000 }[
-    m[2] as 'm' | 'h' | 'd'
-  ]
-  return n * unit
-}
-
 /**
  * Every ledger record at or after `since`, oldest first, optionally for one
  * repo.

@@ -79,7 +79,6 @@ import { formatSchedule } from './status'
 import {
   buildSummaryPrompt,
   handToAgent,
-  parseSince,
   runsSince,
   summaryInput,
   summaryOutPath,
@@ -745,13 +744,8 @@ async function main() {
       return
     }
 
-    const window = parseSince(arg('--since', argv) ?? '1d')
-    if (window === null) {
-      console.log('usage: herdr-desk summary [--since 30m|12h|7d] ...')
-      process.exit(2)
-    }
     const now = new Date()
-    const since = new Date(now.getTime() - window)
+    const since = new Date(sinceMs(arg('--since', argv) ?? '1d'))
     // The routing desk: `--repo`, or the cwd. Not a desk is a loud failure,
     // never a guess at some other repo on the machine.
     const config = loadDeskConfig(repo)

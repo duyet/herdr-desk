@@ -9,7 +9,6 @@ import {
   buildSummaryPrompt,
   daysBetween,
   MAX_RUN_LINES,
-  parseSince,
   runsSince,
   summaryInput,
   summaryTask,
@@ -62,17 +61,6 @@ function desk(name: string): LoadedDesk {
 // Wed 2026-09-30 10:00 local.
 const NOW = new Date(2026, 8, 30, 10, 0)
 const DAY_MS = 86_400_000
-
-describe('parseSince', () => {
-  test('reads minutes, hours, days, and rejects the rest', () => {
-    expect(parseSince('30m')).toBe(30 * 60_000)
-    expect(parseSince('12h')).toBe(12 * 3_600_000)
-    expect(parseSince('7d')).toBe(7 * DAY_MS)
-    expect(parseSince('0d')).toBeNull()
-    expect(parseSince('1w')).toBeNull()
-    expect(parseSince('yesterday')).toBeNull()
-  })
-})
 
 describe('runsSince', () => {
   test('the slice respects --since, boundary included', () => {
