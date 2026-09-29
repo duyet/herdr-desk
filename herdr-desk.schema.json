@@ -9,6 +9,10 @@
   "properties": {
     "$schema": { "type": "string" },
     "name": { "type": "string", "minLength": 1 },
+    "group": {
+      "type": "boolean",
+      "description": "Marks an umbrella config that applies to every repo beneath this directory."
+    },
     "repo": { "type": "string" },
     "playbook": {
       "type": "string",

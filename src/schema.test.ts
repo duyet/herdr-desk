@@ -17,6 +17,26 @@ const good = {
   ],
 }
 
+describe('group config', () => {
+  // `group: true` is how an umbrella config opts in (layers.ts). The
+  // validator and the JSON schema must accept it, or the only way to write a
+  // group file fails `validate` and lights up red in editors.
+  test('validator accepts group: true', () => {
+    expect(validateDeskJson({ name: 'fleet', group: true })).toEqual([])
+  })
+
+  test('validator rejects a non-boolean group', () => {
+    expect(validateDeskJson({ name: 'fleet', group: 'yes' }).length).toBe(1)
+  })
+
+  test('JSON schema declares group', () => {
+    const schema = JSON.parse(
+      readFileSync(join(DESK_ROOT, 'herdr-desk.schema.json'), 'utf8'),
+    )
+    expect(schema.properties.group?.type).toBe('boolean')
+  })
+})
+
 describe('validateDeskJson', () => {
   test('accepts a minimal valid file', () => {
     expect(validateDeskJson(good)).toEqual([])

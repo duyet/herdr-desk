@@ -134,6 +134,7 @@ export function validateDeskJson(
   const allowed = new Set([
     '$schema',
     'name',
+    'group',
     'repo',
     'tasks',
     'extra',
@@ -150,6 +151,9 @@ export function validateDeskJson(
   }
   if (typeof o.name !== 'string' || !o.name.trim()) {
     errors.push(`${path}.name: required string`)
+  }
+  if (o.group !== undefined && typeof o.group !== 'boolean') {
+    errors.push(`${path}.group: must be true or false`)
   }
   if (o.repo !== undefined && typeof o.repo !== 'string') {
     errors.push(`${path}.repo: must be a string`)
