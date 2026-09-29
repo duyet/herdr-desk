@@ -64,7 +64,13 @@ import { SCHEMA_PATH, SCHEMA_URL } from './schema'
 import { formatSchedule } from './status'
 import { textTable } from './table'
 import { formatAgenda, formatNext } from './timeline'
-import { checkForUpdate, reinstall, saveLastCheck } from './update'
+import {
+  checkForUpdate,
+  reinstall,
+  releaseUpdateLock,
+  saveLastCheck,
+  takeUpdateLock,
+} from './update'
 
 function usage(): never {
   console.log(`herdr-desk — Herdr plugin. Each repo is .herdr-desk.json; the daemon picks them up.
@@ -413,7 +419,11 @@ async function main() {
   if (cmd === 'start') {
     const r = startDaemon()
     console.log(
-      r.already ? `already running (pid ${r.pid})` : `started pid ${r.pid}`,
+      r.updating
+        ? 'not started: an update is in progress'
+        : r.already
+          ? `already running (pid ${r.pid})`
+          : `started pid ${r.pid}`,
     )
     return
   }
@@ -437,7 +447,13 @@ async function main() {
   if (cmd === 'on-focus') {
     await discoverDesks()
     const r = startDaemon()
-    console.log(r.already ? `daemon pid ${r.pid}` : `started pid ${r.pid}`)
+    console.log(
+      r.updating
+        ? 'not started: an update is in progress'
+        : r.already
+          ? `daemon pid ${r.pid}`
+          : `started pid ${r.pid}`,
+    )
     return
   }
 
@@ -570,12 +586,16 @@ async function main() {
     }
     // Stop, then install, then start: installing under a running daemon leaves
     // it reading files that are being replaced.
+    takeUpdateLock()
     stopDaemon()
-    const startPlugin = () =>
-      Bun.spawnSync(
+    const startPlugin = () => {
+      // Release first: the start action itself honours the lock.
+      releaseUpdateLock()
+      return Bun.spawnSync(
         [defaultHerdrBin(), 'plugin', 'action', 'invoke', 'herdr-desk.start'],
         { stdout: 'pipe', stderr: 'pipe' },
       )
+    }
     try {
       await reinstall(check.source)
     } catch (err) {

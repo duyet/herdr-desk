@@ -17,7 +17,7 @@ import { loadNotifyConfig, notify } from './notify'
 import { pluginStateDir } from './paths'
 import { isPaused, loadPaused, type PauseState } from './pause'
 import { runTask } from './run'
-import { maybeAutoUpdate } from './update'
+import { maybeAutoUpdate, updateLockHeld } from './update'
 
 const TICK_MS = 20_000
 /** Keep fire keys whose day is within this many days of today (cronNext horizon). */
@@ -372,7 +372,14 @@ function sourceNewerThanDaemon(): boolean {
   }
 }
 
-export function startDaemon(): { already?: boolean; pid: number } {
+export function startDaemon(): {
+  already?: boolean
+  updating?: boolean
+  pid: number
+} {
+  // `desk update` holds this while the checkout is being replaced; starting now
+  // would run the old code from files that are changing underneath it.
+  if (updateLockHeld()) return { updating: true, pid: 0 }
   const live = daemonPid()
   if (live) {
     if (!sourceNewerThanDaemon()) return { already: true, pid: live }

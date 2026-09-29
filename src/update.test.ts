@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { startDaemon } from './daemon'
 import { validateDeskJson } from './schema'
 import {
   autoUpdateEnabled,
@@ -12,8 +13,11 @@ import {
   loadLastCheck,
   maybeAutoUpdate,
   parseSelfSource,
+  releaseUpdateLock,
   saveLastCheck,
+  takeUpdateLock,
   type UpdateCheck,
+  updateLockHeld,
 } from './update'
 
 const prevState = process.env.HERDR_PLUGIN_STATE_DIR
@@ -220,5 +224,23 @@ describe('autoUpdate config', () => {
   test('schema accepts a boolean and rejects anything else', () => {
     expect(validateDeskJson({ name: 'd', autoUpdate: false })).toEqual([])
     expect(validateDeskJson({ name: 'd', autoUpdate: 'no' })).toHaveLength(1)
+  })
+})
+
+describe('update lock', () => {
+  const now = new Date('2026-09-30T12:00:00Z')
+
+  // A focus event mid-install must not start the old daemon.
+  test('startDaemon refuses while an update holds the lock', () => {
+    takeUpdateLock(new Date())
+    expect(startDaemon()).toEqual({ updating: true, pid: 0 })
+    releaseUpdateLock()
+    expect(updateLockHeld()).toBe(false)
+  })
+
+  test('a lock older than 10 minutes is stale and no longer blocks', () => {
+    takeUpdateLock(now)
+    expect(updateLockHeld(new Date(now.getTime() + 9 * 60_000))).toBe(true)
+    expect(updateLockHeld(new Date(now.getTime() + 10 * 60_000))).toBe(false)
   })
 })

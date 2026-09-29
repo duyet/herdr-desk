@@ -1,4 +1,10 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { join } from 'node:path'
 import { defaultHerdrBin, defaultSocket, herdrJson } from './herdr'
 import { loadGlobalConfig } from './layers'
@@ -267,4 +273,32 @@ export async function maybeAutoUpdate(
   log(`updated ${what}`)
   await send(`herdr-desk updated ${what}`).catch(() => {})
   return 'updated'
+}
+
+/** An install older than this is assumed dead; its lock no longer blocks. */
+export const UPDATE_LOCK_MS = 10 * 60 * 1000
+
+function lockPath(): string {
+  return join(pluginStateDir(), 'updating')
+}
+
+/**
+ * Held by `desk update` between stopping the daemon and restarting it, so a
+ * `workspace.focused` event cannot start the old daemon from a checkout that
+ * is being replaced.
+ */
+export function takeUpdateLock(now = new Date()): void {
+  mkdirSync(pluginStateDir(), { recursive: true })
+  writeFileSync(lockPath(), `${now.toISOString()}\n`)
+}
+
+export function releaseUpdateLock(): void {
+  rmSync(lockPath(), { force: true })
+}
+
+export function updateLockHeld(now = new Date()): boolean {
+  if (!existsSync(lockPath())) return false
+  const t = Date.parse(readFileSync(lockPath(), 'utf8').trim())
+  if (Number.isNaN(t)) return false
+  return now.getTime() - t < UPDATE_LOCK_MS
 }
