@@ -204,6 +204,9 @@ herdr plugin action invoke herdr-desk.analytics # success rate, skip/failure cau
 herdr plugin action invoke herdr-desk.board     # static HTML board in the state dir
 herdr plugin action invoke herdr-desk.last      # today's changes.md from each repo
 herdr plugin action invoke herdr-desk.list      # discovered repos
+herdr plugin action invoke herdr-desk.sessions-index  # index local agent sessions
+herdr plugin action invoke herdr-desk.sessions  # recent sessions, every agent
+bun src/cli.ts context --repo DIR               # per-repo history file for any agent
 bun src/cli.ts config explain --repo DIR        # which layer supplied what
 ```
 
@@ -244,7 +247,35 @@ Host-level plugin command log (start / focus hooks, not the schedule itself):
 herdr plugin log list --plugin herdr-desk --limit 20
 ```
 
-State on disk: `~/.local/state/herdr/plugins/herdr-desk/` (`daemon.log`, `runs.jsonl`).
+State on disk: `~/.local/state/herdr/plugins/herdr-desk/` (`daemon.log`, `runs.jsonl`, `sessions.jsonl`, `context/`).
+
+### Agent sessions across the machine
+
+`sessions index` reads, never changes, other agents' local session files and
+writes one row per session (agent, repo, start, end, title) to
+`sessions.jsonl` in the state dir. Titles only (the first user line, or the
+agent's own generated title, capped at 80 chars, secrets redacted); no message bodies are copied.
+Re-runs only open files whose mtime or size changed; a file a reader cannot
+parse is counted as skipped, never fatal.
+
+| Agent | Source read |
+|---|---|
+| Claude Code | `~/.claude/projects/<slug>/*.jsonl` |
+| Codex | `~/.codex/sessions/YYYY/MM/DD/*.jsonl` |
+| Gemini CLI | `~/.gemini/tmp/<sha256(project)>/logs.json` |
+| Grok | `~/.grok/sessions/<cwd>/<id>/summary.json` |
+| desk runs | `runs.jsonl` |
+
+```sh
+bun src/cli.ts sessions index
+bun src/cli.ts sessions --repo . --agent codex --since 7d
+bun src/cli.ts context --repo .   # writes and prints <state>/context/<repo>.md
+```
+
+`context` re-indexes, then writes the last 20 sessions for that repo plus the
+last desk run. To let every agent see it, add a line like "run `herdr-desk
+context --repo .` for recent history" to the repo's `AGENTS.md` — the desk
+never edits an agent's config for you. Nothing here is ever sent by notify.
 
 ## Notify
 

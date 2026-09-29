@@ -131,7 +131,7 @@ this morning, and the reverse.
 
 - **Does:** builds one local index, `sessions.jsonl` in the state dir, one row
   per session: `agent`, `repo` (resolved to a git root), `started`, `ended`,
-  `title` (first user line, trimmed to 120 chars), `path` to the source file.
+  `title` (first user line, one line, secrets redacted, trimmed to 80 chars), `path` to the source file.
   No message bodies are copied.
 - **Data (read-only):**
 

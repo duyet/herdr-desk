@@ -1,0 +1,4 @@
+{"timestamp":"2026-09-29T09:00:00.000Z","type":"session_meta","payload":{"id":"x-1","timestamp":"2026-09-29T09:00:00.000Z","cwd":"/work/alpha","originator":"codex_cli_rs","cli_version":"0.1"}}
+{"timestamp":"2026-09-29T09:00:01.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<environment_context>ENV BODY</environment_context>"}]}}
+{"timestamp":"2026-09-29T09:00:02.000Z","type":"event_msg","payload":{"type":"user_message","message":"Bump the deps and open a PR","images":[]}}
+{"timestamp":"2026-09-29T10:15:00.000Z","type":"event_msg","payload":{"type":"agent_message","message":"CODEX BODY"}}
