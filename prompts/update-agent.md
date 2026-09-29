@@ -6,6 +6,12 @@ its config.
 There is **no `herdr plugin update`** in Herdr v1. Reinstalling is the only
 upgrade path, so do not go looking for a subcommand that does not exist.
 
+Prefer the plugin's own actions, which do the steps below for you:
+`herdr plugin action invoke herdr-desk.update-check` (read-only), then
+`herdr plugin action invoke herdr-desk.update`. The daemon also does this once a
+day unless the machine `config.json` sets `"autoUpdate": false`. Use the manual
+steps below only if those fail.
+
 ## 1. Establish what is installed
 
 ```sh

@@ -571,11 +571,20 @@ async function main() {
     // Stop, then install, then start: installing under a running daemon leaves
     // it reading files that are being replaced.
     stopDaemon()
-    await reinstall(check.source)
-    const start = Bun.spawnSync(
-      [defaultHerdrBin(), 'plugin', 'action', 'invoke', 'herdr-desk.start'],
-      { stdout: 'pipe', stderr: 'pipe' },
-    )
+    const startPlugin = () =>
+      Bun.spawnSync(
+        [defaultHerdrBin(), 'plugin', 'action', 'invoke', 'herdr-desk.start'],
+        { stdout: 'pipe', stderr: 'pipe' },
+      )
+    try {
+      await reinstall(check.source)
+    } catch (err) {
+      // Bring the old daemon back so scheduled jobs keep firing.
+      startPlugin()
+      console.error(err instanceof Error ? err.message : String(err))
+      process.exit(1)
+    }
+    const start = startPlugin()
     if (start.exitCode !== 0) {
       console.error(
         `updated ${what}, but restart failed: ${start.stderr.toString().trim()}`,
