@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { loadFires, pruneFires, saveFires } from './daemon'
+import { loadFires, planSlots, pruneFires, saveFires } from './daemon'
 
 const prevState = process.env.HERDR_PLUGIN_STATE_DIR
 
@@ -151,5 +151,31 @@ describe('migrateFires', () => {
   test('ignores a key that is not a legacy day key', () => {
     const { migrateFires } = require('./daemon') as typeof import('./daemon')
     expect(migrateFires({ garbage: 'v' })).toEqual({ garbage: 'v' })
+  })
+})
+
+describe('planSlots', () => {
+  test('after a long sleep, fires one catch-up run, not every missed slot', () => {
+    // A */30 job whose daemon slept 00:00-10:00: 21 slots are unfired.
+    const slots = Array.from({ length: 21 }, (_, i) => {
+      const h = String(Math.floor(i / 2)).padStart(2, '0')
+      return `${h}:${i % 2 ? '30' : '00'}`
+    })
+    const plan = planSlots(slots, () => false)
+    expect(plan.fire).toBe('10:00')
+    expect(plan.skip).toHaveLength(20)
+    expect(plan.skip).not.toContain('10:00')
+  })
+
+  test('fires nothing when every slot is already recorded (no double-fire)', () => {
+    expect(planSlots(['07:00', '07:30'], () => true)).toEqual({
+      fire: null,
+      skip: [],
+    })
+  })
+
+  test('fires the new slot on a normal tick', () => {
+    const plan = planSlots(['07:00', '07:30'], (s) => s === '07:00')
+    expect(plan).toEqual({ fire: '07:30', skip: [] })
   })
 })

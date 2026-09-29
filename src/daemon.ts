@@ -158,6 +158,23 @@ function fireKey(
   return `${repo}::${taskId}::${cron}::${day}::${slot}`
 }
 
+/**
+ * Which of today's due slots to run now.
+ *
+ * Only the newest unfired slot fires; older unfired ones are missed slots
+ * (daemon started late, machine slept, job newly added) and are marked
+ * skipped. Firing each of them would run a half-hourly job ~20 times back to
+ * back after a 10-hour sleep: a stampede of identical work.
+ */
+export function planSlots(
+  slots: string[],
+  done: (slot: string) => boolean,
+): { fire: string | null; skip: string[] } {
+  const open = slots.filter((s) => !done(s))
+  if (open.length === 0) return { fire: null, skip: [] }
+  return { fire: open[open.length - 1], skip: open.slice(0, -1) }
+}
+
 export async function tickOnce(at = new Date()): Promise<number> {
   const desks = await discoverDesks()
   const fires = loadFires()
@@ -174,9 +191,18 @@ export async function tickOnce(at = new Date()): Promise<number> {
         // of the day consume the whole schedule, so `*/30 * * * *` fired once
         // a day instead of 48 times — and `status` showed nothing wrong,
         // because the job was never recorded as failing.
-        for (const slot of cronSlotsToday(expr, at)) {
-          const key = fireKey(d.repo, task.id, expr, day, slot)
-          if (fires[key]) continue
+        const keyOf = (slot: string) =>
+          fireKey(d.repo, task.id, expr, day, slot)
+        const plan = planSlots(
+          cronSlotsToday(expr, at),
+          (s) => !!fires[keyOf(s)],
+        )
+        for (const slot of plan.skip) {
+          fires[keyOf(slot)] = `skip ${new Date().toISOString()}`
+        }
+        if (plan.fire) {
+          const slot = plan.fire
+          const key = keyOf(slot)
           log(`fire ${d.config.name}/${task.id} ${expr} slot ${slot}`)
           try {
             const result = await runTask({ repo: d.repo, taskId: task.id })
@@ -189,6 +215,9 @@ export async function tickOnce(at = new Date()): Promise<number> {
             log(`fail ${d.config.name}/${task.id} ${expr} slot ${slot}: ${msg}`)
             needsHub = true
           }
+          // Persist per fire: a SIGTERM or crash mid-tick must not forget a
+          // run that already happened, or the restart fires it again.
+          saveFires(fires)
         }
       }
     }
