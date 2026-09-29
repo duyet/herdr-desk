@@ -15,6 +15,7 @@ import {
   spoiler,
   strike,
   tag,
+  toPlain,
   underline,
 } from './format'
 import {
@@ -462,7 +463,41 @@ describe('MarkdownV2 formatting', () => {
         result.machine,
       ),
     )
+    // A lone marker was never markup, so it survives as the reader typed it.
     expect(calls[1]?.body.text).toContain('*unbalanced')
+  })
+
+  test('the plain retry of a real notice has no escapes and keeps the link', async () => {
+    // What a report actually sends: escaped `-`, `#`, `.`, and a link whose
+    // URL is the one thing on a phone worth tapping.
+    const message = noticeBody({
+      level: 'ok',
+      headline: 'desk:github-issues merged v1.2',
+      items: ['PR #418 merged'],
+      links: [['PR #418', 'https://github.com/o/r/pull/418']],
+    })
+    const { calls, impl } = stubFetch([400, 200])
+    const result = await notify({ message, repo: '/r/aidr' }, cfg(), impl)
+    expect(result.sent).toBe(true)
+    const plain = String(calls[1]?.body.text)
+    expect(plain).not.toContain('\\')
+    expect(plain).toContain('desk:github-issues merged v1.2')
+    expect(plain).toContain('PR #418 (https://github.com/o/r/pull/418)')
+    expect(plain).toContain('🟢 ok ')
+    expect(plain).not.toContain('*ok*')
+  })
+
+  test('markdown: false sends the plain rendering, not the escaped source', async () => {
+    const { calls, impl } = stubFetch(200)
+    await notify(
+      { message: 'v1\\.2 \\- done', repo: '/r/a-b', markdown: false },
+      cfg(),
+      impl,
+    )
+    // `a-b` is the repo; escaped it would read `a\\-b`.
+    expect(String(calls[0]?.body.text)).toStartWith('a-b · ')
+    expect(String(calls[0]?.body.text)).toContain('v1.2 - done')
+    expect(String(calls[0]?.body.text)).not.toContain('\\')
   })
 
   test('a 403 is not retried', async () => {
@@ -750,5 +785,55 @@ describe('code and pre escape backslashes', () => {
     // Inside code and pre, MarkdownV2 requires both ` and \ to be escaped.
     expect(code('C:\\')).toBe('`C:\\\\`')
     expect(pre('echo \\n')).toBe('```\necho \\\\n\n```')
+  })
+})
+
+describe('toPlain', () => {
+  test('escapes resolve to the character, before markup is read', () => {
+    expect(toPlain('fix \\*auth\\* v1\\.2 \\- \\#9')).toBe(
+      'fix *auth* v1.2 - #9',
+    )
+  })
+
+  test('paired markup is dropped, an odd marker stays literal', () => {
+    expect(toPlain('*ok* _it_ __u__ ~s~ ||sp||')).toBe('ok it u s sp')
+    expect(toPlain('2 * 3')).toBe('2 * 3')
+  })
+
+  test('an escaped backslash before a marker is a backslash, then markup', () => {
+    expect(toPlain('\\\\*b*')).toBe('\\b')
+  })
+
+  test('links keep their URL', () => {
+    expect(toPlain(link('PR #1', 'https://x.io/a_(b)'))).toBe(
+      'PR #1 (https://x.io/a_(b))',
+    )
+    expect(toPlain('[https://x.io](https://x.io)')).toBe('https://x.io')
+  })
+
+  test('code and fences keep their content, quotes lose their marker', () => {
+    expect(toPlain(code('a_b`c'))).toBe('a_b`c')
+    expect(toPlain(pre('x = *1*', 'ts'))).toBe('x = *1*')
+    expect(toPlain(quote('a.b'))).toBe('a.b')
+    expect(toPlain(expandableQuote('x'))).toBe('x')
+  })
+
+  test('a notice cut mid-link is emitted as it stands, never throws', () => {
+    expect(toPlain('see [PR \\#1](https://x.io/pu')).toBe(
+      'see [PR #1](https://x.io/pu',
+    )
+    expect(toPlain('trailing \\')).toBe('trailing \\')
+  })
+
+  test('round-trips every helper to the text a reader saw', () => {
+    const md = [
+      bold('a.b'),
+      italic('c-d'),
+      underline('e'),
+      strike('f'),
+      spoiler('g'),
+    ].join(' ')
+    expect(toPlain(md)).toBe('a.b c-d e f g')
+    expect(toPlain(esc('_*[]()~`>#+-=|{}.!\\'))).toBe('_*[]()~`>#+-=|{}.!\\')
   })
 })

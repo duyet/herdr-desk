@@ -147,3 +147,116 @@ export function noticeBody(parts: NoticeBody): string {
   out.push([LEVEL_TAG[parts.level], ...(parts.tags ?? []).map(tag)].join(' '))
   return out.join('\n')
 }
+
+type PlainToken = { mark?: string; text: string }
+
+/** Unescape inside code and pre, where only `` ` `` and `\` are escapes. */
+const unescCode = (t: string): string => t.replace(/\\([`\\])/g, '$1')
+
+/** Index of the next unescaped `ch` at or after `from`, or -1. */
+function findUnescaped(s: string, ch: string, from: number): number {
+  for (let i = from; i < s.length; i++) {
+    if (s[i] === '\\') {
+      i++
+      continue
+    }
+    if (s[i] === ch) return i
+  }
+  return -1
+}
+
+/**
+ * Render MarkdownV2 as the text a reader would have seen, without markup.
+ *
+ * Used for the plain-text retry after Telegram rejects a message. Sending the
+ * MarkdownV2 source as plain text shows every `\-` and `\.` as a literal
+ * backslash, and throwing the markup away with a regex eats real `*` and `_`
+ * that were escaped on purpose. So this is a single left-to-right scan:
+ * an escape is resolved before any markup is recognised, links keep their URL
+ * as `label (url)`, and a marker without a partner stays literal.
+ *
+ * The input is malformed by definition — that is why Telegram rejected it — and
+ * may have been cut mid-link, so nothing here throws; anything that does not
+ * parse is emitted as it stands.
+ */
+export function toPlain(md: string): string {
+  const tokens: PlainToken[] = []
+  const text = (t: string) => tokens.push({ text: t })
+  let i = 0
+  while (i < md.length) {
+    const lineStart = i === 0 || md[i - 1] === '\n'
+    if (lineStart && md.startsWith('**>', i)) {
+      i += md[i + 3] === ' ' ? 4 : 3
+      continue
+    }
+    if (lineStart && md[i] === '>') {
+      i += md[i + 1] === ' ' ? 2 : 1
+      continue
+    }
+    const c = md[i]
+    if (c === '\\') {
+      text(i + 1 < md.length ? md[i + 1] : '\\')
+      i += 2
+      continue
+    }
+    if (md.startsWith('```', i)) {
+      const end = md.indexOf('```', i + 3)
+      if (end !== -1) {
+        let inner = md.slice(i + 3, end)
+        const nl = inner.indexOf('\n')
+        // The first line of a fence is its language, not content.
+        if (nl !== -1) inner = inner.slice(nl + 1)
+        text(unescCode(inner.replace(/\n$/, '')))
+        i = end + 3
+        continue
+      }
+    }
+    if (c === '`') {
+      const end = findUnescaped(md, '`', i + 1)
+      if (end !== -1) {
+        text(unescCode(md.slice(i + 1, end)))
+        i = end + 1
+        continue
+      }
+    }
+    if (c === '[') {
+      const close = findUnescaped(md, ']', i + 1)
+      if (close !== -1 && md[close + 1] === '(') {
+        const end = findUnescaped(md, ')', close + 2)
+        if (end !== -1) {
+          const label = toPlain(md.slice(i + 1, close))
+          const url = md.slice(close + 2, end).replace(/\\(.)/g, '$1')
+          text(label === url ? url : `${label} (${url})`)
+          i = end + 1
+          continue
+        }
+      }
+    }
+    if (md.startsWith('__', i) || md.startsWith('||', i)) {
+      tokens.push({ mark: md.slice(i, i + 2), text: md.slice(i, i + 2) })
+      i += 2
+      continue
+    }
+    if (c === '*' || c === '_' || c === '~') {
+      tokens.push({ mark: c, text: c })
+      i += 1
+      continue
+    }
+    text(c)
+    i += 1
+  }
+
+  // Markers pair up in order; an odd one out was never markup.
+  const byKind = new Map<string, PlainToken[]>()
+  for (const t of tokens) {
+    if (!t.mark) continue
+    const list = byKind.get(t.mark) ?? []
+    list.push(t)
+    byKind.set(t.mark, list)
+  }
+  for (const list of byKind.values()) {
+    const paired = list.length - (list.length % 2)
+    for (let k = 0; k < paired; k++) list[k].text = ''
+  }
+  return tokens.map((t) => t.text).join('')
+}
