@@ -180,9 +180,11 @@ export function renderMerged(reports: JobReport[]): string {
       out.push(`  • ${esc(item)}`)
     }
     const more = r.items.length - MAX_ITEMS_PER_JOB
-    if (more > 0) out.push(`  • … +${more} more`)
+    if (more > 0) out.push(`  • ${esc(`… +${more} more`)}`)
   }
-  if (hidden > 0) out.push(`• … +${hidden} more job${hidden === 1 ? '' : 's'}`)
+  if (hidden > 0) {
+    out.push(`• ${esc(`… +${hidden} more job${hidden === 1 ? '' : 's'}`)}`)
+  }
 
   const links = shown.flatMap((r) => r.links).slice(0, MAX_LINKS)
   for (const [label, url] of links) out.push(`• ${link(label, url)}`)

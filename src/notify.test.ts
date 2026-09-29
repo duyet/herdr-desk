@@ -4,6 +4,7 @@ import { hostname, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   bold,
+  clip,
   code,
   esc,
   expandableQuote,
@@ -548,7 +549,7 @@ describe('formatNotice body cap', () => {
       ).startsWith('aidr · box · desk:github-issues\n'),
     ).toBe(true)
     expect(out.startsWith('*aidr* · box · `desk:github\\-issues`\n')).toBe(true)
-    expect(out).toContain('chars)')
+    expect(out).toContain('chars\\)')
     expect(out.length).toBeLessThan(MAX_BODY + 80)
   })
 
@@ -699,5 +700,55 @@ describe('resolveNotify precedence', () => {
     const { config, provenance } = resolveNotify({ repo })
     expect(config.chatId).toBe('group-chat')
     expect(provenance.chatId).toBe('group')
+  })
+})
+
+describe('MarkdownV2 truncation', () => {
+  test('the truncation marker is escaped, so a long notice is not rejected', () => {
+    // `(`, `+`, and `)` are reserved in MarkdownV2. Left bare, every notice
+    // over the cap 400s and falls back to plain text, losing all formatting.
+    const message = 'x'.repeat(MAX_BODY + 5)
+    expect(formatNotice({ message }, 'box')).toContain('… \\(\\+5 chars\\)')
+    expect(formatNoticePlain({ message }, 'box')).toContain('… (+5 chars)')
+  })
+
+  test('the cut never leaves a dangling escape backslash', () => {
+    // An escaped body cut between `\` and the char it escapes turns the
+    // marker's own `\(` into `\\(`: a literal backslash and a bare `(`.
+    const message = `${'x'.repeat(MAX_BODY - 1)}\\.tail`
+    const bodyLine = formatNotice({ message }, 'box').split('\n')[1]
+    expect(bodyLine.startsWith(`${'x'.repeat(MAX_BODY - 1)}…`)).toBe(true)
+  })
+
+  test('the cut never splits an emoji surrogate pair', () => {
+    const message = `${'x'.repeat(MAX_BODY - 1)}🟢 more text`
+    const out = formatNoticePlain({ message }, 'box')
+    expect(out).toContain(`${'x'.repeat(MAX_BODY - 1)}…`)
+  })
+})
+
+describe('clip', () => {
+  test('drops an escape backslash orphaned by the cut', () => {
+    // `a\.b` cut at 2 would end on a lone `\`, which then escapes whatever
+    // follows it (the `…` marker) and makes MarkdownV2 reject the message.
+    expect(clip('a\\.b', 2)).toBe('a')
+    // An escaped backslash (`\\`) is a complete pair and is kept.
+    expect(clip('a\\\\b', 3)).toBe('a\\\\')
+  })
+
+  test('does not split a surrogate pair', () => {
+    expect(clip('a🟢', 2)).toBe('a')
+  })
+
+  test('leaves short text alone', () => {
+    expect(clip('abc', 5)).toBe('abc')
+  })
+})
+
+describe('code and pre escape backslashes', () => {
+  test('a trailing backslash cannot escape the closing backtick', () => {
+    // Inside code and pre, MarkdownV2 requires both ` and \ to be escaped.
+    expect(code('C:\\')).toBe('`C:\\\\`')
+    expect(pre('echo \\n')).toBe('```\necho \\\\n\n```')
   })
 })

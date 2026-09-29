@@ -11,6 +11,7 @@ import {
 import { join } from 'node:path'
 import { dayKey } from './day'
 import {
+  clip,
   esc,
   LEVEL_DOT,
   LEVEL_TAG,
@@ -442,7 +443,7 @@ export function renderDigest(s: HubSnapshot): string {
     out.push(
       `• ${esc(
         shown.map((j) => `${deskOf(j)}  ${ago(j.ageMs)}`).join(' · '),
-      )}${rest > 0 ? ` · +${rest} more` : ''}`,
+      )}${rest > 0 ? esc(` · +${rest} more`) : ''}`,
     )
   }
 
@@ -452,7 +453,8 @@ export function renderDigest(s: HubSnapshot): string {
     )
     .slice(0, MAX_ATTENTION_LISTED)) {
     const why = j.headline?.trim()
-    const silent = j.state === 'stuck' ? ` (${formatAge(j.ageMs, true)})` : ''
+    const silent =
+      j.state === 'stuck' ? esc(` (${formatAge(j.ageMs, true)})`) : ''
     out.push(
       `• ${esc(j.state)} ${esc(deskOf(j))}${why ? ` — ${esc(why)}` : ''}${silent}`,
     )
@@ -467,7 +469,7 @@ export function renderDigest(s: HubSnapshot): string {
 
   const body = out.join('\n')
   return body.length > MAX_BODY
-    ? `${body.slice(0, MAX_BODY - 1).trimEnd()}…`
+    ? `${clip(body, MAX_BODY - 1).trimEnd()}…`
     : body
 }
 

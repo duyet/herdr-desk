@@ -164,7 +164,8 @@ describe('renderDigest', () => {
     const body = renderDigest(snapshot())
     const runningLines = body.split('\n').filter((l) => l.startsWith('• '))
     expect(runningLines).toHaveLength(1)
-    expect(runningLines[0]).toContain('+5 more')
+    // `+` is reserved in MarkdownV2; bare, it 400s the whole digest.
+    expect(runningLines[0]).toContain('\\+5 more')
   })
 
   test('a job that needs a human gets its own line with the reason', () => {
@@ -197,7 +198,8 @@ describe('renderDigest', () => {
     markRunning({ repo: '/p/a', task: 't', desk: 'a', at: at(90) })
     const body = renderDigest(snapshot())
     expect(body).toContain('stuck a/t')
-    expect(body).toContain('(90m)')
+    // Parentheses are reserved in MarkdownV2; bare, every stuck job 400s.
+    expect(body).toContain('\\(90m\\)')
   })
 
   test('agent text cannot break the message', () => {

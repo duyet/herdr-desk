@@ -33,14 +33,36 @@ export const underline = (t: string): string => `__${esc(t)}__`
 export const strike = (t: string): string => `~${esc(t)}~`
 /** `||spoiler||` — MarkdownV2 only. */
 export const spoiler = (t: string): string => `||${esc(t)}||`
-/** `` `code` `` — a backtick is escaped, the content is not. */
+/**
+ * Inside code and pre, MarkdownV2 requires exactly `` ` `` and `\` escaped.
+ * An unescaped trailing `\` would escape the closing backtick and 400.
+ */
+const escCode = (t: string): string => t.replace(/[`\\]/g, '\\$&')
+
+/** `` `code` `` — only a backtick or backslash is escaped. */
 export function code(t: string): string {
-  return `\`${t.replace(/`/g, '\\`')}\``
+  return `\`${escCode(t)}\``
 }
 
 /** Fenced block, optionally with a language for highlighting. */
 export function pre(body: string, lang = ''): string {
-  return `\`\`\`${lang}\n${body.replace(/`/g, '\\`')}\n\`\`\``
+  return `\`\`\`${lang}\n${escCode(body)}\n\`\`\``
+}
+
+/**
+ * Cut escaped text to at most `max` UTF-16 units without breaking it.
+ *
+ * A plain `slice` can end between `\` and the character it escapes, leaving a
+ * lone backslash that escapes whatever is appended next, or between the two
+ * halves of an emoji. Either makes Telegram reject the message.
+ */
+export function clip(text: string, max: number): string {
+  if (text.length <= max) return text
+  let out = text.slice(0, max)
+  if (/[\ud800-\udbff]$/.test(out)) out = out.slice(0, -1)
+  const slashes = /\\*$/.exec(out)?.[0].length ?? 0
+  if (slashes % 2 === 1) out = out.slice(0, -1)
+  return out
 }
 
 /** `[label](url)`. A bad URL is downgraded to plain text rather than 400ing. */

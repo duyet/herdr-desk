@@ -108,6 +108,17 @@ describe('worstLevel', () => {
 })
 
 describe('renderMerged', () => {
+  test('overflow markers are escaped for MarkdownV2', () => {
+    // `+` is reserved; a bare `+2 more` makes Telegram reject the notice.
+    const many = Array.from({ length: MAX_JOBS + 2 }, (_, i) =>
+      job({ task: `t${i}`, items: ['a', 'b', 'c', 'd', 'e', 'f'] }),
+    )
+    const body = renderMerged(many)
+    expect(body).toContain('  • … \\+2 more')
+    expect(body).toContain('• … \\+2 more jobs')
+    expect(body).not.toMatch(/[^\\]\+\d/)
+  })
+
   test('one job renders as a single readable block', () => {
     const body = renderMerged([
       job({
@@ -194,7 +205,7 @@ describe('renderMerged', () => {
       (_, i) => `item ${i}`,
     )
     const body = renderMerged([job({ task: 'desk:github-issues', items })])
-    expect(body).toContain(`… +3 more`)
+    expect(body).toContain(`… \\+3 more`)
     expect(body.split('\n').filter((l) => l.startsWith('  • ')).length).toBe(
       MAX_ITEMS_PER_JOB + 1,
     )
@@ -206,7 +217,7 @@ describe('renderMerged', () => {
         job({ task: `local:j${i}` }),
       ),
     )
-    expect(body).toContain('• … +2 more jobs')
+    expect(body).toContain('• … \\+2 more jobs')
   })
 
   test('no reports render as nothing at all', () => {
