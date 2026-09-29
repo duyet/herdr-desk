@@ -1,6 +1,6 @@
 import { outcomeOf, pct, type Rollup, type SessionRow } from './analytics'
 import type { RunRecord } from './history'
-import type { Fire } from './timeline'
+import { DENSE, type Fire } from './timeline'
 
 const esc = (s: string): string =>
   s.replace(
@@ -33,17 +33,40 @@ export type BoardData = {
 function slotGrid(fires: Fire[], now: Date, days: number): string {
   const start = new Date(now)
   start.setHours(0, 0, 0, 0)
-  const cells = new Map<string, Fire[]>()
-  for (const f of fires) {
-    const di = Math.round(
-      (new Date(f.at).setHours(0, 0, 0, 0) - start.getTime()) / 86_400_000,
+  const dayIdx = (at: Date) =>
+    Math.round(
+      (new Date(at).setHours(0, 0, 0, 0) - start.getTime()) / 86_400_000,
     )
-    const k = `${di}:${f.at.getHours()}`
-    cells.set(k, [...(cells.get(k) ?? []), f])
+  // Like `agenda`: a job firing more than DENSE times in a day is one entry at
+  // its first fire, not one per fire, or a */30 job buries the grid.
+  const perJobDay = new Map<string, Fire[]>()
+  for (const f of fires) {
+    const k = `${dayIdx(f.at)}\0${f.repo}\0${f.job}`
+    perJobDay.set(k, [...(perJobDay.get(k) ?? []), f])
   }
-  const hours = [...new Set(fires.map((f) => f.at.getHours()))].sort(
-    (a, b) => a - b,
-  )
+  const hm = (d: Date) => `${p(d.getHours())}:${p(d.getMinutes())}`
+  const cells = new Map<string, { f: Fire; text: string }[]>()
+  for (const [k, fs] of perJobDay) {
+    const di = k.split('\0')[0]
+    const shown =
+      fs.length > DENSE
+        ? [
+            {
+              f: fs[0],
+              text: `${hm(fs[0].at)}-${hm(fs[fs.length - 1].at)} x${fs.length}`,
+            },
+          ]
+        : fs.map((f) => ({ f, text: hm(f.at) }))
+    for (const e of shown) {
+      const ck = `${di}:${e.f.at.getHours()}`
+      cells.set(ck, [...(cells.get(ck) ?? []), e])
+    }
+  }
+  for (const list of cells.values())
+    list.sort((a, b) => a.f.at.getTime() - b.f.at.getTime())
+  const hours = [
+    ...new Set([...cells.keys()].map((k) => Number(k.split(':')[1]))),
+  ].sort((a, b) => a - b)
   if (hours.length === 0) return '<p class="muted">No fires scheduled.</p>'
   const head = Array.from({ length: days }, (_, i) => {
     const d = new Date(start)
@@ -57,8 +80,8 @@ function slotGrid(fires: Fire[], now: Date, days: number): string {
         if (fs.length === 0) return '<td></td>'
         const items = fs
           .map(
-            (f) =>
-              `<div class="fire" title="${esc(f.agent)}">${p(f.at.getHours())}:${p(f.at.getMinutes())} ${esc(f.repo)}/${esc(f.job)}</div>`,
+            ({ f, text }) =>
+              `<div class="fire" title="${esc(f.agent)}">${text} ${esc(f.repo)}/${esc(f.job)}</div>`,
           )
           .join('')
         return `<td class="${fs.length > 1 ? 'busy' : 'on'}">${items}</td>`

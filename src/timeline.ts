@@ -13,7 +13,7 @@ import { paint, type TermOpts } from './term'
 export type Fire = { at: Date; repo: string; job: string; agent: string }
 
 /** A job firing more often than this in one day is shown as one summary line. */
-const DENSE = 6
+export const DENSE = 6
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const p = (n: number) => String(n).padStart(2, '0')

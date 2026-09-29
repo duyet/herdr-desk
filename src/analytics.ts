@@ -70,12 +70,11 @@ export function outcomeOf(r: RunRecord): {
 } {
   if (!r.ok) {
     const first = (r.detail ?? 'unknown error').split('\n')[0]
-    return { kind: 'fail', cause: first.slice(0, 80) }
+    return { kind: 'fail', cause: first }
   }
   try {
     const d = JSON.parse(r.detail ?? '{}') as { skipped?: unknown }
-    if (typeof d.skipped === 'string')
-      return { kind: 'skip', cause: d.skipped.slice(0, 80) }
+    if (typeof d.skipped === 'string') return { kind: 'skip', cause: d.skipped }
   } catch {
     /* a free-text ok detail still counts as a run */
   }
@@ -171,7 +170,11 @@ export const pct = (r: number | null): string =>
 const fit = (s: string, w: number) =>
   s.length > w ? `${s.slice(0, Math.max(1, w - 1))}…` : s
 
-export function formatAnalytics(r: Rollup, opts: TermOpts): string {
+export function formatAnalytics(
+  r: Rollup,
+  opts: TermOpts,
+  wide = false,
+): string {
   const rateColor = (x: number | null) =>
     x === null ? '0' : x >= 0.9 ? '32' : x >= 0.6 ? '33' : '31'
   const lines = [
@@ -201,12 +204,21 @@ export function formatAnalytics(r: Rollup, opts: TermOpts): string {
           ),
         )
   }
-  const causeW = Math.max(12, opts.width - 8)
+  // Never truncate a cause: two errors that differ only past the cut would
+  // read as one. Wrap to the width instead, or keep one line with `wide`.
+  const causeW = Math.max(12, opts.width - 7)
+  const wrap = (c: string): string[] => {
+    if (wide) return [c]
+    const out: string[] = []
+    for (let i = 0; i < c.length; i += causeW) out.push(c.slice(i, i + causeW))
+    return out.length ? out : ['']
+  }
   const causes = (title: string, xs: [string, number][]) => {
     if (!xs.length) return
     lines.push('', title)
     for (const [c, n] of xs.slice(0, 5))
-      lines.push(`${String(n).padStart(5)}  ${fit(c, causeW)}`)
+      for (const [i, part] of wrap(c).entries())
+        lines.push(`${i === 0 ? String(n).padStart(5) : '     '}  ${part}`)
   }
   causes('failure causes', r.failCauses)
   causes('skip reasons', r.skipCauses)

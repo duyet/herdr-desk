@@ -99,7 +99,7 @@ function usage(): never {
   herdr-desk resume JOB|--all [--repo DIR]
   herdr-desk timeline
   herdr-desk heatmap [--actual] [--since 30d]
-  herdr-desk analytics [--since 30d]
+  herdr-desk analytics [--since 30d] [--wide]
   herdr-desk calendar [--ics FILE]
   herdr-desk board --html [FILE]
   herdr-desk history [N]
@@ -481,6 +481,7 @@ async function main() {
       formatAnalytics(
         rollup(loadRunsSince(since), loadSessions(since), since),
         termOpts(),
+        argv.includes('--wide'),
       ),
     )
     return

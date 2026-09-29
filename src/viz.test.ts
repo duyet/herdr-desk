@@ -190,6 +190,24 @@ describe('analytics', () => {
       expect(l.length).toBeLessThanOrEqual(30)
   })
 
+  test('long causes wrap in full, so errors differing late stay distinct', () => {
+    const base =
+      'EISDIR: illegal operation on a directory, open /home/u/project/x'
+    const r = rollup(
+      [run('t', false, `${base}/a.json`), run('t', false, `${base}/b.json`)],
+      [],
+      parseSince('30d', NOW) ?? NOW,
+      NOW,
+    )
+    const out = formatAnalytics(r, { width: 40, color: false })
+    for (const l of out.split('\n').slice(1))
+      expect(l.length).toBeLessThanOrEqual(40)
+    expect(out.replace(/\n +/g, '')).toContain('x/a.json')
+    expect(out.replace(/\n +/g, '')).toContain('x/b.json')
+    const wide = formatAnalytics(r, { width: 40, color: false }, true)
+    expect(wide).toContain(`${base}/a.json`)
+  })
+
   test('parseSince rejects junk', () => {
     expect(parseSince('soon')).toBeNull()
     expect(parseSince('2w', NOW)?.getTime()).toBe(
@@ -262,6 +280,19 @@ describe('formatBoard', () => {
     expect(html).toContain('<span class="st skip">skip</span>')
     expect(html).toContain('67%')
     expect(html).toContain('<h2>Sessions</h2>')
+  })
+
+  test('a dense job is one range entry per day, not one per fire', () => {
+    const dense = formatBoard({
+      now: NOW,
+      days: 1,
+      fires: upcomingFires([desk('a', { poll: ['*/30 * * * *'] })], NOW, 1),
+      runs: [],
+      rollup: rollup([], [], since, NOW),
+      sessions: [],
+    })
+    expect(dense.match(/class="fire"/g)?.length).toBe(1)
+    expect(dense).toContain('10:30-23:30 x27 a/poll')
   })
 
   test('no sessions section when there is no index', () => {
