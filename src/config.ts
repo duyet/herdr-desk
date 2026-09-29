@@ -21,7 +21,8 @@ export type Schedule = string | string[]
  * `ladder` is ordered by preference: the first rung is tried first, and a
  * failure escalates down the list. A rung is either a bare Herdr agent kind
  * (`claude`) or a command (`anyr claude --yolo`, `opencode2`,
- * `./scripts/desk-agent.sh`) — see `agents.ts` for how the transport is chosen.
+ * `./scripts/desk-agent.sh`). The daemon starts the first rung that is a
+ * Herdr kind (`launchKind` in `run.ts`); command rungs are skipped.
  */
 export type AgentSpec = {
   ladder: string[]
