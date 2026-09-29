@@ -80,6 +80,28 @@ export function loadRuns(limit = 40, job?: JobKey): RunRecord[] {
   return out.reverse()
 }
 
+/**
+ * Every record at or after `since`, oldest first.
+ *
+ * Unbounded by {@link MAX} on purpose: analytics over 30 days must see all
+ * 30 days, not the newest 200 fires. Bad lines are skipped like in `loadRuns`.
+ */
+export function loadRunsSince(since: Date): RunRecord[] {
+  if (!existsSync(historyPath())) return []
+  const out: RunRecord[] = []
+  for (const line of readFileSync(historyPath(), 'utf8').split('\n')) {
+    if (!line.trim()) continue
+    try {
+      const rec = JSON.parse(line) as RunRecord
+      const t = Date.parse(rec.at)
+      if (Number.isFinite(t) && t >= since.getTime()) out.push(rec)
+    } catch {
+      /* skip bad line */
+    }
+  }
+  return out
+}
+
 export function formatHistory(runs: RunRecord[]): string {
   if (runs.length === 0) return 'no runs yet'
   return runs

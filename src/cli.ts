@@ -1,7 +1,9 @@
 #!/usr/bin/env bun
 
 import { readFileSync, writeFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { join, resolve } from 'node:path'
+import { formatAnalytics, loadSessions, parseSince, rollup } from './analytics'
+import { formatBoard } from './board'
 import {
   applyCleanup,
   formatCleanup,
@@ -20,7 +22,7 @@ import {
 import { dayKey } from './day'
 import { discoverDesks, formatScan } from './discover'
 import { defaultHerdrBin } from './herdr'
-import { formatHistory, loadRuns } from './history'
+import { formatHistory, loadRuns, loadRunsSince } from './history'
 import { formatHub, publish, snapshot } from './hub'
 import { stripAllDeskCrons } from './install'
 import { readLastChanges } from './last'
@@ -30,6 +32,7 @@ import {
   notify,
   resolveNotify,
 } from './notify'
+import { pluginStateDir } from './paths'
 import {
   describePause,
   loadPaused,
@@ -63,7 +66,16 @@ import { scheduleLabel } from './schedule'
 import { SCHEMA_PATH, SCHEMA_URL } from './schema'
 import { formatSchedule } from './status'
 import { textTable } from './table'
-import { formatAgenda, formatNext } from './timeline'
+import { termOpts } from './term'
+import {
+  formatAgenda,
+  formatHeatmap,
+  formatNext,
+  formatTimeline,
+  heatOf,
+  toIcs,
+  upcomingFires,
+} from './timeline'
 import {
   checkForUpdate,
   reinstall,
@@ -85,6 +97,11 @@ function usage(): never {
   herdr-desk trigger [JOB] --repo DIR
   herdr-desk pause JOB|--all [--repo DIR] [--until DATE]
   herdr-desk resume JOB|--all [--repo DIR]
+  herdr-desk timeline
+  herdr-desk heatmap [--actual] [--since 30d]
+  herdr-desk analytics [--since 30d] [--wide]
+  herdr-desk calendar [--ics FILE]
+  herdr-desk board --html [FILE]
   herdr-desk history [N]
   herdr-desk cleanup [--dry-run]
   herdr-desk last
@@ -107,6 +124,17 @@ function arg(flag: string, argv: string[]): string | undefined {
   const i = argv.indexOf(flag)
   if (i === -1) return undefined
   return argv[i + 1]
+}
+
+/** `--since 30d`, default 30 days; a bad value is a usage error, not a guess. */
+function sinceArg(argv: string[]): Date {
+  const spec = arg('--since', argv) ?? '30d'
+  const since = parseSince(spec)
+  if (!since) {
+    console.log(`bad --since ${spec}: use e.g. 12h, 30d, 2w`)
+    process.exit(2)
+  }
+  return since
 }
 
 /** Show which layer chose the chat, so "it went to the wrong place" is answerable. */
@@ -402,6 +430,99 @@ async function main() {
     const result = await applyCleanup(plan)
     console.log(formatResult(result))
     if (result.failed.length > 0) process.exit(1)
+    return
+  }
+
+  if (cmd === 'timeline') {
+    console.log(
+      formatTimeline(
+        await discoverDesks(),
+        termOpts(),
+        new Date(),
+        7,
+        loadPaused(),
+      ),
+    )
+    return
+  }
+
+  if (cmd === 'heatmap') {
+    if (argv.includes('--actual')) {
+      const since = sinceArg(argv)
+      const dates = loadRunsSince(since).map((r) => new Date(r.at))
+      console.log(
+        formatHeatmap(
+          heatOf(dates),
+          termOpts(),
+          `actual fires since ${since.toISOString().slice(0, 10)}`,
+        ),
+      )
+      return
+    }
+    const fires = upcomingFires(
+      await discoverDesks(),
+      new Date(),
+      7,
+      loadPaused(),
+    )
+    console.log(
+      formatHeatmap(
+        heatOf(fires.map((f) => f.at)),
+        termOpts(),
+        'scheduled fires, next 7 days',
+      ),
+    )
+    return
+  }
+
+  if (cmd === 'analytics') {
+    const since = sinceArg(argv)
+    console.log(
+      formatAnalytics(
+        rollup(loadRunsSince(since), loadSessions(since), since),
+        termOpts(),
+        argv.includes('--wide'),
+      ),
+    )
+    return
+  }
+
+  if (cmd === 'calendar') {
+    const ics = toIcs(
+      upcomingFires(await discoverDesks(), new Date(), 7, loadPaused()),
+    )
+    const file = arg('--ics', argv)
+    if (argv.includes('--ics')) {
+      if (!file || file.startsWith('--')) usage()
+      writeFileSync(resolve(file), ics)
+      console.log(`wrote ${resolve(file)}`)
+      return
+    }
+    process.stdout.write(ics)
+    return
+  }
+
+  if (cmd === 'board') {
+    if (!argv.includes('--html')) usage()
+    const next = arg('--html', argv)
+    const file = resolve(
+      next && !next.startsWith('--')
+        ? next
+        : join(pluginStateDir(), 'board.html'),
+    )
+    const now = new Date()
+    const since = sinceArg(argv)
+    const sessions = loadSessions(since)
+    const html = formatBoard({
+      now,
+      days: 7,
+      fires: upcomingFires(await discoverDesks(), now, 7, loadPaused()),
+      runs: loadRuns(40),
+      rollup: rollup(loadRunsSince(since), sessions, since, now),
+      sessions,
+    })
+    writeFileSync(file, html)
+    console.log(`wrote ${file}`)
     return
   }
 

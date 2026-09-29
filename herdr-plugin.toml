@@ -49,6 +49,36 @@ title = "Resume every paused job"
 command = ["bin/desk", "resume", "--all"]
 
 [[actions]]
+id = "timeline"
+title = "Show one lane per job for the next 7 days"
+command = ["bin/desk", "timeline"]
+
+[[actions]]
+id = "heatmap"
+title = "Show 7x24 scheduled fire density"
+command = ["bin/desk", "heatmap"]
+
+[[actions]]
+id = "heatmap-actual"
+title = "Show 7x24 density of actual fires from the ledger"
+command = ["bin/desk", "heatmap", "--actual"]
+
+[[actions]]
+id = "analytics"
+title = "Show success rate, skip and failure causes for 30 days"
+command = ["bin/desk", "analytics"]
+
+[[actions]]
+id = "calendar"
+title = "Print the next 7 days of fires as iCalendar"
+command = ["bin/desk", "calendar"]
+
+[[actions]]
+id = "board"
+title = "Write a static HTML board to the state dir"
+command = ["bin/desk", "board", "--html"]
+
+[[actions]]
 id = "list"
 title = "List desks picked up from repos"
 command = ["bin/desk", "scan"]
