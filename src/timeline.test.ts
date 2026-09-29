@@ -2,7 +2,14 @@ import { describe, expect, test } from 'bun:test'
 import { join } from 'node:path'
 import type { LoadedDesk } from './config'
 import type { Discovered } from './discover'
-import { formatAgenda, upcomingFires } from './timeline'
+import { emptyPause, pauseKey, withPause } from './pause'
+import {
+  formatAgenda,
+  formatIn,
+  formatNext,
+  nextFires,
+  upcomingFires,
+} from './timeline'
 
 function desk(name: string, jobs: Record<string, string[]>): Discovered {
   const config: LoadedDesk = {
@@ -74,5 +81,59 @@ describe('formatAgenda', () => {
 
   test('no crons in range says so', () => {
     expect(formatAgenda([], NOW)).toBe('no fires in the next 7 day(s)')
+  })
+})
+
+describe('nextFires', () => {
+  const desks = [
+    desk('a', { triage: ['0 12 * * *'] }),
+    desk('b', { wrap: ['30 10 * * *', '0 11 * * *'] }),
+  ]
+
+  test('next 3 over two desks are the three earliest fires, in order', () => {
+    const got = nextFires(desks, 3, NOW)
+    expect(got.map((f) => `${f.repo}/${f.job}`)).toEqual([
+      'b/wrap',
+      'b/wrap',
+      'a/triage',
+    ])
+    expect(got.map((f) => f.at.getHours())).toEqual([10, 11, 12])
+  })
+
+  test('In renders hours and minutes as 2h05m', () => {
+    expect(formatIn((2 * 60 + 5) * 60_000)).toBe('2h05m')
+    expect(formatIn(45 * 60_000)).toBe('45m')
+    expect(formatIn((26 * 60 + 3) * 60_000)).toBe('1d02h')
+    const out = formatNext([desk('a', { t: ['5 12 * * *'] })], 1, NOW)
+    expect(out).toContain('2h05m')
+    expect(out.split('\n')[0]).toMatch(/When\s+\|\s+In\s+\|\s+Repo/)
+  })
+})
+
+describe('paused jobs', () => {
+  const desks = [desk('a', { triage: ['0 12 * * *'], wrap: ['0 13 * * *'] })]
+  const paused = withPause(emptyPause(), pauseKey('/r/a', 'triage'))
+
+  test('a paused job is absent from upcomingFires and next, and named in a note', () => {
+    expect(upcomingFires(desks, NOW, 1, paused).map((f) => f.job)).toEqual([
+      'wrap',
+    ])
+    expect(new Set(nextFires(desks, 5, NOW, paused).map((f) => f.job))).toEqual(
+      new Set(['wrap']),
+    )
+    const agenda = formatAgenda(desks, NOW, 1, paused)
+    expect(agenda).not.toContain('12:00')
+    expect(agenda).toContain('paused:')
+    expect(agenda).toContain('a  triage  paused')
+  })
+
+  test('--until lets the job back in once the pause ends', () => {
+    const until = withPause(emptyPause(), 'all', new Date(2026, 9, 1, 12, 30))
+    const got = upcomingFires(desks, NOW, 3, until).map((f) => f.at.getTime())
+    expect(got).toEqual(
+      upcomingFires(desks, NOW, 3)
+        .filter((f) => f.at.getTime() >= new Date(2026, 9, 1, 13).getTime())
+        .map((f) => f.at.getTime()),
+    )
   })
 })

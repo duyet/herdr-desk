@@ -14,6 +14,7 @@ import { discoverDesks } from './discover'
 import { publish } from './hub'
 import { loadNotifyConfig } from './notify'
 import { pluginStateDir } from './paths'
+import { isPaused, loadPaused, type PauseState } from './pause'
 import { runTask } from './run'
 
 const TICK_MS = 20_000
@@ -176,9 +177,37 @@ export function catchUpPlan(
   return { run: due[due.length - 1], stale: due.slice(0, -1) }
 }
 
+/**
+ * Consume every unfired slot of a paused job as `skip paused`.
+ *
+ * Written into the fire ledger, not just ignored: a slot that is merely
+ * skipped this tick would still be unfired, and the catch-up plan would run it
+ * the moment the job is resumed. Returns how many slots it consumed.
+ */
+export function skipPausedSlots(
+  fires: Record<string, string>,
+  repo: string,
+  taskId: string,
+  expr: string,
+  day: string,
+  slots: string[],
+  at = new Date(),
+): number {
+  let n = 0
+  for (const slot of slots) {
+    const key = fireKey(repo, taskId, expr, day, slot)
+    if (fires[key]) continue
+    fires[key] = `skip paused ${at.toISOString()}`
+    n++
+  }
+  return n
+}
+
 export async function tickOnce(at = new Date()): Promise<number> {
   const desks = await discoverDesks()
   const fires = loadFires()
+  // Read once per tick; a corrupt file throws and fires nothing (fail closed).
+  const paused: PauseState = loadPaused()
   const day = dayKey(at)
   let n = 0
   // Set when any fire was a problem, so the hub is published immediately rather
@@ -188,6 +217,24 @@ export async function tickOnce(at = new Date()): Promise<number> {
     for (const task of d.config.tasks) {
       for (const expr of task.crons) {
         if (!expr) continue
+        if (isPaused(paused, d.repo, task.id, at)) {
+          const skipped = skipPausedSlots(
+            fires,
+            d.repo,
+            task.id,
+            expr,
+            day,
+            cronSlotsToday(expr, at),
+            at,
+          )
+          if (skipped) {
+            saveFires(fires)
+            log(
+              `skip ${d.config.name}/${task.id} ${expr}: paused, ${skipped} slot(s)`,
+            )
+          }
+          continue
+        }
         // Key on the SLOT, not the day. A day-keyed ledger let the first fire
         // of the day consume the whole schedule, so `*/30 * * * *` fired once
         // a day instead of 48 times — and `status` showed nothing wrong,

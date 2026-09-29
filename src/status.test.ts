@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import type { LoadedDesk } from './config'
 import type { Discovered } from './discover'
 import { historyPath, loadRuns, type RunRecord } from './history'
+import { emptyPause, pauseKey, withPause } from './pause'
 import { formatSchedule } from './status'
 
 const LAST = 4
@@ -139,5 +140,20 @@ describe('formatSchedule Last column', () => {
         ).toBe('never')
       },
     )
+  })
+})
+
+describe('formatSchedule paused', () => {
+  test('Next says paused instead of a time that will not happen', () => {
+    const d = desk('/r/a', 'a', 'triage')
+    const now = new Date(2026, 8, 30, 10, 0)
+    const held = formatSchedule(
+      [d],
+      now,
+      withPause(emptyPause(), pauseKey('/r/a', 'triage')),
+    )
+    expect(held).toContain('paused')
+    expect(held).not.toContain('2026-10-01 07:00')
+    expect(formatSchedule([d], now)).toContain('2026-10-01 07:00')
   })
 })

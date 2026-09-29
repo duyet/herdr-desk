@@ -195,6 +195,7 @@ Herdr has no built-in crontab UI. This plugin is the schedule. Use:
 ```sh
 herdr plugin action invoke herdr-desk.status    # daemon + next/last fire per slot
 herdr plugin action invoke herdr-desk.agenda    # upcoming fires per slot, next 7 days
+herdr plugin action invoke herdr-desk.next      # the next 5 fires, soonest first
 herdr plugin action invoke herdr-desk.history   # recent runs (runs.jsonl)
 herdr plugin action invoke herdr-desk.cleanup-dry-run  # what cleanup would remove; `cleanup` removes exactly that
 herdr plugin action invoke herdr-desk.last      # today's changes.md from each repo
@@ -208,6 +209,21 @@ Or:
 bun src/cli.ts status
 bun src/cli.ts history
 ```
+
+Manage jobs without editing JSON (a job is `JOB --repo DIR`, like `run`):
+
+```sh
+bun src/cli.ts next 10                          # next 10 fires: When, In, Repo, Job, Agent
+bun src/cli.ts trigger triage --repo DIR        # fire now; history shows "(manual)"
+bun src/cli.ts pause triage --repo DIR          # until `resume`
+bun src/cli.ts pause --all --until 2026-10-05   # every job, until local midnight
+bun src/cli.ts resume triage --repo DIR         # or: resume --all
+```
+
+Pauses live in `paused.json` in the state dir, never in the committed
+`.herdr-desk.json`. A paused slot is recorded as skipped, so resuming does not
+replay it. `status`, `agenda` and `next` show what is paused. `trigger` runs
+even a paused job, since you asked for it.
 
 Host-level plugin command log (start / focus hooks, not the schedule itself):
 

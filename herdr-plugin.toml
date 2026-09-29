@@ -34,6 +34,21 @@ title = "Show upcoming fires per slot for the next 7 days"
 command = ["bin/desk", "agenda"]
 
 [[actions]]
+id = "next"
+title = "Show the next 5 fires across the machine"
+command = ["bin/desk", "next"]
+
+[[actions]]
+id = "pause"
+title = "Pause every job until resumed"
+command = ["bin/desk", "pause", "--all"]
+
+[[actions]]
+id = "resume"
+title = "Resume every paused job"
+command = ["bin/desk", "resume", "--all"]
+
+[[actions]]
 id = "list"
 title = "List desks picked up from repos"
 command = ["bin/desk", "scan"]

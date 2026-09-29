@@ -10,6 +10,8 @@ export type RunRecord = {
   mode: string
   ok: boolean
   detail?: string
+  /** Set when a person fired the job (`desk trigger`), not a cron slot. */
+  trigger?: 'manual'
 }
 
 /** How a job is identified in the ledger, independent of its display name. */
@@ -84,7 +86,8 @@ export function formatHistory(runs: RunRecord[]): string {
     .map((r) => {
       const mark = r.ok ? 'ok' : 'fail'
       const extra = r.detail ? `  ${r.detail}` : ''
-      return `${r.at}  ${mark}  ${r.name}/${r.task}  ${r.mode}${extra}`
+      const how = r.trigger ? ` (${r.trigger})` : ''
+      return `${r.at}  ${mark}  ${r.name}/${r.task}  ${r.mode}${how}${extra}`
     })
     .join('\n')
 }
