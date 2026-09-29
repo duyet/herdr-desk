@@ -203,6 +203,7 @@ herdr plugin action invoke herdr-desk.heatmap   # 7x24 cron density (heatmap-act
 herdr plugin action invoke herdr-desk.analytics # success rate, skip/failure causes, last 30 days
 herdr plugin action invoke herdr-desk.board     # static HTML board in the state dir
 herdr plugin action invoke herdr-desk.last      # today's changes.md from each repo
+herdr plugin action invoke herdr-desk.summary   # preview the summary prompt
 herdr plugin action invoke herdr-desk.list      # discovered repos
 herdr plugin action invoke herdr-desk.sessions-index  # index local agent sessions
 herdr plugin action invoke herdr-desk.sessions  # recent sessions, every agent
@@ -276,6 +277,25 @@ bun src/cli.ts context --repo .   # writes and prints <state>/context/<repo>.md
 last desk run. To let every agent see it, add a line like "run `herdr-desk
 context --repo .` for recent history" to the repo's `AGENTS.md` — the desk
 never edits an agent's config for you. Nothing here is ever sent by notify.
+
+### A written summary
+
+```sh
+bun src/cli.ts summary --since 1d --dry-run        # print the exact prompt
+bun src/cli.ts summary --since 7d --repo DIR       # hand it to an agent
+bun src/cli.ts summary --since 1d --notify         # ... and have it sent
+```
+
+The desk never calls a model. `summary` gathers the ledger records since
+`--since` (the whole window, not the last 200), plus each job's `changes.md`
+and `status.md` for every day in it, fences them as data in
+`prompts/summary.md`, and prompts a `<desk>-summary` agent through the same
+Herdr path a job fire uses (first rung of the desk's first job's ladder). The
+agent writes plain text to `summaries/<time>.txt` in the state dir. With
+`--notify` it then runs `summary --send FILE`, and the desk escapes and sends
+it. Without `--repo` it covers every desk; the cwd must still be a desk, since
+that is where the agent runs. Manual only: it costs an agent run, so nothing
+schedules it.
 
 ## Notify
 
@@ -443,14 +463,23 @@ bun src/cli.ts report --repo /path/to/anyrouter --settle 45 # send
 
 ```
 🟠 blocked 2 jobs · 1 ok · 1 blocked
-• desk:github-issues — 3 PRs merged, 1 blocked on a schema call
-  • PR #418 merged
+🟢 ok anyrouter/desk:github-issues · grok · 18m · 1 PR · 1 issue · next Thu 07:00
+  3 PRs merged, 1 blocked on a schema call
   • #412 filed
-• local:merge-queue — queue drained, needs a human on the squash policy
-  • waiting on decision for docs/*
-• [changes.md](https://example.com/run/changes.md)
+  • PR #418
+  • #412
+🟠 blocked anyrouter/local:merge-queue · claude · 7m · next Wed 18:00
+  queue drained, needs a human on the squash policy
 #blocked #desk
 ```
+
+Every job gets the same verdict line: dot, level, `repo/job`, agent, duration,
+PR and issue counts (from the fragment's GitHub links), next fire. A field the
+desk does not know is left out. Duration runs from the fire's start to when
+`status.md` was written, and the next fire is an absolute time, so two
+`report` runs over the same jobs render the same text and the dedupe below
+still holds. If Telegram rejects the MarkdownV2, the retry is a real plain
+rendering: no escapes, and each link as `label (url)`.
 
 Three things make that one message rather than four:
 
@@ -584,6 +613,7 @@ herdr plugin action invoke herdr-desk.history
 herdr plugin action invoke herdr-desk.validate
 herdr plugin action invoke herdr-desk.notify
 herdr plugin action invoke herdr-desk.prompts   # registries and what is approved
+herdr plugin action invoke herdr-desk.summary   # summary prompt preview (dry run)
 ```
 
 On-demand (plugin actions take no arguments):
@@ -591,6 +621,7 @@ On-demand (plugin actions take no arguments):
 ```sh
 bun src/cli.ts run desk:github-issues --repo /path/to/repo
 bun src/cli.ts report --repo /path/to/repo --settle 45   # merged status notice
+bun src/cli.ts summary --since 1d --repo /path/to/repo    # agent-written summary
 ```
 
 A successful run finds the **already-open** Herdr Space for that repo

@@ -29,6 +29,7 @@ import { readLastChanges } from './last'
 import {
   loadNotifyConfig,
   type NotifyProvenance,
+  noticeBody,
   notify,
   resolveNotify,
 } from './notify'
@@ -75,6 +76,14 @@ import {
 import type { SessionRow } from './sessions/types'
 import { parseSince } from './since'
 import { formatSchedule } from './status'
+import {
+  buildSummaryPrompt,
+  handToAgent,
+  parseSince,
+  runsSince,
+  summaryInput,
+  summaryOutPath,
+} from './summary'
 import { textTable } from './table'
 import { termOpts } from './term'
 import {
@@ -126,6 +135,7 @@ function usage(): never {
   herdr-desk notify MESSAGE [--repo DIR] [--label TEXT]
   herdr-desk report --repo DIR [--settle SECONDS] [--dry-run] [--force]
   herdr-desk hub [--send] [--json] [--force]
+  herdr-desk summary [--since 1d] [--repo DIR] [--dry-run] [--notify]
   herdr-desk prompts list | check | apply [--accept] | pin REPO SHA
   herdr-desk update [--check]
   herdr-desk uninstall-cron
@@ -702,6 +712,79 @@ async function main() {
           : `not sent (${o.reason}) ${o.jobs} job(s)`,
       )
     }
+    return
+  }
+
+  if (cmd === 'summary') {
+    const repoArg = arg('--repo', argv)
+    const repo = resolve(repoArg ?? process.cwd())
+
+    const sendPath = arg('--send', argv)
+    if (sendPath) {
+      // The agent's prose is not MarkdownV2. It goes through `noticeBody`,
+      // which escapes every line, so a `_` or `*` in it cannot 400 the notice.
+      const lines = readFileSync(resolve(sendPath), 'utf8')
+        .split('\n')
+        .map((l) => l.trim())
+        .filter(Boolean)
+      const { config: dest } = resolveNotify({ repo })
+      const r = await notify(
+        {
+          message: noticeBody({
+            level: 'info',
+            headline: lines[0] ?? 'summary',
+            items: lines.slice(1),
+            tags: ['desk', 'summary'],
+          }),
+          repo,
+          label: 'summary',
+        },
+        dest,
+      )
+      console.log(r.sent ? 'sent summary' : `not sent (${r.reason})`)
+      return
+    }
+
+    const window = parseSince(arg('--since', argv) ?? '1d')
+    if (window === null) {
+      console.log('usage: herdr-desk summary [--since 30m|12h|7d] ...')
+      process.exit(2)
+    }
+    const now = new Date()
+    const since = new Date(now.getTime() - window)
+    // The routing desk: `--repo`, or the cwd. Not a desk is a loud failure,
+    // never a guess at some other repo on the machine.
+    const config = loadDeskConfig(repo)
+    const routedRepo = config.repo ?? repo
+    // Without `--repo` the summary covers the whole machine; with it, only
+    // that repo — matched on the resolved path `recordRun` stores.
+    const desks = repoArg
+      ? [{ repo: routedRepo, config }]
+      : (await discoverDesks()).map((d) => ({
+          repo: d.config.repo ?? d.repo,
+          config: d.config,
+        }))
+    const input = summaryInput({
+      runs: runsSince(since, repoArg ? routedRepo : undefined),
+      desks,
+      since,
+      now,
+    })
+    const outPath = summaryOutPath(now)
+    const prompt = buildSummaryPrompt({
+      input,
+      scope: repoArg ? config.name : 'every desk on this machine',
+      since,
+      now,
+      outPath,
+      notifyRepo: argv.includes('--notify') ? routedRepo : undefined,
+    })
+    if (argv.includes('--dry-run')) {
+      console.log(prompt)
+      return
+    }
+    const r = await handToAgent({ config, repo: routedRepo, prompt })
+    console.log(`${r.how} ${r.agent}; summary will be written to ${outPath}`)
     return
   }
 

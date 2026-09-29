@@ -3,7 +3,7 @@ import { hostname, userInfo } from 'node:os'
 import { basename, join } from 'node:path'
 import type { NotifyOverride } from './config'
 
-import { clip, esc, link } from './format'
+import { clip, esc, link, toPlain } from './format'
 import { type Layer, resolveConfig } from './layers'
 import { pluginConfigDir } from './paths'
 
@@ -139,9 +139,15 @@ export function formatNotice(n: Notice, machine = machineName()): string {
   return render(n, machine, esc)
 }
 
-/** Unescaped, markup-free text, for the plain-text retry. */
+/**
+ * Unescaped, markup-free text, for the plain-text retry.
+ *
+ * The body is MarkdownV2 (built with `noticeBody` or `renderMerged`), so it is
+ * rendered to plain text with {@link toPlain} before it is capped — otherwise
+ * every `\-` and `\.` arrives as a literal backslash and links lose their URL.
+ */
 export function formatNoticePlain(n: Notice, machine = machineName()): string {
-  return render(n, machine, (s) => s)
+  return render({ ...n, message: toPlain(n.message) }, machine, (s) => s)
 }
 
 /**
@@ -304,7 +310,10 @@ export async function notify(
   const useMarkdown = n.markdown !== false
   const base: Record<string, unknown> = {
     chat_id: config.chatId,
-    text,
+    // Without MarkdownV2 the escaped form would show every escape as a
+    // literal backslash, so a plain send uses the plain rendering from the
+    // start.
+    text: useMarkdown ? text : plainText,
     disable_web_page_preview: true,
   }
   if (config.topicId) base.message_thread_id = Number(config.topicId)
@@ -335,8 +344,9 @@ export async function notify(
     // lands. Only 400 is retried — a 403/401 will fail identically, and a 5xx
     // may have been delivered, so re-sending either risks a duplicate.
     if (useMarkdown && res.status === 400) {
-      // Rebuild rather than strip: the markdown text is escaped for MarkdownV2
+      // Render rather than resend: the markdown text is escaped for MarkdownV2
       // and those escapes would show as literal backslashes in plain text.
+      // `formatNoticePlain` unescapes the body and keeps each link's URL.
       const { parse_mode: _dropped, ...plain } = base
       plain.text = plainText
       const retry = await post(plain)

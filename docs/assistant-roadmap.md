@@ -66,7 +66,7 @@ writes. P2 adds a new data source. P3 is rendering on top of P0–P2.
 - **Accept:** test that `next 3` over two desks returns the three earliest
   fires in order, with `In` rendered as `2h05m`.
 
-### 3.3 Done-notice format
+### 3.3 Done-notice format — shipped
 
 - **Does:** one fixed shape for every run notice: `<state> <repo>/<job> ·
   <agent> · <duration> · <n PRs> · <one line from status.md>`. Replaces
@@ -110,7 +110,7 @@ ledger like a scheduled fire. **Files:** `src/run.ts`, `src/cli.ts`, toml.
 branch with unpushed commits. **Accept:** test that an unpushed worktree
 survives.
 
-### 4.4 `desk summary [--since 1d] [--repo DIR]`
+### 4.4 `desk summary [--since 1d] [--repo DIR]` — shipped
 
 - **Does:** fires a short-lived summary job (an agent from the ladder) with a
   prompt `prompts/summary.md` and the ledger slice as input; prints and
