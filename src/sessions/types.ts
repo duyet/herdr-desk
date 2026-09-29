@@ -30,16 +30,38 @@ export type SessionReader = {
   parse(path: string, text: string): SessionRow[]
 }
 
-export const TITLE_MAX = 120
+export const TITLE_MAX = 80
 
-/** First non-empty line, whitespace collapsed, capped at `TITLE_MAX`. */
+/**
+ * Obvious secrets a pasted prompt may carry: vendor-prefixed tokens
+ * (`sk-…`, `ghp_…`, `github_pat_…`, `xoxb-…`, `AKIA…`) and any hex/base64-ish
+ * run longer than 32 chars.
+ */
+const SECRET_PATTERNS = [
+  /\b(?:sk|pk|rk)-[A-Za-z0-9_-]{8,}/g,
+  /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{8,}/g,
+  /\bgithub_pat_[A-Za-z0-9_]{8,}/g,
+  /\bxox[abposr]-[A-Za-z0-9-]{8,}/g,
+  /\bAKIA[0-9A-Z]{12,}/g,
+  /[A-Za-z0-9+/_=-]{33,}/g,
+]
+
+export function redactSecrets(text: string): string {
+  return SECRET_PATTERNS.reduce((t, re) => t.replace(re, '[redacted]'), text)
+}
+
+/**
+ * A title is prompt text, so it is kept to one line, secrets redacted, and
+ * capped at `TITLE_MAX`.
+ */
 export function titleLine(text: string): string {
   const line =
     text
       .split('\n')
       .map((l) => l.replace(/\s+/g, ' ').trim())
       .find((l) => l.length > 0) ?? ''
-  return line.length > TITLE_MAX ? `${line.slice(0, TITLE_MAX - 1)}…` : line
+  const safe = redactSecrets(line)
+  return safe.length > TITLE_MAX ? `${safe.slice(0, TITLE_MAX - 1)}…` : safe
 }
 
 /** Parse JSONL, dropping lines that are not JSON objects. */

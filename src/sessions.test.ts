@@ -26,6 +26,7 @@ import {
   type SessionRow,
   sessionsPath,
 } from './sessions/index'
+import { titleLine } from './sessions/types'
 
 const FIXTURES = join(import.meta.dir, 'sessions', 'fixtures')
 // Strings that only appear in message bodies or model-written summaries.
@@ -137,8 +138,8 @@ describe('readers', () => {
     ])
   })
 
-  test('titles are capped at 120 chars', () => {
-    const long = 'x'.repeat(500)
+  test('titles are capped at 80 chars', () => {
+    const long = 'word '.repeat(100)
     const [r] = codexReader.parse(
       '/r.jsonl',
       [
@@ -146,7 +147,22 @@ describe('readers', () => {
         `{"timestamp":"2026-01-01T00:00:00Z","type":"event_msg","payload":{"type":"user_message","message":"${long}"}}`,
       ].join('\n'),
     )
-    expect(r.title.length).toBe(120)
+    expect(r.title.length).toBe(80)
+  })
+})
+
+describe('titleLine', () => {
+  test('keeps one line and redacts obvious secrets from prompt text', () => {
+    const t = titleLine(
+      'use sk-proj-abcDEF123456 and ghp_abcdefghij0123456789 then abcdef0123456789abcdef0123456789abcdef\nsecond line',
+    )
+    expect(t).toBe('use [redacted] and [redacted] then [redacted]')
+  })
+
+  test('ordinary words and paths survive', () => {
+    expect(titleLine('Fix src/sessions/index.ts for PR #54')).toBe(
+      'Fix src/sessions/index.ts for PR #54',
+    )
   })
 })
 

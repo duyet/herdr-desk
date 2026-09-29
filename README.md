@@ -254,7 +254,7 @@ State on disk: `~/.local/state/herdr/plugins/herdr-desk/` (`daemon.log`, `runs.j
 `sessions index` reads, never changes, other agents' local session files and
 writes one row per session (agent, repo, start, end, title) to
 `sessions.jsonl` in the state dir. Titles only (the first user line, or the
-agent's own generated title, capped at 120 chars); no message bodies are copied.
+agent's own generated title, capped at 80 chars, secrets redacted); no message bodies are copied.
 Re-runs only open files whose mtime or size changed; a file a reader cannot
 parse is counted as skipped, never fatal.
 
