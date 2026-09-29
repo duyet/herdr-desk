@@ -327,6 +327,19 @@ describe('fetchPlaybooks', () => {
     expect(asked).toEqual(['tasks/triage.md', 'tasks/nested/deep.md'])
   })
 
+  test('fetches a playbook whose name has URL-special characters', async () => {
+    // The path goes into a URL. Unencoded, `?` starts the query (so the file is
+    // requested as `tasks/why` from whatever `ref` follows) and `#` drops the
+    // rest, so the bytes approved would not be the file that was listed.
+    const gh = fakeGh({
+      'tasks/why?.md': '# Why\n',
+      'tasks/a#b.md': '# Hash\n',
+    })
+    const out = await fetchPlaybooks(gh, 'duyet/prompts', 'f'.repeat(40))
+    expect(out['tasks/why?.md']).toBe('# Why\n')
+    expect(out['tasks/a#b.md']).toBe('# Hash\n')
+  })
+
   test('refuses a file over the size cap', async () => {
     // A playbook is a page. A 10 MB "playbook" is not a prompt, and writing it
     // into a cache that gets interpolated into every run is how a disk fills.
@@ -454,6 +467,27 @@ describe('approve and the lock', () => {
     expect(file).toBe(cachePathFor('duyet/prompts', commit, 'tasks/triage.md'))
     expect(readFileSync(file as string, 'utf8')).toBe('# Triage\n')
     expect(listRegistryTasks()).toEqual(['gh:duyet/prompts/triage'])
+  })
+
+  test('a nested playbook is listed under a spec that resolves', () => {
+    // `tasks/ops/deploy.md` is eligible and resolves as `gh:repo/ops/deploy`.
+    // Listing it by basename alone printed a spec nothing could resolve.
+    configured()
+    const commit = 'e'.repeat(40)
+    writeCache('duyet/prompts', commit, { 'tasks/ops/deploy.md': '# Deploy\n' })
+    approve([
+      diffRepo({
+        repo: 'duyet/prompts',
+        ref: 'main',
+        fromCommit: null,
+        from: null,
+        to: { 'tasks/ops/deploy.md': '# Deploy\n' },
+        toCommit: commit,
+      }),
+    ])
+    const specs = listRegistryTasks()
+    expect(specs).toEqual(['gh:duyet/prompts/ops/deploy'])
+    expect(approvedPlaybookPath(specs[0])).not.toBeNull()
   })
 
   test('the short form finds the playbook in an allowed registry', () => {
