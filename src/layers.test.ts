@@ -11,6 +11,41 @@ import {
   mergeConfigs,
 } from './layers'
 
+describe('agent default vs inherited ladder', () => {
+  // `default` is the one-rung alias for `ladder`. A repo that writes
+  // `default` must beat a lower layer's `ladder`, or the repo silently runs
+  // the machine-wide agent instead of the one it asked for.
+  test('a higher layer `default` replaces a lower layer `ladder`', () => {
+    const merged = mergeConfigs(
+      { name: 'g', agent: { ladder: ['grok', 'codex'] } } as DeskConfig,
+      { name: 'r', agent: { default: 'claude' } } as DeskConfig,
+    )
+    expect(applyDefaults(merged, '/tmp/r').tasks[0].agent.ladder).toEqual([
+      'claude',
+    ])
+  })
+
+  test('a higher layer `default` replaces a lower layer string pin', () => {
+    const merged = mergeConfigs(
+      { name: 'g', agent: 'grok' } as DeskConfig,
+      { name: 'r', agent: { default: 'claude' } } as DeskConfig,
+    )
+    expect(applyDefaults(merged, '/tmp/r').tasks[0].agent.ladder).toEqual([
+      'claude',
+    ])
+  })
+
+  test('overriding only permission still inherits a `default` ladder', () => {
+    const merged = mergeConfigs(
+      { name: 'g', agent: { default: 'codex' } } as DeskConfig,
+      { name: 'r', agent: { permission: 'yolo' } } as DeskConfig,
+    )
+    const agent = applyDefaults(merged, '/tmp/r').tasks[0].agent
+    expect(agent.ladder).toEqual(['codex'])
+    expect(agent.permission).toBe('yolo')
+  })
+})
+
 const roots: string[] = []
 
 function tmp(prefix: string): string {

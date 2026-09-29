@@ -163,6 +163,13 @@ function mergeAgentField(
         : {}
       : { ...(base ?? {}) }
   const next: Record<string, unknown> = { ...fromBase }
+  // `ladder` and `default` are one setting spelled two ways, and `ladder` wins
+  // when both survive the merge. So a layer that sets either one replaces the
+  // inherited pair, or a repo's `default` loses to a global `ladder`.
+  if (over.ladder !== undefined || over.default !== undefined) {
+    delete next.ladder
+    delete next.default
+  }
   for (const [k, v] of Object.entries(over)) {
     if (v !== undefined) next[k] = v
   }
