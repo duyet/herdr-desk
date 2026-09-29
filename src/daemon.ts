@@ -158,6 +158,24 @@ function fireKey(
   return `${repo}::${taskId}::${cron}::${day}::${slot}`
 }
 
+/**
+ * Which slot to run, and which missed slots to write off.
+ *
+ * A daemon that was down — or a tick that never finished — leaves slots
+ * unfired, and firing all of them is how one machine hands its live managers
+ * the same prompt thirty times in nine seconds (duyet/herdr-desk#40). So only
+ * the newest missed slot runs; the rest are consumed without running, and the
+ * desk resumes where it left off instead of replaying the day.
+ */
+export function catchUpPlan(
+  slots: string[],
+  isFired: (slot: string) => boolean,
+): { run?: string; stale: string[] } {
+  const due = slots.filter((slot) => !isFired(slot))
+  if (due.length <= 1) return { run: due[0], stale: [] }
+  return { run: due[due.length - 1], stale: due.slice(0, -1) }
+}
+
 export async function tickOnce(at = new Date()): Promise<number> {
   const desks = await discoverDesks()
   const fires = loadFires()
@@ -174,21 +192,40 @@ export async function tickOnce(at = new Date()): Promise<number> {
         // of the day consume the whole schedule, so `*/30 * * * *` fired once
         // a day instead of 48 times — and `status` showed nothing wrong,
         // because the job was never recorded as failing.
-        for (const slot of cronSlotsToday(expr, at)) {
-          const key = fireKey(d.repo, task.id, expr, day, slot)
-          if (fires[key]) continue
-          log(`fire ${d.config.name}/${task.id} ${expr} slot ${slot}`)
-          try {
-            const result = await runTask({ repo: d.repo, taskId: task.id })
-            fires[key] = new Date().toISOString()
-            log(`ok ${JSON.stringify(result)}`)
-            n++
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err)
-            fires[key] = `fail ${new Date().toISOString()}`
-            log(`fail ${d.config.name}/${task.id} ${expr} slot ${slot}: ${msg}`)
-            needsHub = true
-          }
+        const plan = catchUpPlan(cronSlotsToday(expr, at), (slot) =>
+          Boolean(fires[fireKey(d.repo, task.id, expr, day, slot)]),
+        )
+        // The skipped slots are consumed *before* anything runs, and written
+        // before it, so a tick that is interrupted half way cannot replay the
+        // day on the next start. A ledger only saved at the end of a tick is a
+        // ledger that never advances while the tick is busy — which is exactly
+        // when it is needed.
+        for (const slot of plan.stale) {
+          fires[fireKey(d.repo, task.id, expr, day, slot)] =
+            `skip ${new Date().toISOString()}`
+        }
+        if (plan.stale.length) {
+          saveFires(fires)
+          log(
+            `skip ${d.config.name}/${task.id} ${expr}: ${plan.stale.length} missed slots, oldest ${plan.stale[0]}`,
+          )
+        }
+        const slot = plan.run
+        if (!slot) continue
+        const key = fireKey(d.repo, task.id, expr, day, slot)
+        log(`fire ${d.config.name}/${task.id} ${expr} slot ${slot}`)
+        try {
+          const result = await runTask({ repo: d.repo, taskId: task.id })
+          fires[key] = new Date().toISOString()
+          saveFires(fires)
+          log(`ok ${JSON.stringify(result)}`)
+          n++
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err)
+          fires[key] = `fail ${new Date().toISOString()}`
+          saveFires(fires)
+          log(`fail ${d.config.name}/${task.id} ${expr} slot ${slot}: ${msg}`)
+          needsHub = true
         }
       }
     }

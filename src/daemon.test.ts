@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { loadFires, pruneFires, saveFires } from './daemon'
+import { catchUpPlan, loadFires, pruneFires, saveFires } from './daemon'
 
 const prevState = process.env.HERDR_PLUGIN_STATE_DIR
 
@@ -151,5 +151,36 @@ describe('migrateFires', () => {
   test('ignores a key that is not a legacy day key', () => {
     const { migrateFires } = require('./daemon') as typeof import('./daemon')
     expect(migrateFires({ garbage: 'v' })).toEqual({ garbage: 'v' })
+  })
+})
+
+describe('catchUpPlan', () => {
+  const half = ['00:10', '00:40', '01:10', '01:40', '02:10']
+  const noneFired = () => false
+
+  test('runs the newest missed slot and writes off the rest', () => {
+    // The live shape on 2026-09-28: a desk off for six hours, 12 missed slots
+    // per half-hourly job, every start replaying all twelve at ~300ms each.
+    const plan = catchUpPlan(half, noneFired)
+    expect(plan.run).toBe('02:10')
+    expect(plan.stale).toEqual(['00:10', '00:40', '01:10', '01:40'])
+  })
+
+  test('one missed slot still runs', () => {
+    const plan = catchUpPlan(half, (slot) => slot !== '02:10')
+    expect(plan.run).toBe('02:10')
+    expect(plan.stale).toEqual([])
+  })
+
+  test('nothing missed means nothing to do', () => {
+    expect(catchUpPlan(half, () => true)).toEqual({ run: undefined, stale: [] })
+  })
+
+  test('a slot already failed is not re-run as catch-up', () => {
+    // A failure is a record, not an invitation: the ledger holds `fail ...` for
+    // it, so a job that failed once does not run again until its next slot.
+    const plan = catchUpPlan(half, (slot) => slot === '02:10')
+    expect(plan.run).toBe('01:40')
+    expect(plan.stale).toEqual(['00:10', '00:40', '01:10'])
   })
 })
