@@ -3,7 +3,7 @@ import { hostname, userInfo } from 'node:os'
 import { basename, join } from 'node:path'
 import type { NotifyOverride } from './config'
 
-import { esc, link } from './format'
+import { clip, esc, link } from './format'
 import { type Layer, resolveConfig } from './layers'
 import { pluginConfigDir } from './paths'
 
@@ -161,7 +161,7 @@ function render(
   safe: (s: string) => string,
 ): string {
   const bold = safe === esc
-  const out = [header(n, machine, safe, bold), body(n)]
+  const out = [header(n, machine, safe, bold), body(n, safe)]
   if (n.url) {
     const shown = linkLabel(n.url)
     out.push(bold ? `→ ${link(shown, n.url)}` : `→ ${shown}`)
@@ -194,10 +194,15 @@ function shortMachine(machine: string): string {
   return machine.replace(/\s*\([^)]*\)\s*$/, '')
 }
 
-function body(n: Notice): string {
+/**
+ * The message is already MarkdownV2 (built with `noticeBody`), so only the
+ * marker this function adds is escaped — `(`, `+`, `)` are reserved, and a
+ * bare marker would 400 every long notice.
+ */
+function body(n: Notice, safe: (s: string) => string): string {
   const raw = n.message.trim() || '(no message)'
   return raw.length > MAX_BODY
-    ? `${raw.slice(0, MAX_BODY)}… (+${raw.length - MAX_BODY} chars)`
+    ? `${clip(raw, MAX_BODY)}${safe(`… (+${raw.length - MAX_BODY} chars)`)}`
     : raw
 }
 
