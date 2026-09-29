@@ -467,7 +467,7 @@ async function resolveBaseRef(repo: string): Promise<string> {
  * `worktree open` re-attaches an existing branch, so a manager worktree that
  * is still on disk is reused rather than duplicated.
  */
-async function spawnDeskWorktree(
+export async function spawnDeskWorktree(
   parentWorkspaceId: string,
   task: TaskConfig,
   label: string,

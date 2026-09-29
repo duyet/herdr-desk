@@ -197,6 +197,7 @@ herdr plugin action invoke herdr-desk.status    # daemon + next/last fire per sl
 herdr plugin action invoke herdr-desk.agenda    # upcoming fires per slot, next 7 days
 herdr plugin action invoke herdr-desk.history   # recent runs (runs.jsonl)
 herdr plugin action invoke herdr-desk.last      # today's changes.md from each repo
+herdr plugin action invoke herdr-desk.summary   # preview the summary prompt
 herdr plugin action invoke herdr-desk.list      # discovered repos
 bun src/cli.ts config explain --repo DIR        # which layer supplied what
 ```
@@ -215,6 +216,25 @@ herdr plugin log list --plugin herdr-desk --limit 20
 ```
 
 State on disk: `~/.local/state/herdr/plugins/herdr-desk/` (`daemon.log`, `runs.jsonl`).
+
+### A written summary
+
+```sh
+bun src/cli.ts summary --since 1d --dry-run        # print the exact prompt
+bun src/cli.ts summary --since 7d --repo DIR       # hand it to an agent
+bun src/cli.ts summary --since 1d --notify         # ... and have it sent
+```
+
+The desk never calls a model. `summary` gathers the ledger records since
+`--since` (the whole window, not the last 200), plus each job's `changes.md`
+and `status.md` for every day in it, fences them as data in
+`prompts/summary.md`, and prompts a `<desk>-summary` agent through the same
+Herdr path a job fire uses (first rung of the desk's first job's ladder). The
+agent writes plain text to `summaries/<time>.txt` in the state dir. With
+`--notify` it then runs `summary --send FILE`, and the desk escapes and sends
+it. Without `--repo` it covers every desk; the cwd must still be a desk, since
+that is where the agent runs. Manual only: it costs an agent run, so nothing
+schedules it.
 
 ## Notify
 
@@ -532,6 +552,7 @@ herdr plugin action invoke herdr-desk.history
 herdr plugin action invoke herdr-desk.validate
 herdr plugin action invoke herdr-desk.notify
 herdr plugin action invoke herdr-desk.prompts   # registries and what is approved
+herdr plugin action invoke herdr-desk.summary   # summary prompt preview (dry run)
 ```
 
 On-demand (plugin actions take no arguments):
@@ -539,6 +560,7 @@ On-demand (plugin actions take no arguments):
 ```sh
 bun src/cli.ts run desk:github-issues --repo /path/to/repo
 bun src/cli.ts report --repo /path/to/repo --settle 45   # merged status notice
+bun src/cli.ts summary --since 1d --repo /path/to/repo    # agent-written summary
 ```
 
 A successful run finds the **already-open** Herdr Space for that repo
