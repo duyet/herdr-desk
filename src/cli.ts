@@ -47,6 +47,7 @@ import { scheduleLabel } from './schedule'
 import { SCHEMA_PATH, SCHEMA_URL } from './schema'
 import { formatSchedule } from './status'
 import { textTable } from './table'
+import { formatAgenda } from './timeline'
 
 function usage(): never {
   console.log(`herdr-desk — Herdr plugin. Each repo is .herdr-desk.json; the daemon picks them up.
@@ -56,6 +57,7 @@ function usage(): never {
   herdr-desk config show   [--repo DIR]
   herdr-desk config explain [--repo DIR] [--tasks]
   herdr-desk status
+  herdr-desk agenda [DAYS]
   herdr-desk history [N]
   herdr-desk last
   herdr-desk start | stop | daemon
@@ -292,6 +294,13 @@ async function main() {
     const pid = daemonPid()
     console.log(`daemon: ${pid ? `running (pid ${pid})` : 'stopped'}`)
     console.log(formatSchedule(await discoverDesks()))
+    return
+  }
+
+  if (cmd === 'agenda') {
+    const n = Number(argv[1])
+    const days = Number.isInteger(n) && n > 0 && n <= 7 ? n : 7
+    console.log(formatAgenda(await discoverDesks(), new Date(), days))
     return
   }
 
