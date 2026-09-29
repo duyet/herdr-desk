@@ -1,5 +1,6 @@
-import { outcomeOf, pct, type Rollup, type SessionRow } from './analytics'
+import { outcomeOf, pct, type Rollup } from './analytics'
 import type { RunRecord } from './history'
+import type { SessionRow } from './sessions/types'
 import { DENSE, type Fire } from './timeline'
 
 const esc = (s: string): string =>
