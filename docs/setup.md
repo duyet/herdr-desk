@@ -50,7 +50,8 @@ A linked plugin never auto-upgrades. That is deliberate — you own that tree.
     "ladder": ["opencode2", "opencode", "claude", "codex"],
     "permission": "yolo"
   },
-  "features": { "issues": false, "selfUpgrade": "check" }
+  "features": { "issues": false },
+  "autoUpdate": true
 }
 ```
 
@@ -196,16 +197,34 @@ Point `$schema` at it in each config file.
 
 ## Upgrading
 
-There is no `herdr plugin update` in Herdr v1. Upgrading means reinstalling:
+There is no `herdr plugin update` in Herdr v1. Upgrading means reinstalling,
+which `desk update` does for you (stop daemon, `herdr plugin install
+duyet/herdr-desk --yes`, start):
 
 ```sh
-herdr plugin install duyet/herdr-desk
+herdr plugin action invoke herdr-desk.update-check   # read-only
+herdr plugin action invoke herdr-desk.update
 ```
 
+`herdr plugin install` without `--ref` installs the tip of the default branch,
+not the release tag. That is always at or ahead of the latest release, and the
+version string only moves when a release PR merges, so after an update the
+installed version equals the latest tag and there is no upgrade loop. The
+update does not pass `--ref`, because Herdr would record it as a pin and later
+checks would then refuse to move it.
+
+While `desk update` runs it holds an `updating` lock in the state dir;
+`desk start` and the `workspace.focused` hook skip starting the daemon while
+that lock is under 10 minutes old.
+
 Config and state live outside the plugin checkout, so a reinstall never loses
-`config.json`, `runs.jsonl`, or `fires.json`. The desk checks for a newer
-version on every tick and reports it in `status`; applying one is a separate
-step you trigger yourself. `docs/design.md` has the details.
+`config.json`, `runs.jsonl`, or `fires.json`.
+
+The daemon checks the latest GitHub release at most once a day (the stamp is
+`update-check.json` in the state dir) and applies it when `autoUpdate` in the
+machine `config.json` is on, which is the default. Set `"autoUpdate": false` to
+only log what is available. It notifies on upgrade and on failure. A linked
+plugin or a pinned `--ref` is never upgraded. `docs/design.md` has the details.
 
 ## Troubleshooting
 

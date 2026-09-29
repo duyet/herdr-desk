@@ -19,6 +19,7 @@ import {
 } from './daemon'
 import { dayKey } from './day'
 import { discoverDesks, formatScan } from './discover'
+import { defaultHerdrBin } from './herdr'
 import { formatHistory, loadRuns } from './history'
 import { formatHub, publish, snapshot } from './hub'
 import { stripAllDeskCrons } from './install'
@@ -63,6 +64,13 @@ import { SCHEMA_PATH, SCHEMA_URL } from './schema'
 import { formatSchedule } from './status'
 import { textTable } from './table'
 import { formatAgenda, formatNext } from './timeline'
+import {
+  checkForUpdate,
+  reinstall,
+  releaseUpdateLock,
+  saveLastCheck,
+  takeUpdateLock,
+} from './update'
 
 function usage(): never {
   console.log(`herdr-desk — Herdr plugin. Each repo is .herdr-desk.json; the daemon picks them up.
@@ -89,6 +97,7 @@ function usage(): never {
   herdr-desk report --repo DIR [--settle SECONDS] [--dry-run] [--force]
   herdr-desk hub [--send] [--json] [--force]
   herdr-desk prompts list | check | apply [--accept] | pin REPO SHA
+  herdr-desk update [--check]
   herdr-desk uninstall-cron
 `)
   process.exit(2)
@@ -410,7 +419,11 @@ async function main() {
   if (cmd === 'start') {
     const r = startDaemon()
     console.log(
-      r.already ? `already running (pid ${r.pid})` : `started pid ${r.pid}`,
+      r.updating
+        ? 'not started: an update is in progress'
+        : r.already
+          ? `already running (pid ${r.pid})`
+          : `started pid ${r.pid}`,
     )
     return
   }
@@ -434,7 +447,13 @@ async function main() {
   if (cmd === 'on-focus') {
     await discoverDesks()
     const r = startDaemon()
-    console.log(r.already ? `daemon pid ${r.pid}` : `started pid ${r.pid}`)
+    console.log(
+      r.updating
+        ? 'not started: an update is in progress'
+        : r.already
+          ? `daemon pid ${r.pid}`
+          : `started pid ${r.pid}`,
+    )
     return
   }
 
@@ -542,6 +561,57 @@ async function main() {
 
   if (cmd === 'prompts') {
     await promptsCommand(argv.slice(1))
+    return
+  }
+
+  if (cmd === 'update') {
+    const check = await checkForUpdate()
+    saveLastCheck(new Date(), `manual ${check.installed} -> ${check.latest}`)
+    const what = `${check.installed} -> ${check.latest}`
+    if (!check.newer) {
+      console.log(
+        `already current (${check.installed}, latest ${check.latest})`,
+      )
+      return
+    }
+    if (argv.includes('--check')) {
+      console.log(
+        `update available ${what}${check.blocked ? ` (not applicable: ${check.blocked})` : ''}`,
+      )
+      return
+    }
+    if (check.blocked) {
+      console.log(`update available ${what}, refusing: ${check.blocked}`)
+      process.exit(1)
+    }
+    // Stop, then install, then start: installing under a running daemon leaves
+    // it reading files that are being replaced.
+    takeUpdateLock()
+    stopDaemon()
+    const startPlugin = () => {
+      // Release first: the start action itself honours the lock.
+      releaseUpdateLock()
+      return Bun.spawnSync(
+        [defaultHerdrBin(), 'plugin', 'action', 'invoke', 'herdr-desk.start'],
+        { stdout: 'pipe', stderr: 'pipe' },
+      )
+    }
+    try {
+      await reinstall(check.source)
+    } catch (err) {
+      // Bring the old daemon back so scheduled jobs keep firing.
+      startPlugin()
+      console.error(err instanceof Error ? err.message : String(err))
+      process.exit(1)
+    }
+    const start = startPlugin()
+    if (start.exitCode !== 0) {
+      console.error(
+        `updated ${what}, but restart failed: ${start.stderr.toString().trim()}`,
+      )
+      process.exit(1)
+    }
+    console.log(`updated ${what}`)
     return
   }
 
