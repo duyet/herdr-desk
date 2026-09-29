@@ -19,6 +19,7 @@ import {
   stopDaemon,
   tickOnce,
 } from './daemon'
+import { collect, render } from './dashboard'
 import { dayKey } from './day'
 import { discoverDesks, formatScan } from './discover'
 import { defaultHerdrBin } from './herdr'
@@ -135,6 +136,7 @@ function usage(): never {
   herdr-desk report --repo DIR [--settle SECONDS] [--dry-run] [--force]
   herdr-desk hub [--send] [--json] [--force]
   herdr-desk summary [--since 1d] [--repo DIR] [--dry-run] [--notify]
+  herdr-desk dash [--json] [--no-color]
   herdr-desk prompts list | check | apply [--accept] | pin REPO SHA
   herdr-desk update [--check]
   herdr-desk uninstall-cron
@@ -802,6 +804,34 @@ async function main() {
     console.log(
       result.sent ? '\nsent to Telegram' : `\nnot sent (${result.reason})`,
     )
+    return
+  }
+
+  if (cmd === 'dash') {
+    const d = collect()
+    if (argv.includes('--no-color')) d.plain = true
+    if (argv.includes('--json')) {
+      console.log(
+        JSON.stringify(
+          {
+            host: d.host,
+            budget: d.budget,
+            hub: {
+              running: d.hub.running,
+              stuck: d.hub.stuck,
+              settled: d.hub.settled,
+              byLevel: d.hub.byLevel,
+            },
+            queue: { jobs: d.queue.jobs, expired: d.queue.expired },
+            today: d.today,
+          },
+          null,
+          2,
+        ),
+      )
+      return
+    }
+    console.log(render(d))
     return
   }
 
