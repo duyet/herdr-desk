@@ -1,11 +1,21 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { loadDeskConfig } from './config'
+import { markRunning } from './hub'
+import { MAX_BODY } from './notify'
 import {
   collectReports,
   fingerprint,
+  formatDuration,
+  formatNext,
   isLevel,
   type JobReport,
   MAX_ITEMS_PER_JOB,
@@ -119,49 +129,125 @@ describe('renderMerged', () => {
     expect(body).not.toMatch(/[^\\]\+\d/)
   })
 
-  test('one job renders as a single readable block', () => {
+  // Thu 2026-10-01 07:00 local, built like timeline.test.ts so the snapshot
+  // does not depend on the machine's zone.
+  const NEXT = new Date(2026, 9, 1, 7, 0)
+  const pr = (n: number): [string, string] => [
+    `PR #${n}`,
+    `https://github.com/o/aidr/pull/${n}`,
+  ]
+
+  test('ok: one fixed verdict line, then headline, items, links', () => {
     const body = renderMerged([
       job({
         task: 'desk:github-issues',
-        headline: '3 PRs merged',
-        items: ['PR #418 merged'],
+        repo: 'aidr',
+        agent: 'grok',
+        durationMs: 12 * 60_000,
+        nextAt: NEXT,
+        headline: '2 PRs merged',
+        items: ['#412 filed'],
+        links: [
+          pr(418),
+          pr(419),
+          ['#412', 'https://github.com/o/aidr/issues/412'],
+        ],
       }),
     ])
     expect(body).toBe(
       [
-        '🟢 ok 1 job · 1 ok',
         // `-` and `#` are reserved in MarkdownV2 and arrive escaped; `:` is
-        // not, so the job id keeps its colon. Telegram renders each escape as
-        // the plain character, so this is the text the reader actually sees.
-        '• desk:github\\-issues — 3 PRs merged',
-        '  • PR \\#418 merged',
+        // not. Telegram renders each escape as the plain character.
+        '🟢 *ok* aidr/desk:github\\-issues · grok · 12m · 2 PRs · 1 issue · next Thu 07:00',
+        '  2 PRs merged',
+        '  • \\#412 filed',
+        '  • [PR \\#418](https://github.com/o/aidr/pull/418)',
+        '  • [PR \\#419](https://github.com/o/aidr/pull/419)',
+        '  • [\\#412](https://github.com/o/aidr/issues/412)',
         '#ok #desk',
       ].join('\n'),
     )
   })
 
-  test('parallel jobs merge into one message, not one each', () => {
+  test('fail: same shape, unknown fields left out rather than guessed', () => {
+    const body = renderMerged([
+      job({
+        task: 'local:prod',
+        level: 'fail',
+        repo: 'chmonitor',
+        agent: 'claude',
+        durationMs: 65 * 60_000,
+        headline: 'deploy check failed',
+      }),
+    ])
+    expect(body).toBe(
+      [
+        '🔴 *fail* chmonitor/local:prod · claude · 1h05m',
+        '  deploy check failed',
+        '#fail #desk',
+      ].join('\n'),
+    )
+  })
+
+  test('blocked: parallel jobs merge into one message with a count line', () => {
     const body = renderMerged([
       job({
         task: 'desk:github-issues',
-        level: 'ok',
+        repo: 'aidr',
+        agent: 'grok',
+        nextAt: NEXT,
         headline: '3 PRs merged',
       }),
       job({
         task: 'local:deps',
         level: 'blocked',
+        repo: 'aidr',
+        agent: 'grok',
+        durationMs: 30_000,
+        nextAt: NEXT,
         headline: 'upgrade needs a human',
       }),
     ])
-    // One message, one dot, one tag line — and both jobs visible inside it.
+    // One message, one tag line — and both jobs visible inside it.
     expect(body).toBe(
       [
-        '🟠 blocked 2 jobs · 1 ok · 1 blocked',
-        '• desk:github\\-issues — 3 PRs merged',
-        '• local:deps — upgrade needs a human',
+        '🟠 *blocked* 2 jobs · 1 ok · 1 blocked',
+        '🟢 *ok* aidr/desk:github\\-issues · grok · next Thu 07:00',
+        '  3 PRs merged',
+        '🟠 *blocked* aidr/local:deps · grok · <1m · next Thu 07:00',
+        '  upgrade needs a human',
         '#blocked #desk',
       ].join('\n'),
     )
+  })
+
+  test('a busy morning stays inside the notice body cap', () => {
+    // The tag line is last, so an over-long body loses `#fail` to the clip.
+    const tasks = ['desk:github-issues', 'local:deps', 'local:prod']
+    const body = renderMerged(
+      tasks.map((task, i) =>
+        job({
+          task,
+          level: i === 2 ? 'fail' : 'ok',
+          repo: 'anyrouter',
+          agent: 'grok',
+          durationMs: 25 * 60_000,
+          nextAt: NEXT,
+          headline: 'merged the dependency bumps',
+          items: ['CI green on main'],
+          links: [pr(3651 + i)],
+        }),
+      ),
+    )
+    expect(body.length).toBeLessThan(MAX_BODY)
+    expect(body.split('\n').pop()).toBe('#fail #desk')
+  })
+
+  test('duration and next fire are stable text', () => {
+    expect(formatDuration(0)).toBe('<1m')
+    expect(formatDuration(59 * 60_000)).toBe('59m')
+    expect(formatDuration(125 * 60_000)).toBe('2h05m')
+    expect(formatNext(NEXT)).toBe('Thu 07:00')
   })
 
   test('escapes text an agent wrote, so a title cannot 400 the notice', () => {
@@ -271,6 +357,40 @@ describe('collectReports', () => {
     expect(groups).toHaveLength(1)
     expect(groups[0].reports.map((r) => r.task)).toEqual(['desk:github-issues'])
     expect(groups[0].reports[0].headline).toBe('merged 2')
+  })
+
+  test('fills the verdict line from stored stamps, not from the clock', () => {
+    const repo = desk()
+    const state = tmp('state')
+    const saved = process.env.HERDR_PLUGIN_STATE_DIR
+    process.env.HERDR_PLUGIN_STATE_DIR = state
+    try {
+      const [y, m, d] = DAY.split('-').map(Number)
+      const started = new Date(y, m - 1, d, 7, 0)
+      markRunning({ repo, task: 'desk:github-issues', desk: 'x', at: started })
+      status(repo, 'desk:github-issues', 'level: ok\nmerged 2')
+      const task = loadDeskConfig(repo).tasks[0]
+      const wrote = new Date(y, m - 1, d, 7, 42)
+      utimesSync(reportPath(runDirFor(repo, task, DAY)), wrote, wrote)
+
+      const now = new Date(y, m - 1, d, 9, 0)
+      const [r] = collectReports({ repo, day: DAY, now })[0].reports
+      expect(r.repo).toBe(loadDeskConfig(repo).name)
+      expect(r.agent).toBe(task.agent.ladder[0])
+      expect(r.durationMs).toBe(42 * 60_000)
+      // The default `0 7 * * *` already fired today, so next is tomorrow 07:00.
+      expect(r.nextAt).toEqual(new Date(y, m - 1, d + 1, 7, 0))
+      // Same inputs later in the day render the same body: dedupe holds.
+      const later = collectReports({
+        repo,
+        day: DAY,
+        now: new Date(y, m - 1, d, 11, 0),
+      })[0].reports
+      expect(renderMerged(later)).toBe(renderMerged([r]))
+    } finally {
+      if (saved === undefined) delete process.env.HERDR_PLUGIN_STATE_DIR
+      else process.env.HERDR_PLUGIN_STATE_DIR = saved
+    }
   })
 
   test('splits jobs that are routed to different topics', () => {

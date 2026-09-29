@@ -154,6 +154,11 @@ function readRecord(path: string): HubRecord | null {
   }
 }
 
+/** One job's current hub record, or `null` if it has none. Read-only. */
+export function jobRecord(repo: string, task: string): HubRecord | null {
+  return readRecord(recordPath(repo, task))
+}
+
 /**
  * Every record, minus the ones no longer worth showing.
  *

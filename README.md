@@ -382,14 +382,23 @@ bun src/cli.ts report --repo /path/to/anyrouter --settle 45 # send
 
 ```
 🟠 blocked 2 jobs · 1 ok · 1 blocked
-• desk:github-issues — 3 PRs merged, 1 blocked on a schema call
-  • PR #418 merged
+🟢 ok anyrouter/desk:github-issues · grok · 18m · 1 PR · 1 issue · next Thu 07:00
+  3 PRs merged, 1 blocked on a schema call
   • #412 filed
-• local:merge-queue — queue drained, needs a human on the squash policy
-  • waiting on decision for docs/*
-• [changes.md](https://example.com/run/changes.md)
+  • PR #418
+  • #412
+🟠 blocked anyrouter/local:merge-queue · claude · 7m · next Wed 18:00
+  queue drained, needs a human on the squash policy
 #blocked #desk
 ```
+
+Every job gets the same verdict line: dot, level, `repo/job`, agent, duration,
+PR and issue counts (from the fragment's GitHub links), next fire. A field the
+desk does not know is left out. Duration runs from the fire's start to when
+`status.md` was written, and the next fire is an absolute time, so two
+`report` runs over the same jobs render the same text and the dedupe below
+still holds. If Telegram rejects the MarkdownV2, the retry is a real plain
+rendering: no escapes, and each link as `label (url)`.
 
 Three things make that one message rather than four:
 

@@ -1,8 +1,17 @@
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs'
 import { join } from 'node:path'
 import { type LoadedDesk, loadDeskConfig, type TaskConfig } from './config'
+import { cronNext } from './cron'
+import { dayKey } from './day'
 import {
+  bold,
   esc,
   LEVEL_DOT,
   LEVEL_TAG,
@@ -10,7 +19,7 @@ import {
   type NoticeLevel,
   tag,
 } from './format'
-import { markSettled } from './hub'
+import { jobRecord, markSettled } from './hub'
 import { type NotifyConfig, notify, resolveNotify } from './notify'
 import { pluginStateDir } from './paths'
 import { runDirFor } from './run'
@@ -71,7 +80,23 @@ export type ReportFragment = {
   tags: string[]
 }
 
-export type JobReport = ReportFragment & { task: string }
+/**
+ * What the desk knows about a job beyond its own fragment. Every field is
+ * optional: a renderer shows what is known and leaves the rest out, never a
+ * placeholder.
+ */
+export type JobMeta = {
+  /** Desk name, shown as `<repo>/<job>`. */
+  repo?: string
+  /** First rung of the job's ladder. */
+  agent?: string
+  /** From the hub's start stamp to the fragment's mtime. */
+  durationMs?: number
+  /** The job's next scheduled fire. */
+  nextAt?: Date
+}
+
+export type JobReport = ReportFragment & { task: string } & JobMeta
 
 export function isLevel(value: string): value is NoticeLevel {
   return (LEVELS as string[]).includes(value)
@@ -156,42 +181,90 @@ export const MAX_ITEMS_PER_JOB = 4
 export const MAX_LINKS = 5
 
 /**
- * Merge every job's fragment into one body.
+ * Merge every job's fragment into one body, in one fixed shape.
  *
- * The order is: verdict line, then one block per job (task id in code, headline
- * bold, its own bullets), then the links, then the searchable tag. Job id is in
- * backticks rather than prose so a reader can tell at a glance which job a
- * block belongs to without the messages being three near-identical blobs.
+ * Every job gets the same verdict line, fields in the same order, so a channel
+ * read by scanning can be scanned:
+ *
+ * ```
+ * 🟢 *ok* aidr/desk:github-issues · grok · 12m · 2 PRs · 1 issue · next Thu 07:00
+ *   3 PRs merged
+ *   • PR #418 merged
+ *   • [PR #418](https://…)
+ * #ok #desk
+ * ```
+ *
+ * A field the desk does not know is left out rather than shown as `?`. Several
+ * jobs add one count line on top; the tag line is always last.
+ *
+ * The body must be identical every time it is rendered for the same jobs — the
+ * fingerprint dedupe depends on it — so nothing here reads the clock: duration
+ * comes from two stored stamps and the next fire is an absolute time.
  */
 export function renderMerged(reports: JobReport[]): string {
   if (reports.length === 0) return ''
   const shown = reports.slice(0, MAX_JOBS)
   const hidden = reports.length - shown.length
   const level = worstLevel(shown.map((r) => r.level))
-  const jobs = shown.length === 1 ? '1 job' : `${shown.length} jobs`
 
-  const out: string[] = [
-    `${LEVEL_DOT[level]} ${esc(level)} ${esc(jobs)} · ${esc(summaryLine(shown))}`,
-  ]
+  const out: string[] = []
+  if (reports.length > 1) {
+    out.push(
+      `${LEVEL_DOT[level]} ${bold(level)} ${esc(`${reports.length} jobs`)} · ${esc(summaryLine(shown))}`,
+    )
+  }
 
+  let linksLeft = MAX_LINKS
   for (const r of shown) {
-    out.push(`• ${esc(r.task)} — ${esc(r.headline)}`)
+    out.push(verdictLine(r))
+    if (r.headline) out.push(`  ${esc(r.headline)}`)
     for (const item of r.items.slice(0, MAX_ITEMS_PER_JOB)) {
       out.push(`  • ${esc(item)}`)
     }
     const more = r.items.length - MAX_ITEMS_PER_JOB
     if (more > 0) out.push(`  • ${esc(`… +${more} more`)}`)
+    for (const [label, url] of r.links.slice(0, linksLeft)) {
+      out.push(`  • ${link(label, url)}`)
+      linksLeft -= 1
+    }
   }
   if (hidden > 0) {
     out.push(`• ${esc(`… +${hidden} more job${hidden === 1 ? '' : 's'}`)}`)
   }
 
-  const links = shown.flatMap((r) => r.links).slice(0, MAX_LINKS)
-  for (const [label, url] of links) out.push(`• ${link(label, url)}`)
-
   const extra = [...new Set(shown.flatMap((r) => r.tags))].slice(0, 3)
   out.push([LEVEL_TAG[level], tag('desk'), ...extra.map(tag)].join(' '))
   return out.join('\n')
+}
+
+/** `<dot> *level* repo/job · agent · 12m · 2 PRs · 1 issue · next Thu 07:00` */
+export function verdictLine(r: JobReport): string {
+  const who = r.repo ? `${r.repo}/${r.task}` : r.task
+  const parts = [`${LEVEL_DOT[r.level]} ${bold(r.level)} ${esc(who)}`]
+  if (r.agent) parts.push(esc(r.agent))
+  if (r.durationMs !== undefined) parts.push(esc(formatDuration(r.durationMs)))
+  const prs = r.links.filter(([, url]) => /\/pull\/\d+/.test(url)).length
+  const issues = r.links.filter(([, url]) => /\/issues\/\d+/.test(url)).length
+  if (prs) parts.push(esc(`${prs} PR${prs === 1 ? '' : 's'}`))
+  if (issues) parts.push(esc(`${issues} issue${issues === 1 ? '' : 's'}`))
+  if (r.nextAt) parts.push(esc(`next ${formatNext(r.nextAt)}`))
+  return parts.join(' · ')
+}
+
+/** `<1m`, `12m`, `1h05m`. */
+export function formatDuration(ms: number): string {
+  const min = Math.floor(ms / 60_000)
+  if (min < 1) return '<1m'
+  if (min < 60) return `${min}m`
+  return `${Math.floor(min / 60)}h${String(min % 60).padStart(2, '0')}m`
+}
+
+const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+
+/** Local `Thu 07:00`. Absolute, so the body does not change as time passes. */
+export function formatNext(at: Date): string {
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${DAY_NAMES[at.getDay()]} ${p(at.getHours())}:${p(at.getMinutes())}`
 }
 
 /**
@@ -240,6 +313,8 @@ export function collectReports(opts: {
   repo: string
   day: string
   config?: LoadedDesk
+  /** Where "next fire" is measured from. */
+  now?: Date
 }): ReportGroup[] {
   const config = opts.config ?? loadDeskConfig(opts.repo)
   const buckets = new Map<string, ReportGroup>()
@@ -247,6 +322,10 @@ export function collectReports(opts: {
   for (const task of config.tasks) {
     const report = readRunReport(opts.repo, task, opts.day)
     if (!report) continue
+    Object.assign(
+      report,
+      jobMeta(opts.repo, config.name, task, opts.day, opts.now ?? new Date()),
+    )
     const { config: dest } = resolveNotify({
       repo: opts.repo,
       taskNotify: task.notify,
@@ -261,6 +340,43 @@ export function collectReports(opts: {
     group.reports.sort((a, b) => a.task.localeCompare(b.task))
   }
   return [...buckets.values()]
+}
+
+/**
+ * The desk-side facts for one job's verdict line.
+ *
+ * Duration runs from the hub's start stamp to the fragment's mtime — two stored
+ * times, so rendering twice gives the same body. A start from another day, or
+ * after the fragment was written, belongs to a different fire and is dropped.
+ */
+function jobMeta(
+  repo: string,
+  name: string,
+  task: TaskConfig,
+  day: string,
+  now: Date,
+): JobMeta {
+  const meta: JobMeta = { repo: name, agent: task.agent.ladder[0] }
+  try {
+    const started = jobRecord(repo, task.id)?.startedAt
+    const wrote = statSync(reportPath(runDirFor(repo, task, day))).mtimeMs
+    const from = started ? Date.parse(started) : Number.NaN
+    if (
+      Number.isFinite(from) &&
+      dayKey(new Date(from)) === day &&
+      from <= wrote
+    ) {
+      meta.durationMs = wrote - from
+    }
+  } catch {
+    // No hub record or no fragment mtime: the line has no duration.
+  }
+  const next = task.crons
+    .map((expr) => cronNext(expr, now))
+    .filter((d): d is Date => d !== null)
+    .sort((a, b) => a.getTime() - b.getTime())[0]
+  if (next) meta.nextAt = next
+  return meta
 }
 
 /** One job's fragment, or `null` if it wrote none or its run dir is unusable. */
