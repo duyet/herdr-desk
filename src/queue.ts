@@ -110,6 +110,27 @@ export function next(): HeldJob | null {
 }
 
 /**
+ * Drop a held job that is no longer owed, keyed like every other operation here.
+ *
+ * A queued job is owed *one* run, not one run per slot, so anything that
+ * actually ran it — the scheduled path recovering it, say — has discharged the
+ * debt. Leaving the entry behind makes the queue claim work is still due, and
+ * the tick that just did the work will believe it: `retryHeld` reads the same
+ * `repo::task` later in the same tick and runs it a second time. Nothing in
+ * `fires` can catch that, because a held slot is deliberately never written
+ * there.
+ *
+ * The failure path must not call this. A run that threw did not happen, so the
+ * job stays owed with the age it already had.
+ */
+export function clear(repo: string, task: string): void {
+  const jobs = load()
+  const kept = jobs.filter((j) => key(j) !== key({ repo, task }))
+  if (kept.length === jobs.length) return
+  save(kept)
+}
+
+/**
  * Put a job back after a failed attempt, keeping its age.
  *
  * The job is appended unconditionally. Looking for an existing entry first —

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { hold, MAX_HELD_MS, next, queued, requeue, view } from './queue'
+import { clear, hold, MAX_HELD_MS, next, queued, requeue, view } from './queue'
 
 let stateDir: string
 let saved: string | undefined
@@ -77,5 +77,23 @@ describe('queue', () => {
   test('reports how long the oldest job has waited', () => {
     hold(job(TASK), new Date(Date.now() - 5 * 60_000))
     expect(view().oldestMs).toBeGreaterThanOrEqual(5 * 60_000)
+  })
+
+  test('a job that ran is no longer owed', () => {
+    // A queued job owes one run, not one run per slot, so whatever ran it has
+    // paid the debt. Left queued, it sat at the head and the desk ran it again
+    // on every tick until it aged out.
+    hold(job(TASK))
+    clear(REPO, TASK)
+    expect(queued()).toHaveLength(0)
+  })
+
+  test('clearing one job leaves the rest of the desk owed', () => {
+    // One queue for every task on the machine. A discharge that emptied it would
+    // drop work for jobs that never got their turn.
+    hold(job('a'))
+    hold(job('b'))
+    clear(REPO, 'a')
+    expect(queued().map((j) => j.task)).toEqual(['b'])
   })
 })

@@ -11,13 +11,13 @@ import { join } from 'node:path'
 import { cronSlotsToday } from './cron'
 import { dayKey } from './day'
 import { discoverDesks } from './discover'
-import { check, readHealth } from './health'
+import { check, type HostHealth, readHealth, type Verdict } from './health'
 import { defaultHerdrBin } from './herdr'
 import { publish } from './hub'
 import { loadNotifyConfig, notify } from './notify'
 import { pluginStateDir } from './paths'
 import { isPaused, loadPaused, type PauseState } from './pause'
-import { hold, requeue, view } from './queue'
+import { clear, hold, requeue, view } from './queue'
 import { runTask } from './run'
 import { maybeAutoUpdate, updateLockHeld } from './update'
 
@@ -207,7 +207,16 @@ export function skipPausedSlots(
   return n
 }
 
-export async function tickOnce(at = new Date()): Promise<number> {
+/**
+ * One pass over every desk: fire what is due, then retry one held job.
+ *
+ * `gate` is the host health check, injected so a test can drive the tick on a
+ * machine too busy to pass it. Production always passes the real one.
+ */
+export async function tickOnce(
+  at = new Date(),
+  gate: (h: HostHealth) => Verdict = check,
+): Promise<number> {
   const desks = await discoverDesks()
   const fires = loadFires()
   // Read once per tick; a corrupt file throws and fires nothing (fail closed).
@@ -269,7 +278,7 @@ export async function tickOnce(at = new Date()): Promise<number> {
         // when the tick began may be saturated by the time this job is
         // reached. `docs/machine-health.md` says "check before starting, not
         // after", and this is that check.
-        const verdict = check(readHealth())
+        const verdict = gate(readHealth())
         if (!verdict.ok) {
           // Held, not dropped. `key` is deliberately NOT written to `fires`, so
           // the slot stays due and the same job is offered on a later tick —
@@ -294,6 +303,12 @@ export async function tickOnce(at = new Date()): Promise<number> {
           const result = await runTask({ repo: d.repo, taskId: task.id })
           fires[key] = new Date().toISOString()
           saveFires(fires)
+          // This tick just ran the job, so the queue must stop owing it. The
+          // held slot is deliberately absent from `fires`, so the ledger cannot
+          // answer "is this still due?" — and `retryHeld` runs later in this
+          // same tick. Without this the recovered job ran twice, and the ledger
+          // recorded two honest fires for one due slot.
+          clear(d.repo, task.id)
           log(`ok ${JSON.stringify(result)}`)
           n++
         } catch (err) {
@@ -308,7 +323,7 @@ export async function tickOnce(at = new Date()): Promise<number> {
   }
   // A held job is retried *after* the scheduled ones, so the queue can never
   // starve a job that was actually due.
-  if (await retryHeld(at)) n++
+  if (await retryHeld(at, gate)) n++
   saveFires(fires)
   if (n > 0 || needsHub) await publishHub()
   return n
@@ -323,8 +338,16 @@ export async function tickOnce(at = new Date()): Promise<number> {
  *
  * A retry that fails goes back with the age it already had, so a job that can
  * never run is eventually given up on rather than circling the queue forever.
+ *
+ * The head is read, not popped: the entry is dropped by `clear()` once the run
+ * has actually happened. Taking it off first — `next()` — would make the queue
+ * lose the job outright if the daemon died between the pop and the run, and a
+ * lost job is the one failure this queue does not get to have.
  */
-async function retryHeld(at: Date): Promise<boolean> {
+async function retryHeld(
+  at: Date,
+  gate: (h: HostHealth) => Verdict = check,
+): Promise<boolean> {
   const { jobs, expired } = view(at)
   for (const gone of expired) {
     log(`give up ${gone.task}: held since ${gone.since} without running`)
@@ -332,9 +355,13 @@ async function retryHeld(at: Date): Promise<boolean> {
   const next_ = jobs[0]
   if (!next_) return false
   const health = readHealth()
-  if (!check(health).ok) return false
+  if (!gate(health).ok) return false
   try {
     const result = await runTask({ repo: next_.repo, taskId: next_.task })
+    // The same discharge the scheduled path does: the job ran, so the queue
+    // must stop owing it. Left in place, a held job that finally ran stayed at
+    // the head of the queue and ran again on every tick until it aged out.
+    clear(next_.repo, next_.task)
     log(`held ran ${next_.task}: ${JSON.stringify(result)}`)
     return true
   } catch (err) {

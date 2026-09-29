@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -8,18 +14,43 @@ import {
   pruneFires,
   saveFires,
   skipPausedSlots,
+  tickOnce,
 } from './daemon'
+import { loadRuns } from './history'
+import { hold, queued } from './queue'
 
-const prevState = process.env.HERDR_PLUGIN_STATE_DIR
+// Everything the tick reads off the host, so a run cannot pick up the machine's
+// real Herdr, real desk configs, or a real Telegram token.
+const HOST_ENV = [
+  'HERDR_PLUGIN_STATE_DIR',
+  'HERDR_PLUGIN_CONFIG_DIR',
+  'HERDR_BIN_PATH',
+  'HERDR_BIN',
+  'HERDR_SOCKET_PATH',
+  'HERDR_DESK_TELEGRAM_TOKEN',
+  'HERDR_DESK_TELEGRAM_CHAT_ID',
+] as const
+const prevEnv = HOST_ENV.map((k) => [k, process.env[k]] as const)
+const tempDirs: string[] = []
 
 afterEach(() => {
-  if (prevState === undefined) delete process.env.HERDR_PLUGIN_STATE_DIR
-  else process.env.HERDR_PLUGIN_STATE_DIR = prevState
+  for (const [k, v] of prevEnv) {
+    if (v === undefined) delete process.env[k]
+    else process.env[k] = v
+  }
+  for (const dir of tempDirs.splice(0)) {
+    rmSync(dir, { recursive: true, force: true })
+  }
 })
 
+function tempDir(prefix: string): string {
+  const dir = mkdtempSync(join(tmpdir(), prefix))
+  tempDirs.push(dir)
+  return dir
+}
+
 function stateDir(): string {
-  const dir = join(tmpdir(), `desk-fires-${Date.now()}-${Math.random()}`)
-  mkdirSync(dir, { recursive: true })
+  const dir = tempDir('desk-fires-')
   process.env.HERDR_PLUGIN_STATE_DIR = dir
   return dir
 }
@@ -214,5 +245,91 @@ describe('skipPausedSlots', () => {
       skipPausedSlots(fires, '/r', 't', '0 7 * * *', '2026-09-30', ['07:00']),
     ).toBe(0)
     expect(fires[key]).toBe('2026-09-30T07:00:01Z')
+  })
+})
+
+describe('a held job whose slot comes due', () => {
+  const TASK = 'local:triage'
+  // 09:15, so the newest due slot for a `* * * * *` job is `09:15` itself.
+  const AT = new Date(2026, 8, 30, 9, 15)
+  const SLOT = '09:15'
+  const HELD_AT = new Date(2026, 8, 30, 8, 45)
+
+  /**
+   * A one-task desk on a temp repo, and a Herdr that is not running.
+   *
+   * `herdrUp` chooses which way the run goes without stubbing `runTask`: a
+   * missing socket is a precondition skip, so the run resolves, while a missing
+   * binary throws. Both are the real path, and neither reaches the network.
+   */
+  function desk(herdrUp: boolean): string {
+    const state = stateDir()
+    const repo = tempDir('herdr-desk-repo-')
+    writeFileSync(
+      join(repo, '.herdr-desk.json'),
+      `${JSON.stringify({
+        name: 'held-test',
+        tasks: [{ id: TASK, schedule: '* * * * *' }],
+      })}\n`,
+    )
+    // `discoverDesks` finds a remembered repo, since Herdr is not here to list
+    // the open workspaces.
+    writeFileSync(
+      join(state, 'known-repos.json'),
+      `${JSON.stringify({ repos: [repo] })}\n`,
+    )
+    // The binary has to exist for a missing socket to be the reported problem.
+    process.env.HERDR_BIN_PATH = herdrUp
+      ? process.execPath
+      : join(state, 'no-herdr')
+    process.env.HERDR_SOCKET_PATH = join(state, 'herdr.sock')
+    // The global desk config and the notify token both live here, and a dev box
+    // has a real Telegram token in the default location.
+    process.env.HERDR_PLUGIN_CONFIG_DIR = tempDir('herdr-desk-config-')
+    delete process.env.HERDR_DESK_TELEGRAM_TOKEN
+    delete process.env.HERDR_DESK_TELEGRAM_CHAT_ID
+    // `readHealth` asks Herdr how many sessions are alive, and this is not the
+    // moment to learn what the developer's desk is doing.
+    process.env.HERDR_BIN = join(state, 'no-herdr')
+    return repo
+  }
+
+  const heldFor = (repo: string): void => {
+    hold(
+      { repo, task: TASK, slot: SLOT, reason: 'load 2.1/core over 1.5' },
+      HELD_AT,
+    )
+  }
+
+  // The real gate reads the real host, so these two would assert nothing on a
+  // box over budget — and worse, pass, because a held job is also still owed.
+  // A fixed verdict keeps the tick hermetic and these tests honest.
+  const roomy = () => ({ ok: true, breaches: [], pressure: 0 })
+
+  test('the recovered job runs once, and the queue stops owing it', async () => {
+    // The tick fires the due slot, then drains one held job. A held slot is
+    // deliberately never written to `fires`, so the ledger cannot tell "still
+    // owed" from "just ran" — and it ran twice, with two honest fires recorded
+    // for one due slot.
+    const repo = desk(true)
+    heldFor(repo)
+
+    await tickOnce(AT, roomy)
+
+    expect(loadRuns(50, { repo, task: TASK })).toHaveLength(1)
+    expect(queued()).toHaveLength(0)
+  })
+
+  test('a job whose run fails is still owed, at the age it had', async () => {
+    // The other half. Discharging a failed run would report a job as done that
+    // never happened, and would restart the clock that gives up on a desk that
+    // can never take the work.
+    const repo = desk(false)
+    heldFor(repo)
+
+    await tickOnce(AT, roomy)
+
+    expect(queued()).toHaveLength(1)
+    expect(queued()[0]?.since).toBe(HELD_AT.toISOString())
   })
 })
