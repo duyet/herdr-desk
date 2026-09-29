@@ -44,6 +44,16 @@ title = "Show recent desk run history"
 command = ["bin/desk", "history"]
 
 [[actions]]
+id = "cleanup-dry-run"
+title = "List merged worktrees, old run dirs and stale panes a cleanup would remove"
+command = ["bin/desk", "cleanup", "--dry-run"]
+
+[[actions]]
+id = "cleanup"
+title = "Remove merged worktrees, old run dirs and stale panes (what cleanup-dry-run lists)"
+command = ["bin/desk", "cleanup"]
+
+[[actions]]
 id = "last"
 title = "Show today's start-run change summaries"
 command = ["bin/desk", "last"]

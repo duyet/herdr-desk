@@ -2,6 +2,12 @@
 
 import { readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import {
+  applyCleanup,
+  formatCleanup,
+  formatResult,
+  planCleanup,
+} from './cleanup'
 import { listBundledTasks, loadDeskConfig } from './config'
 import { explainConfig, explainTasks, showConfig } from './configShow'
 import {
@@ -59,6 +65,7 @@ function usage(): never {
   herdr-desk status
   herdr-desk agenda [DAYS]
   herdr-desk history [N]
+  herdr-desk cleanup [--dry-run]
   herdr-desk last
   herdr-desk start | stop | daemon
   herdr-desk tick
@@ -301,6 +308,21 @@ async function main() {
     const n = Number(argv[1])
     const days = Number.isInteger(n) && n > 0 && n <= 7 ? n : 7
     console.log(formatAgenda(await discoverDesks(), new Date(), days))
+    return
+  }
+
+  if (cmd === 'cleanup') {
+    const dryRun = argv.includes('--dry-run')
+    const desks = (await discoverDesks()).map((d) => ({
+      repo: d.repo,
+      tasks: d.config.tasks,
+    }))
+    const plan = await planCleanup(desks)
+    console.log(formatCleanup(plan, dryRun))
+    if (dryRun) return
+    const result = await applyCleanup(plan)
+    console.log(formatResult(result))
+    if (result.failed.length > 0) process.exit(1)
     return
   }
 
