@@ -19,6 +19,8 @@ In scope:
 - delegating child worktrees to work the queue
 - filing real GitHub issues for findings
 - recording what actually happened, and showing it
+- reading, not changing, local agent session files to index history (titles
+  and timestamps only, kept in the local state dir)
 
 Out of scope, deliberately:
 
