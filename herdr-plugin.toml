@@ -29,6 +29,11 @@ title = "Show daemon, cron slots, last/next fire"
 command = ["bin/desk", "status"]
 
 [[actions]]
+id = "agenda"
+title = "Show upcoming fires per slot for the next 7 days"
+command = ["bin/desk", "agenda"]
+
+[[actions]]
 id = "list"
 title = "List desks picked up from repos"
 command = ["bin/desk", "scan"]
