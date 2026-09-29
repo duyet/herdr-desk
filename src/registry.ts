@@ -202,7 +202,11 @@ export function listRegistryTasks(
     if (!isAllowed(config, repo)) continue
     for (const path of Object.keys(entry.files)) {
       if (!isEligiblePath(path)) continue
-      out.push(`${GH_PREFIX}${repo}/${playbookName(path)}`)
+      // The spec keeps any subdirectory under `tasks/`: `approvedPlaybookPath`
+      // resolves `gh:repo/ops/deploy` to `tasks/ops/deploy.md`, not the
+      // basename.
+      const name = path.slice(REGISTRY_DIR.length + 1).replace(/\.md$/, '')
+      out.push(`${GH_PREFIX}${repo}/${name}`)
     }
   }
   return out.sort()
@@ -357,7 +361,9 @@ async function fetchOne(
 ): Promise<string> {
   const b64 = await gh([
     'api',
-    `repos/${repo}/contents/${path}?ref=${commit}`,
+    // Encode each segment: a raw `?` or `#` in a file name would otherwise
+    // truncate the path or override `ref`, fetching bytes from another file.
+    `repos/${repo}/contents/${path.split('/').map(encodeURIComponent).join('/')}?ref=${commit}`,
     '--jq',
     '.content',
   ])
