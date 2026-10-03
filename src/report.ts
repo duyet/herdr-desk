@@ -197,9 +197,10 @@ export const MAX_LINKS = 5
  * A field the desk does not know is left out rather than shown as `?`. Several
  * jobs add one count line on top; the tag line is always last.
  *
- * The body must be identical every time it is rendered for the same jobs — the
- * fingerprint dedupe depends on it — so nothing here reads the clock: duration
- * comes from two stored stamps and the next fire is an absolute time.
+ * Nothing here reads the clock: duration comes from two stored stamps and the
+ * next fire is an absolute time, not a countdown. `next` still moves when the
+ * schedule rolls over — it is there for a human checking that a job is alive —
+ * so `fingerprint` leaves it out rather than the renderer dropping it.
  */
 export function renderMerged(reports: JobReport[]): string {
   if (reports.length === 0) return ''
@@ -284,15 +285,31 @@ function summaryLine(reports: JobReport[]): string {
 }
 
 /**
- * Fingerprint of what a notice would say.
+ * Fingerprint of the reports a notice was built from, not of its body.
  *
  * Two jobs finishing at the same moment both run `report`, and after the settle
- * window they merge to the *same* body. Hashing it lets the second one stand
- * down instead of posting a duplicate — which is the whole reason merging is
- * worth doing at all.
+ * window they report the same thing. Hashing the reports lets the second one
+ * stand down instead of posting a duplicate — which is the whole reason merging
+ * is worth doing at all.
+ *
+ * Hashing the rendered body does not work. The body carries `next Thu 07:00`,
+ * and the next fire moves at every schedule boundary, so a desk whose fragments
+ * had not changed resent the same paragraph on each tick: three notices in one
+ * day over one byte-identical `status.md`.
+ *
+ * Two fields are left out, because neither is something a manager wrote and
+ * both move on their own: `nextAt`, which advances when the schedule rolls over,
+ * and `durationMs`, which changes with every re-fire of an identical fragment.
+ * Everything else is hashed, so a change to the level, the headline, an item, a
+ * link or a tag still sends. That is the direction to fail in: a repeated notice
+ * is a nuisance, a dropped one is invisible.
  */
-export function fingerprint(body: string): string {
-  return createHash('sha256').update(body).digest('hex').slice(0, 16)
+export function fingerprint(reports: JobReport[]): string {
+  const written = reports.map(({ nextAt, durationMs, ...rest }) => rest)
+  return createHash('sha256')
+    .update(JSON.stringify(written))
+    .digest('hex')
+    .slice(0, 16)
 }
 
 /** One merged notice's worth of jobs, plus where they have to go. */
@@ -465,7 +482,7 @@ export async function sendReports(opts: {
       group.dest.chatId,
       group.dest.topicId,
     )
-    const hash = fingerprint(body)
+    const hash = fingerprint(group.reports)
 
     if (opts.dryRun) {
       out.push({ sent: false, reason: 'dry run', body, jobs })

@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { loadDeskConfig } from './config'
 import { markRunning } from './hub'
-import { MAX_BODY } from './notify'
+import { MAX_BODY, type NotifyConfig, type notify } from './notify'
 import {
   collectReports,
   fingerprint,
@@ -21,13 +21,19 @@ import {
   MAX_ITEMS_PER_JOB,
   MAX_JOBS,
   parseReport,
+  type ReportGroup,
   renderMerged,
   reportPath,
+  sendReports,
   worstLevel,
 } from './report'
 import { runDirFor } from './run'
 
 const DAY = '2026-09-28'
+
+// Thu 2026-10-01 07:00 local, built like timeline.test.ts so the snapshot does
+// not depend on the machine's zone.
+const NEXT = new Date(2026, 9, 1, 7, 0)
 
 const roots: string[] = []
 let savedConfigDir: string | undefined
@@ -129,9 +135,6 @@ describe('renderMerged', () => {
     expect(body).not.toMatch(/[^\\]\+\d/)
   })
 
-  // Thu 2026-10-01 07:00 local, built like timeline.test.ts so the snapshot
-  // does not depend on the machine's zone.
-  const NEXT = new Date(2026, 9, 1, 7, 0)
   const pr = (n: number): [string, string] => [
     `PR #${n}`,
     `https://github.com/o/aidr/pull/${n}`,
@@ -312,11 +315,128 @@ describe('renderMerged', () => {
 })
 
 describe('fingerprint', () => {
-  test('identical merged bodies collide, changed ones do not', () => {
+  test('identical reports collide, changed ones do not', () => {
     // This is the whole dedupe: two managers that merge to the same text must
     // produce the same hash, or the second notice is a duplicate.
-    expect(fingerprint('a')).toBe(fingerprint('a'))
-    expect(fingerprint('a')).not.toBe(fingerprint('b'))
+    expect(fingerprint([job({ task: 't' })])).toBe(
+      fingerprint([job({ task: 't' })]),
+    )
+    expect(fingerprint([job({ task: 't' })])).not.toBe(
+      fingerprint([job({ task: 't', headline: 'merged the bumps' })]),
+    )
+  })
+
+  test('fields that move on their own do not change the hash', () => {
+    // `next Thu 07:00` advances at every schedule boundary and the duration
+    // changes on every re-fire of the same fragment. Hashing either resent the
+    // same paragraph, which is the bug.
+    const base = { task: 't', nextAt: NEXT, durationMs: 7 * 60_000 }
+    expect(fingerprint([job(base)])).toBe(
+      fingerprint([
+        job({
+          ...base,
+          nextAt: new Date(2026, 9, 1, 8, 0),
+          durationMs: 9 * 60_000,
+        }),
+      ]),
+    )
+  })
+})
+
+describe('sendReports', () => {
+  const dest: NotifyConfig = {
+    enabled: true,
+    token: 't',
+    chatId: 'c',
+    topicId: '',
+  }
+  let savedState: string | undefined
+
+  /** The ledger lands in a throwaway state dir, never the real machine's. */
+  function ledger(): void {
+    savedState = process.env.HERDR_PLUGIN_STATE_DIR
+    process.env.HERDR_PLUGIN_STATE_DIR = tmp('state')
+  }
+
+  /** Stand in for the notifier, keeping every body it was asked to send. */
+  function recorder(): { send: typeof notify; bodies: string[] } {
+    const bodies: string[] = []
+    return {
+      bodies,
+      send: async (notice) => {
+        bodies.push(notice.message)
+        return { sent: true, machine: 'm', repo: notice.repo ?? '' }
+      },
+    }
+  }
+
+  /** One destination, one job — the shape `collectReports` hands over. */
+  function groups(over: Partial<JobReport> & { task: string }): ReportGroup[] {
+    return [{ dest, reports: [job(over)] }]
+  }
+
+  afterEach(() => {
+    if (savedState === undefined) delete process.env.HERDR_PLUGIN_STATE_DIR
+    else process.env.HERDR_PLUGIN_STATE_DIR = savedState
+    savedState = undefined
+  })
+
+  test('a schedule boundary does not resend an unchanged report', async () => {
+    // 2026-10-03: three sends, one byte-identical `status.md`, only `next` moved.
+    ledger()
+    const { send, bodies } = recorder()
+    const report = { task: 'desk:github-issues', repo: 'herdr-desk' }
+    const args = { repo: '/repo', day: DAY, send }
+
+    const [first] = await sendReports({
+      ...args,
+      groups: groups({ ...report, nextAt: NEXT }),
+    })
+    expect(first.sent).toBe(true)
+
+    const [again] = await sendReports({
+      ...args,
+      groups: groups({ ...report, nextAt: new Date(2026, 9, 1, 8, 0) }),
+    })
+    expect(again.sent).toBe(false)
+    expect(again.reason).toBe('unchanged since last notice')
+    // One send, and the body it stood down on differs from the one it sent — so
+    // this cannot pass by the render having stopped moving.
+    expect(bodies).toHaveLength(1)
+    expect(again.body).not.toBe(bodies[0])
+  })
+
+  test('a changed level sends again', async () => {
+    // The direction of failure: a changed report must never be swallowed, because
+    // a notice that does not arrive leaves no trace at all.
+    ledger()
+    const { send, bodies } = recorder()
+    const args = { repo: '/repo', day: DAY, send }
+
+    await sendReports({ ...args, groups: groups({ task: 't', level: 'ok' }) })
+    const [again] = await sendReports({
+      ...args,
+      groups: groups({ task: 't', level: 'fail' }),
+    })
+    expect(again.sent).toBe(true)
+    expect(bodies).toHaveLength(2)
+  })
+
+  test('a changed headline sends again', async () => {
+    ledger()
+    const { send, bodies } = recorder()
+    const args = { repo: '/repo', day: DAY, send }
+
+    await sendReports({
+      ...args,
+      groups: groups({ task: 't', headline: '3 PRs merged' }),
+    })
+    const [again] = await sendReports({
+      ...args,
+      groups: groups({ task: 't', headline: 'bumped deps' }),
+    })
+    expect(again.sent).toBe(true)
+    expect(bodies).toHaveLength(2)
   })
 })
 
