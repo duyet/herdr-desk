@@ -3,6 +3,37 @@
 Versions stay on **0.1.x**. `feat` and `fix` bump the patch. Do not merge a
 1.0 or 0.2 release PR.
 
+## [0.1.7](https://github.com/duyet/herdr-desk/compare/v0.1.6...v0.1.7) (2026-10-03)
+
+
+### Features
+
+* **agenda:** assistant roadmap + desk agenda ([#48](https://github.com/duyet/herdr-desk/issues/48)) ([616b626](https://github.com/duyet/herdr-desk/commit/616b626f1a6b7322425cc814b69aca86b6652f3c))
+* **cleanup:** add desk cleanup with --dry-run ([#51](https://github.com/duyet/herdr-desk/issues/51)) ([e08fb8f](https://github.com/duyet/herdr-desk/commit/e08fb8f0fd2a305c36cf7bee0d520bb43499985f))
+* **cli:** add next, trigger, pause and resume ([#52](https://github.com/duyet/herdr-desk/issues/52)) ([750ccb7](https://github.com/duyet/herdr-desk/commit/750ccb7a30fcc66e4dc3db2da45f2f4689417d80))
+* **daemon:** a host health gate, a held-job queue, and `dash` ([#39](https://github.com/duyet/herdr-desk/issues/39)) ([919a982](https://github.com/duyet/herdr-desk/commit/919a9827d08f10e67dd211986c70b81d72e57491))
+* fixed run-done notice, real plain fallback, desk summary ([#57](https://github.com/duyet/herdr-desk/issues/57)) ([a0bee97](https://github.com/duyet/herdr-desk/commit/a0bee97f562477977117c47a9b62d5949d0280e5))
+* **notify:** write telegram notices like a short text ([20c6bff](https://github.com/duyet/herdr-desk/commit/20c6bff20cc16fee8a570405e009f440365e6cab))
+* **sessions:** cross-agent session index and per-repo context ([#54](https://github.com/duyet/herdr-desk/issues/54)) ([f05e3e7](https://github.com/duyet/herdr-desk/commit/f05e3e715af5bbb96723c41a302d49335b8fc7db))
+* **update:** self-update from GitHub releases ([#50](https://github.com/duyet/herdr-desk/issues/50)) ([be55a7d](https://github.com/duyet/herdr-desk/commit/be55a7dcb86f1e0e3c599c9c135fb3cd6e299fe6))
+* **viz:** timeline, heatmap, analytics, calendar and HTML board ([#53](https://github.com/duyet/herdr-desk/issues/53)) ([b289a1f](https://github.com/duyet/herdr-desk/commit/b289a1f43b0db61a3218603dd22509bfc47647d1))
+
+
+### Bug Fixes
+
+* **child:** teach check-first merge, not arm --auto ([#58](https://github.com/duyet/herdr-desk/issues/58)) ([238d950](https://github.com/duyet/herdr-desk/commit/238d950bb62ff48d8fdbdd0f379ed8bffbd590f2))
+* **ci:** repin setup-bun so the weekly branch prune can run ([#59](https://github.com/duyet/herdr-desk/issues/59)) ([2b9444b](https://github.com/duyet/herdr-desk/commit/2b9444b625df0371d6651021fa90c7b6912920d4))
+* **config:** agent.default precedence and group schema drift ([#47](https://github.com/duyet/herdr-desk/issues/47)) ([cb418d4](https://github.com/duyet/herdr-desk/commit/cb418d46bcef1b5eea7768a8461ccb3a86c1e49b))
+* **daemon:** a late start resumes, it does not replay the day ([#41](https://github.com/duyet/herdr-desk/issues/41)) ([57baa6f](https://github.com/duyet/herdr-desk/commit/57baa6fd85d5cb518c2ee2374c19d5640c955a38))
+* **daemon:** a signal-driven stop leaves a line ([#62](https://github.com/duyet/herdr-desk/issues/62)) ([d7a79af](https://github.com/duyet/herdr-desk/commit/d7a79afdd666690a285d3093af0a175f3094dceb))
+* **daemon:** discharge the queue when a job runs ([#61](https://github.com/duyet/herdr-desk/issues/61)) ([1ba212c](https://github.com/duyet/herdr-desk/commit/1ba212c88463779ae77528f778d182d6d3cd1c38))
+* **history:** count a job's failure streak over its own records, not the global window ([#35](https://github.com/duyet/herdr-desk/issues/35)) ([f2da52f](https://github.com/duyet/herdr-desk/commit/f2da52fcf0a8d6ef32a227deadef20b75a9aba8d))
+* **notify:** escape MarkdownV2 markers so long and stuck notices are not rejected ([#49](https://github.com/duyet/herdr-desk/issues/49)) ([d9f05fb](https://github.com/duyet/herdr-desk/commit/d9f05fb77fb23f2440d7cf2bd1d48b9c50805e12))
+* **registry:** encode playbook paths and list nested playbooks by full spec ([#46](https://github.com/duyet/herdr-desk/issues/46)) ([d38dcc4](https://github.com/duyet/herdr-desk/commit/d38dcc4cf1dd56db98cfb6218c882d3a212d1145))
+* **run:** prompt a registered-but-unlisted manager instead of starting one ([#33](https://github.com/duyet/herdr-desk/issues/33)) ([9593d57](https://github.com/duyet/herdr-desk/commit/9593d570818f84026dd7e6a2b82321770112ba6e)), closes [#32](https://github.com/duyet/herdr-desk/issues/32)
+* **run:** start the first Herdr agent kind in the ladder, reject ladders with none ([#55](https://github.com/duyet/herdr-desk/issues/55)) ([340c57d](https://github.com/duyet/herdr-desk/commit/340c57d4306213dd3f9ed6ee9b4deeddd3020958))
+* **status:** read the Last column per job, not from a global window ([#42](https://github.com/duyet/herdr-desk/issues/42)) ([3b1a2d3](https://github.com/duyet/herdr-desk/commit/3b1a2d397c3404463c40e8cfc6bdf823719d1e46))
+
 ## [0.1.6](https://github.com/duyet/herdr-desk/compare/v0.1.5...v0.1.6) (2026-09-28)
 
 
