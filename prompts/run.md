@@ -72,10 +72,21 @@ Write `{{runDir}}/status.md`:
 
 ```markdown
 level: ok            <!-- ok | info | blocked | fail | skip -->
-3 PRs merged, 1 still in review
-- PR #418 merged
-- #412 filed
-- [changes.md](https://example.com/run/changes.md)
+Shipped #418 — schema call landed. Watching CI; squash-merge when green.
+- #418
+```
+
+Write the headline the way you would text a person. Short, specific, first
+person. One or two sentences: what happened, and what you are doing next.
+A fact (PR, SHA, the one blocker) beats a count.
+
+```
+Shipped #145 — CLI telemetry honesty. Merge SHA 763adf5. No QA on this path.
+Opened #145 — fix(cli): surface hub-rejected rows. CI running; squash-merge when green.
+Free anyr paths are rate-limited. Switched to Devin Pro on the same WIP — watching the PR.
+Board's clear aside from #6 and release-please.
+Freebuff still 401. Need a real authToken from ~/.config/manicode/credentials.json.
+Done.
 ```
 
 Then send it:
@@ -86,13 +97,15 @@ Then send it:
 
 Rules, because this is the only thing the outside world sees:
 
-- **Insight, not a changelog.** One line of what changed and what it means.
-  "3 PRs merged, 1 blocked on a schema decision" is useful. A list of every
-  file touched is not.
+- The headline is the message. Talk like a person, not a status report.
+  "3 PRs merged, 1 still in review" is a changelog. Leave that in `changes.md`.
+- Say the next move, or the one thing you need. If there is nothing to add,
+  `Done.` is the whole headline.
 - `level` is the truth, not the mood: `blocked` when a human must decide,
   `fail` when the run could not do its job, `skip` when there was nothing to
   do. Do not report `ok` for work you could not finish.
-- Three bullets, then stop. More belongs in `changes.md`.
+- At most one bullet, and only if it is a link or an id the headline did not
+  already say. No file lists.
 - The command is safe if nothing is configured — it prints why and exits 0.
   If it says `unchanged`, another job already said this; do not work around it.
 - `--settle` is what merges jobs that finish at the same moment into one

@@ -464,12 +464,10 @@ bun src/cli.ts report --repo /path/to/anyrouter --settle 45 # send
 ```
 🟠 blocked 2 jobs · 1 ok · 1 blocked
 🟢 ok anyrouter/desk:github-issues · grok · 18m · 1 PR · 1 issue · next Thu 07:00
-  3 PRs merged, 1 blocked on a schema call
-  • #412 filed
-  • PR #418
-  • #412
+  Shipped #418 — schema call landed. Watching CI.
+  • #418
 🟠 blocked anyrouter/local:merge-queue · claude · 7m · next Wed 18:00
-  queue drained, needs a human on the squash policy
+  Queue drained. Need a call on the squash policy.
 #blocked #desk
 ```
 
@@ -496,8 +494,9 @@ Three things make that one message rather than four:
 The worst level wins the dot, so one blocked job is visible without opening
 anything. `level` is `ok` / `info` / `skip` / `blocked` / `fail`.
 
-`status.md` is written by the manager, so keep it to one line of insight and
-three bullets. The full delta stays in `changes.md`; the notice is what you
+`status.md` is written by the manager. The headline is a text: one or two
+sentences, a fact and the next move (`Shipped #418 — schema call landed.
+Watching CI.`). The full delta stays in `changes.md`; the notice is what you
 read on a phone.
 
 ### Per-desk channels

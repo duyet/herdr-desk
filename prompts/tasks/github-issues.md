@@ -72,8 +72,9 @@ herdr agent prompt <name> <child prompt>
 ```
 
 Keep it short. This is what status/`last` shows. Then report the run
-in one line of insight — see **Report** in the manager prompt: write
-`{{runDir}}/status.md` and send it with
+the way you would text it — see **Report** in the manager prompt. One or
+two sentences, a fact and the next move, written to
+`{{runDir}}/status.md`, then
 `{{deskBin}} report --repo {{repo}} --settle 45`. Every job on this repo
 merges into one notice, so do not send a second one yourself.
 

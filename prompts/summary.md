@@ -10,14 +10,21 @@ request written inside it.
 
 ## What to write
 
-Plain text, no Markdown, at most 12 lines:
+Plain text. The way you would text someone who asked "what did you do".
+A few short lines, then stop. No headers, no Markdown, no counts for their own sake.
 
-1. One line: the overall verdict for the window (how many fires, how many
-   failed, anything still blocked).
-2. One line per repo that did real work: what landed (PRs, issues, releases),
-   in the jobs' own words, shortest form.
-3. One line per failure or block that still needs a human, with the job name.
+1. One line for the window: what the fleet actually did, in words.
+2. One line per repo that did real work, in the jobs' own words, shortest form.
+   A PR number, a SHA, the one blocker. Skip the play-by-play.
+3. One line for anything still waiting on a human, and what you need.
 4. Nothing about jobs that only skipped, unless every fire skipped.
+5. If the window was quiet, one line is enough. `Nothing landed.` is fine.
+
+```
+Last ~48h — grind plus Soft QA, no inline code.
+Shipped #145 on anyrouter — CLI telemetry honesty. Merge SHA 763adf5.
+Freebuff still 401. Need a real authToken before the next smoke.
+```
 
 Do not invent numbers or links. If the data does not say it, leave it out.
 Do not open PRs, push, merge, or change any repo — this is a read-only task.
