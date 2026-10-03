@@ -3,6 +3,21 @@
 Versions stay on **0.1.x**. `feat` and `fix` bump the patch. Do not merge a
 1.0 or 0.2 release PR.
 
+## [0.1.8](https://github.com/duyet/herdr-desk/compare/v0.1.7...v0.1.8) (2026-10-03)
+
+
+### Bug Fixes
+
+* **daemon:** measure downtime from the last tick, not local midnight ([#65](https://github.com/duyet/herdr-desk/issues/65)) ([05ccff0](https://github.com/duyet/herdr-desk/commit/05ccff045f2523b692b219afe041f30c8a495066))
+* **run:** name the real base-ref git, and pin --short ([#63](https://github.com/duyet/herdr-desk/issues/63)) ([ec36bd6](https://github.com/duyet/herdr-desk/commit/ec36bd6ba403e0be3fec4e1cc04412f5fbb1ea37))
+
+
+### Documentation
+
+* **ci:** correct release-please CI run counts and approval evidence ([#67](https://github.com/duyet/herdr-desk/issues/67)) ([8d134c3](https://github.com/duyet/herdr-desk/commit/8d134c386b6382c7fd60d1ca63c42873ddedd5c6)), closes [#64](https://github.com/duyet/herdr-desk/issues/64)
+* **ci:** date the approvals from run_started_at, not created_at ([#68](https://github.com/duyet/herdr-desk/issues/68)) ([73ad459](https://github.com/duyet/herdr-desk/commit/73ad459337d54cee0102f99d5752988257061160)), closes [#64](https://github.com/duyet/herdr-desk/issues/64)
+* **ci:** explain why release-please PRs never run CI ([#66](https://github.com/duyet/herdr-desk/issues/66)) ([2ed085f](https://github.com/duyet/herdr-desk/commit/2ed085f9c2ca3ce30d503030acf3124eee7cd54b))
+
 ## [0.1.7](https://github.com/duyet/herdr-desk/compare/v0.1.6...v0.1.7) (2026-10-03)
 
 
