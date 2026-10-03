@@ -1,5 +1,12 @@
 import { describe, expect, test } from 'bun:test'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs'
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { TaskConfig } from './config'
@@ -7,6 +14,7 @@ import type { ListedAgent } from './herdr'
 import {
   announceable,
   announceBody,
+  baseRefArgv,
   baseRefFrom,
   canPromptManager,
   deskWorktreeBranch,
@@ -165,6 +173,48 @@ describe('baseRefFrom', () => {
 
   test('honors an explicit fallback', () => {
     expect(baseRefFrom(null, 'origin/master')).toBe('origin/master')
+  })
+})
+
+describe('baseRefArgv', () => {
+  const git = (cwd: string, ...args: string[]) => {
+    const r = Bun.spawnSync(['git', ...args], { cwd, stderr: 'pipe' })
+    if (r.exitCode !== 0) throw new Error(r.stderr.toString())
+    return r.stdout.toString().trim()
+  }
+
+  /** A clone whose remote default is `master` — the repo shape #18 died on. */
+  function masterRepo(): string {
+    const root = mkdtempSync(join(tmpdir(), 'herdr-desk-baseref-'))
+    const repo = join(root, 'repo')
+    git(root, 'init', '--bare', '-b', 'master', join(root, 'origin.git'))
+    git(root, 'clone', join(root, 'origin.git'), repo)
+    git(repo, 'config', 'user.email', 't@t')
+    git(repo, 'config', 'user.name', 't')
+    writeFileSync(join(repo, 'a'), '1')
+    git(repo, 'add', '.')
+    git(repo, 'commit', '-m', 'init')
+    git(repo, 'push', 'origin', 'master')
+    git(repo, 'remote', 'set-head', 'origin', 'master')
+    return root
+  }
+
+  test('a master repo comes back as origin/master, so --short never goes', () => {
+    // Not the parser — the command that feeds it. The tests above pass whatever
+    // git printed, so they stay green if `--short` is dropped from the spawn:
+    // git would answer `refs/remotes/origin/master`, the same regex would
+    // reject it, and a `master` repo would fall back to an origin/main it does
+    // not have. `fatal: invalid reference` again, with nothing in the log.
+    const root = masterRepo()
+    const proc = Bun.spawnSync(baseRefArgv(join(root, 'repo')), {
+      stderr: 'pipe',
+    })
+    const printed = proc.stdout.toString().trim()
+    rmSync(root, { recursive: true, force: true })
+
+    expect(proc.exitCode).toBe(0)
+    expect(printed).not.toContain('refs/remotes/')
+    expect(baseRefFrom(printed)).toBe('origin/master')
   })
 })
 

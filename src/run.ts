@@ -447,7 +447,7 @@ export function canPromptManager(
 }
 
 /**
- * Base ref for a new manager worktree, from `git symbolic-ref origin/HEAD`.
+ * Base ref for a new manager worktree, read by {@link baseRefArgv}.
  *
  * The default branch is not always `main`. Hardcoding `origin/main` made every
  * fire on a `master` repo fail with `fatal: invalid reference: origin/main`
@@ -461,19 +461,31 @@ export function baseRefFrom(
   return /^origin\/\S+$/.test(ref) ? ref : fallback
 }
 
+/**
+ * `git symbolic-ref --short refs/remotes/origin/HEAD`, as argv a test can run.
+ *
+ * `--short` is load-bearing. Without it git prints `refs/remotes/origin/master`,
+ * which {@link baseRefFrom} rejects — so a `master` repo would silently fall
+ * back to `origin/main` and die on the same `fatal: invalid reference` as the
+ * hardcode it replaced, with nothing in the log to say why.
+ */
+export function baseRefArgv(repo: string): string[] {
+  return [
+    'git',
+    '-C',
+    repo,
+    'symbolic-ref',
+    '--short',
+    'refs/remotes/origin/HEAD',
+  ]
+}
+
 async function resolveBaseRef(repo: string): Promise<string> {
   try {
-    const proc = Bun.spawn(
-      [
-        'git',
-        '-C',
-        repo,
-        'symbolic-ref',
-        '--short',
-        'refs/remotes/origin/HEAD',
-      ],
-      { stdout: 'pipe', stderr: 'ignore' },
-    )
+    const proc = Bun.spawn(baseRefArgv(repo), {
+      stdout: 'pipe',
+      stderr: 'ignore',
+    })
     const out = await new Response(proc.stdout).text()
     const code = await proc.exited
     if (code === 0) return baseRefFrom(out)
