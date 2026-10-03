@@ -184,6 +184,28 @@ export function cronNext(expr: string, from = new Date()): Date | null {
 }
 
 /**
+ * Every `(hour, minute)` slot `expr` matches on `at`'s local day, as `HH:MM`
+ * strings in ascending order — the whole day, not up to `at`.
+ *
+ * `cronSlotsToday` is this list cut at the current minute. Which of the two a
+ * caller wants is a question about *scope*, not about the clock: the daemon
+ * wants the cut version to decide what to fire, and the uncut one to walk a
+ * day the desk is no longer in (duyet/herdr-desk#60).
+ */
+export function cronSlotsOnDay(expr: string, at = new Date()): string[] {
+  const c = compiled(expr)
+  if (!c) return []
+  if (!dayMatches(c, at)) return []
+  const p = (n: number) => String(n).padStart(2, '0')
+  const out: string[] = []
+  // `hours` and `minutes` are ascending, so the nested loop already is.
+  for (const h of c.hours) {
+    for (const m of c.minutes) out.push(`${p(h)}:${p(m)}`)
+  }
+  return out
+}
+
+/**
  * Every `(hour, minute)` slot `expr` matches today, up to and including the
  * minute of `at`, as `HH:MM` strings in ascending order.
  *
@@ -191,23 +213,19 @@ export function cronNext(expr: string, from = new Date()): Date | null {
  * which is fine for "is there anything to do" but loses *which* slot — and a
  * day-keyed fire ledger built on that boolean fires any expression at most
  * once per day, so a half-hourly cron runs 48 times less often than configured.
+ *
+ * Today only, and that limit is load-bearing: a fire key is
+ * `repo::task::cron::day::slot`, so a slot from an earlier day is not
+ * miscounted, it is outside the query entirely.
  */
 export function cronSlotsToday(expr: string, at = new Date()): string[] {
-  const c = compiled(expr)
-  if (!c) return []
-  if (!dayMatches(c, at)) return []
   const nowH = at.getHours()
   const nowM = at.getMinutes()
-  const p = (n: number) => String(n).padStart(2, '0')
-  const out: string[] = []
-  for (const h of c.hours) {
-    if (h > nowH) continue
-    for (const m of c.minutes) {
-      if (h === nowH && m > nowM) continue
-      out.push(`${p(h)}:${p(m)}`)
-    }
-  }
-  return out.sort()
+  return cronSlotsOnDay(expr, at).filter((slot) => {
+    const h = Number(slot.slice(0, 2))
+    const m = Number(slot.slice(3, 5))
+    return h < nowH || (h === nowH && m <= nowM)
+  })
 }
 
 /**
