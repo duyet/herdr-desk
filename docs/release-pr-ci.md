@@ -65,9 +65,11 @@ and would keep CI off release PRs after the real fix below lands.
 
 ## The two real fixes, both a human's call
 
-1. **Approve per release.** No code change, no new secret. Costs a manual click
-   each time. This is known to work, not a guess: all 3 approved runs on the
-   release branch passed, on 2026-08-18, 2026-09-07 and 2026-09-27.
+1. **Approve per release.** No code change, no new secret, and all 3 approved
+   runs on the release branch passed — on 2026-08-21, 2026-09-13 and 2026-09-27.
+   The cost is not the click, it is the wait. Those runs sat blocked from
+   2026-08-18 and from 2026-09-07 before anyone approved them, three and six
+   days. The third was approved 40 seconds after it was created.
 2. **Give release-please an app token or PAT** instead of `secrets.GITHUB_TOKEN`.
    GitHub documents that this removes the approval prompt. It also widens what the
    release workflow can reach, so it is a deliberate trade rather than a cleanup.
