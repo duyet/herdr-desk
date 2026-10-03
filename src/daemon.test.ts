@@ -14,6 +14,7 @@ import {
   pruneFires,
   saveFires,
   skipPausedSlots,
+  startLine,
   stopOn,
   tickOnce,
 } from './daemon'
@@ -54,6 +55,72 @@ function stateDir(): string {
   const dir = tempDir('desk-fires-')
   process.env.HERDR_PLUGIN_STATE_DIR = dir
   return dir
+}
+
+// The real gate reads the real host, so a tick driven from a test would assert
+// nothing on a box over budget — and worse, pass, because a held job is also
+// still owed. A fixed verdict keeps these tests hermetic and honest.
+const roomy = () => ({ ok: true, breaches: [], pressure: 0 })
+
+/**
+ * A one-task desk on a temp repo, and a Herdr that is not running.
+ *
+ * `herdrUp` chooses which way the run goes without stubbing `runTask`: a
+ * missing socket is a precondition skip, so the run resolves, while a missing
+ * binary throws. Both are the real path, and neither reaches the network.
+ */
+function desk(
+  herdrUp: boolean,
+  taskId = 'local:triage',
+  schedule = '* * * * *',
+) {
+  const state = stateDir()
+  const repo = tempDir('herdr-desk-repo-')
+  writeFileSync(
+    join(repo, '.herdr-desk.json'),
+    `${JSON.stringify({
+      name: 'held-test',
+      tasks: [{ id: taskId, schedule }],
+    })}\n`,
+  )
+  // `discoverDesks` finds a remembered repo, since Herdr is not here to list
+  // the open workspaces.
+  writeFileSync(
+    join(state, 'known-repos.json'),
+    `${JSON.stringify({ repos: [repo] })}\n`,
+  )
+  // The binary has to exist for a missing socket to be the reported problem.
+  process.env.HERDR_BIN_PATH = herdrUp
+    ? process.execPath
+    : join(state, 'no-herdr')
+  process.env.HERDR_SOCKET_PATH = join(state, 'herdr.sock')
+  // The global desk config and the notify token both live here, and a dev box
+  // has a real Telegram token in the default location.
+  process.env.HERDR_PLUGIN_CONFIG_DIR = tempDir('herdr-desk-config-')
+  delete process.env.HERDR_DESK_TELEGRAM_TOKEN
+  delete process.env.HERDR_DESK_TELEGRAM_CHAT_ID
+  // `readHealth` asks Herdr how many sessions are alive, and this is not the
+  // moment to learn what the developer's desk is doing.
+  process.env.HERDR_BIN = join(state, 'no-herdr')
+  return repo
+}
+
+/** Every `missed slots` line this tick or the last one wrote. */
+function missedLines(): string[] {
+  return readFileSync(
+    join(process.env.HERDR_PLUGIN_STATE_DIR as string, 'daemon.log'),
+    'utf8',
+  )
+    .split('\n')
+    .filter((l) => l.includes('missed slots'))
+}
+
+/** The stamp a daemon's last tick would have left. */
+function aliveAt(at: Date): void {
+  writeFileSync(
+    join(process.env.HERDR_PLUGIN_STATE_DIR as string, 'alive'),
+    `${at.toISOString()}\n`,
+  )
 }
 
 describe('pruneFires', () => {
@@ -291,56 +358,12 @@ describe('a held job whose slot comes due', () => {
   const SLOT = '09:15'
   const HELD_AT = new Date(2026, 8, 30, 8, 45)
 
-  /**
-   * A one-task desk on a temp repo, and a Herdr that is not running.
-   *
-   * `herdrUp` chooses which way the run goes without stubbing `runTask`: a
-   * missing socket is a precondition skip, so the run resolves, while a missing
-   * binary throws. Both are the real path, and neither reaches the network.
-   */
-  function desk(herdrUp: boolean): string {
-    const state = stateDir()
-    const repo = tempDir('herdr-desk-repo-')
-    writeFileSync(
-      join(repo, '.herdr-desk.json'),
-      `${JSON.stringify({
-        name: 'held-test',
-        tasks: [{ id: TASK, schedule: '* * * * *' }],
-      })}\n`,
-    )
-    // `discoverDesks` finds a remembered repo, since Herdr is not here to list
-    // the open workspaces.
-    writeFileSync(
-      join(state, 'known-repos.json'),
-      `${JSON.stringify({ repos: [repo] })}\n`,
-    )
-    // The binary has to exist for a missing socket to be the reported problem.
-    process.env.HERDR_BIN_PATH = herdrUp
-      ? process.execPath
-      : join(state, 'no-herdr')
-    process.env.HERDR_SOCKET_PATH = join(state, 'herdr.sock')
-    // The global desk config and the notify token both live here, and a dev box
-    // has a real Telegram token in the default location.
-    process.env.HERDR_PLUGIN_CONFIG_DIR = tempDir('herdr-desk-config-')
-    delete process.env.HERDR_DESK_TELEGRAM_TOKEN
-    delete process.env.HERDR_DESK_TELEGRAM_CHAT_ID
-    // `readHealth` asks Herdr how many sessions are alive, and this is not the
-    // moment to learn what the developer's desk is doing.
-    process.env.HERDR_BIN = join(state, 'no-herdr')
-    return repo
-  }
-
   const heldFor = (repo: string): void => {
     hold(
       { repo, task: TASK, slot: SLOT, reason: 'load 2.1/core over 1.5' },
       HELD_AT,
     )
   }
-
-  // The real gate reads the real host, so these two would assert nothing on a
-  // box over budget — and worse, pass, because a held job is also still owed.
-  // A fixed verdict keeps the tick hermetic and these tests honest.
-  const roomy = () => ({ ok: true, breaches: [], pressure: 0 })
 
   test('the recovered job runs once, and the queue stops owing it', async () => {
     // The tick fires the due slot, then drains one held job. A held slot is
@@ -367,5 +390,110 @@ describe('a held job whose slot comes due', () => {
 
     expect(queued()).toHaveLength(1)
     expect(queued()[0]?.since).toBe(HELD_AT.toISOString())
+  })
+})
+
+describe('the line a start leaves', () => {
+  // The outage duyet/herdr-desk#60 is about: 27h41m between one start line and
+  // the next, and the only way to read that off the log was to compare two
+  // timestamps by hand.
+  const NOW = new Date(2026, 8, 30, 9, 15)
+  const DARK = new Date(2026, 8, 29, 5, 34)
+
+  test('carries the gap when there is a stamp to measure it from', () => {
+    const dir = stateDir()
+    writeFileSync(join(dir, 'alive'), `${DARK.toISOString()}\n`)
+
+    expect(startLine(4242, NOW)).toBe(
+      `daemon start pid=4242: dark for 27h41m, last alive ${DARK.toISOString()}`,
+    )
+  })
+
+  test('is the bare line when there is nothing true to add', () => {
+    // A first ever run, and a stamp that cannot support a claim — unparseable,
+    // from a clock that moved backwards, or older than a year and therefore an
+    // artifact rather than evidence. Each reads as no record, because a count
+    // is only ever as good as the instant behind it.
+    const dir = stateDir()
+    expect(startLine(4242, NOW)).toBe('daemon start pid=4242')
+    for (const raw of [
+      'not a date',
+      new Date(2026, 8, 30, 9, 16).toISOString(),
+      new Date(2024, 8, 30).toISOString(),
+    ]) {
+      writeFileSync(join(dir, 'alive'), `${raw}\n`)
+      expect(startLine(4242, NOW)).toBe('daemon start pid=4242')
+    }
+  })
+})
+
+describe('a tick that finds the desk was gone', () => {
+  const TASK = 'local:prod'
+  const CRON = '*/30 * * * *'
+  // Sep 30 09:15 local. `*/30` is owed 19 slots today, 00:00 through 09:00.
+  const AT = new Date(2026, 8, 30, 9, 15)
+  // Two days back at 09:00: Sep 28 owes 29 slots after it, Sep 29 owes 48.
+  const ONCE = new Date(2026, 8, 28, 9, 0)
+
+  test('counts the slots owed across both dark days, and runs one job', async () => {
+    // The defect. A fire key is `repo::task::cron::day::slot`, so the tick's
+    // own query — `cronSlotsToday`, local midnight to now — cannot see a slot
+    // from an earlier day at all. It reported `18 missed slots` on the day
+    // below while 95 had gone by, and read as a quiet morning.
+    const repo = desk(true, TASK, CRON)
+    aliveAt(ONCE)
+
+    await tickOnce(AT, roomy)
+
+    // 18 stale today + 29 on Sep 28 (after 09:00) + 48 on Sep 29.
+    expect(missedLines()).toHaveLength(1)
+    expect(missedLines()[0]).toContain(
+      '95 missed slots, oldest 2026-09-28 09:30',
+    )
+    // The count widened; what fires did not. One job, the newest slot.
+    expect(loadRuns(50, { repo, task: TASK })).toHaveLength(1)
+  })
+
+  test('a fresh stamp leaves today exactly as it was', async () => {
+    // The normal path, one tick after the last. The horizon is now, there are
+    // no dead days in it, and the line is byte-for-byte what it said before the
+    // horizon existed — a bare `00:00`, with no day to imply otherwise.
+    const repo = desk(true, TASK, CRON)
+    aliveAt(new Date(2026, 8, 30, 9, 14, 40))
+
+    await tickOnce(AT, roomy)
+
+    expect(missedLines()[0]).toContain('18 missed slots, oldest 00:00')
+    expect(missedLines()[0]).not.toContain('2026-09-30')
+    expect(loadRuns(50, { repo, task: TASK })).toHaveLength(1)
+  })
+
+  test('the gap is counted once, not on every tick after it', async () => {
+    // The stamp advances every tick, so the next tick's horizon is the present
+    // and the dead days fall out of the window. A horizon that did not advance
+    // would bill the same 27 hours on every tick for as long as the desk ran.
+    const repo = desk(true, TASK, CRON)
+    aliveAt(ONCE)
+
+    await tickOnce(AT, roomy)
+    await tickOnce(new Date(2026, 8, 30, 9, 15, 20), roomy)
+
+    expect(missedLines()).toHaveLength(1)
+    expect(loadRuns(50, { repo, task: TASK })).toHaveLength(1)
+  })
+
+  test('a first ever run claims no gap it cannot measure', async () => {
+    // No stamp means no horizon, so the count is today's and the start line is
+    // bare. A desk that had never run must not open by reporting slots missed
+    // before it existed.
+    desk(true, TASK, CRON)
+
+    expect(startLine(4242, AT)).toBe('daemon start pid=4242')
+
+    await tickOnce(AT, roomy)
+
+    expect(missedLines()).toEqual([
+      expect.stringContaining('18 missed slots, oldest 00:00'),
+    ])
   })
 })

@@ -8,7 +8,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { join } from 'node:path'
-import { cronSlotsToday } from './cron'
+import { cronSlotsOnDay, cronSlotsToday } from './cron'
 import { dayKey } from './day'
 import { discoverDesks } from './discover'
 import { check, type HostHealth, readHealth, type Verdict } from './health'
@@ -18,15 +18,30 @@ import { loadNotifyConfig, notify } from './notify'
 import { pluginStateDir } from './paths'
 import { isPaused, loadPaused, type PauseState } from './pause'
 import { clear, hold, requeue, view } from './queue'
+import { formatDuration } from './report'
 import { runTask } from './run'
 import { maybeAutoUpdate, updateLockHeld } from './update'
 
 const TICK_MS = 20_000
 /** Keep fire keys whose day is within this many days of today (cronNext horizon). */
 const FIRE_KEEP_DAYS = 8
+/**
+ * How stale the alive stamp may be and still count as a liveness record.
+ *
+ * Two reasons, and both are about not claiming. A stamp nobody has maintained
+ * for a year is an artifact, not evidence the desk was alive until then; and
+ * the day-walk in {@link missedBeforeToday} starts from it, so an unbounded
+ * window is a restart trying to enumerate a decade of slots. Past this the
+ * honest answer is "no record", which is what a desk reporting no gap says.
+ */
+const ALIVE_MAX_AGE_MS = 366 * 86_400_000
 
 function pidPath(): string {
   return join(pluginStateDir(), 'daemon.pid')
+}
+
+function alivePath(): string {
+  return join(pluginStateDir(), 'alive')
 }
 
 function firesPath(): string {
@@ -51,6 +66,35 @@ export function daemonPid(): number | null {
   } catch {
     return null
   }
+}
+
+/**
+ * When this desk was last known to be alive. Null when there is no record.
+ *
+ * A stamp that does not parse, is in the future, or is older than
+ * `ALIVE_MAX_AGE_MS` reads as no record at all. Each of those is a stamp that
+ * cannot support a claim: a fault, a clock that moved, or an artifact nobody
+ * maintains. Every gap figure this plugin reports is measured from this instant
+ * and from nothing else, so an instant that cannot carry one produces silence
+ * rather than a number.
+ */
+function readLastAlive(now = new Date()): Date | null {
+  let raw: string
+  try {
+    if (!existsSync(alivePath())) return null
+    raw = readFileSync(alivePath(), 'utf8').trim()
+  } catch {
+    return null
+  }
+  const at = new Date(raw)
+  const age = now.getTime() - at.getTime()
+  if (!Number.isFinite(age) || age < 0 || age > ALIVE_MAX_AGE_MS) return null
+  return at
+}
+
+function writeLastAlive(at = new Date()): void {
+  mkdirSync(pluginStateDir(), { recursive: true })
+  writeFileSync(alivePath(), `${at.toISOString()}\n`)
 }
 
 function fireDay(key: string): string | null {
@@ -181,6 +225,64 @@ export function catchUpPlan(
   return { run: due[due.length - 1], stale: due.slice(0, -1) }
 }
 
+/** A slot named the way the ledger and the log name it: a local day and `HH:MM`. */
+export type SlotStamp = { day: string; slot: string }
+
+/**
+ * Slots this desk was owed on days that have already ended, since `from`.
+ *
+ * {@link catchUpPlan} counts today, and that is correct for *firing*: only the
+ * newest unfired slot runs, and the rest are consumed into the ledger. It is
+ * wrong for *accounting*. A fire key is `repo::task::cron::day::slot`, so a slot
+ * from an earlier day is not miscounted by that plan — it is outside the query.
+ * A restart after 27 hours therefore wrote off "5 missed slots" while 154 had
+ * gone by: arithmetically true, and the reason 27 hours of outage read as a
+ * quiet morning (duyet/herdr-desk#60).
+ *
+ * So the count gets a wider window than the plan does, and the days before
+ * today are counted but **not** written to the ledger. They are not written
+ * because `fires.json` keeps `FIRE_KEEP_DAYS` and a key for a day that has
+ * ended is a key nothing will read again: back-filling a multi-day gap is a lot
+ * of keys to answer a question the `daemon start` line already answers in one
+ * number. They are still *skipped*, which is what the log says — they just
+ * leave no key behind.
+ *
+ * "Unfired" is what "missed" means here. A slot with a key was handled — fired,
+ * written off, or skipped — and only the desk itself could have written it. A
+ * desk that was dark writes no keys, so an absent key on a day inside the gap is
+ * proof the slot went by unrun.
+ *
+ * `from` is exclusive. The stamp is the instant a tick began, and the tick that
+ * began it had already accounted for everything up to there; re-counting from
+ * the stamp inclusive would bill the gap for its own first slot.
+ */
+export function missedBeforeToday(
+  expr: string,
+  from: Date,
+  to: Date,
+  isFired: (day: string, slot: string) => boolean,
+): { count: number; oldest: SlotStamp | null } {
+  const today = dayKey(to)
+  const day = new Date(from)
+  day.setHours(0, 0, 0, 0)
+  let count = 0
+  let oldest: SlotStamp | null = null
+  for (;;) {
+    const key = dayKey(day)
+    if (key >= today) break
+    for (const slot of cronSlotsOnDay(expr, day)) {
+      const at = new Date(day)
+      at.setHours(Number(slot.slice(0, 2)), Number(slot.slice(3, 5)), 0, 0)
+      if (at.getTime() <= from.getTime()) continue
+      if (isFired(key, slot)) continue
+      count++
+      if (!oldest) oldest = { day: key, slot }
+    }
+    day.setDate(day.getDate() + 1)
+  }
+  return { count, oldest }
+}
+
 /**
  * Consume every unfired slot of a paused job as `skip paused`.
  *
@@ -217,6 +319,17 @@ export async function tickOnce(
   at = new Date(),
   gate: (h: HostHealth) => Verdict = check,
 ): Promise<number> {
+  // Read before anything is written, so the first tick after a restart still
+  // sees how long the desk was gone — and then the stamp is advanced, so the
+  // next tick's horizon is the present and the gap is counted exactly once.
+  const lastAlive = readLastAlive(at)
+  // Written at the tick's start rather than its end: a tick that throws has
+  // still proven the process is alive, and a stamp that only moved on success
+  // would have a permanently broken desk re-report the same outage every 20
+  // seconds. The cost is that the recorded instant is the tick's start, so a
+  // desk killed part way through a long tick reopens the hole by one tick —
+  // 20s against a window that is measured in hours.
+  writeLastAlive(at)
   const desks = await discoverDesks()
   const fires = loadFires()
   // Read once per tick; a corrupt file throws and fires nothing (fail closed).
@@ -255,6 +368,17 @@ export async function tickOnce(
         const plan = catchUpPlan(cronSlotsToday(expr, at), (slot) =>
           Boolean(fires[fireKey(d.repo, task.id, expr, day, slot)]),
         )
+        // The plan is today's, and stays today's — one job runs, not a
+        // stampede. The *number* attached to it is not: a restart measures from
+        // the last tick, so the days the desk was gone are counted too. No
+        // record means no claim, which is the same accounting as today.
+        const dark = lastAlive
+          ? missedBeforeToday(expr, lastAlive, at, (gone, slot) =>
+              Boolean(fires[fireKey(d.repo, task.id, expr, gone, slot)]),
+            )
+          : { count: 0, oldest: null }
+        // Today's stale first, so the count reads oldest-first with it.
+        const missed = plan.stale.length + dark.count
         // The skipped slots are consumed *before* anything runs, and written
         // before it, so a tick that is interrupted half way cannot replay the
         // day on the next start. A ledger only saved at the end of a tick is a
@@ -264,10 +388,16 @@ export async function tickOnce(
           fires[fireKey(d.repo, task.id, expr, day, slot)] =
             `skip ${new Date().toISOString()}`
         }
-        if (plan.stale.length) {
-          saveFires(fires)
+        if (plan.stale.length) saveFires(fires)
+        if (missed) {
+          const oldest = dark.oldest ?? { day, slot: plan.stale[0] }
+          // With the day when it is not today. A bare `00:10` says nothing
+          // about *which* 00:10, and that ambiguity is the whole bug: it read
+          // as this morning's when it was three days ago's.
+          const since =
+            oldest.day === day ? oldest.slot : `${oldest.day} ${oldest.slot}`
           log(
-            `skip ${d.config.name}/${task.id} ${expr}: ${plan.stale.length} missed slots, oldest ${plan.stale[0]}`,
+            `skip ${d.config.name}/${task.id} ${expr}: ${missed} missed slots, oldest ${since}`,
           )
         }
         const slot = plan.run
@@ -431,10 +561,27 @@ export function stopOn(
   exit(0)
 }
 
+/**
+ * The line a start leaves, carrying the gap when there is one to carry.
+ *
+ * `stopOn` gives a requested stop an end, and this gives an unrequested death a
+ * size. `daemon start pid=N` on its own said nothing about the hours before it:
+ * the 2026-09-28 outage left 27h41m between one start line and the next, and
+ * the only way to measure it was to read two timestamps by hand
+ * (duyet/herdr-desk#60). No record — a first ever run, or a stamp older than
+ * `ALIVE_MAX_AGE_MS` — gets the bare line, because there is nothing true to add
+ * to it.
+ */
+export function startLine(pid: number, now = new Date()): string {
+  const lastAlive = readLastAlive(now)
+  if (!lastAlive) return `daemon start pid=${pid}`
+  return `daemon start pid=${pid}: dark for ${formatDuration(now.getTime() - lastAlive.getTime())}, last alive ${lastAlive.toISOString()}`
+}
+
 export async function runDaemon(): Promise<void> {
   mkdirSync(pluginStateDir(), { recursive: true })
   writeFileSync(pidPath(), `${process.pid}\n`)
-  log(`daemon start pid=${process.pid}`)
+  log(startLine(process.pid))
   process.on('SIGTERM', () => stopOn('SIGTERM'))
   process.on('SIGINT', () => stopOn('SIGINT'))
   for (;;) {
