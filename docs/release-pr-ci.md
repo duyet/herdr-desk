@@ -20,17 +20,22 @@ GitHub puts such a run in an approval-required state by default. From
 
 So every release-please PR gets a `ci` run that ends `action_required` at 0
 seconds, with zero jobs. The commit ends up with no `ci` check-run at all — only
-the Socket and GitGuardian checks. That has been every release PR since
-2026-08-18, 46 runs on one branch.
+the Socket and GitGuardian checks.
+
+Across the 47 runs release-please has triggered on its own branch back to
+2026-08-18, no first attempt has ever passed. 44 were blocked outright — 35
+`action_required`, and 9 ending `failure` with zero jobs just the same. The
+remaining 3 are second attempts, and all 3 passed.
 
 This is default behaviour, not a misconfiguration. There is no setting to flip.
 
 ## It is specific to `GITHUB_TOKEN`
 
 Renovate PRs are the control. Renovate authenticates as a GitHub App, so its runs
-are not approval-gated. On 2026-09-28 a renovate run finished `success` seven
-seconds before a release-please run on the same branch push was gated. All 13
-renovate runs of `ci` have succeeded.
+are not approval-gated. On 2026-09-28 a release-please run was created at
+`03:47:52Z` and gated; a renovate run was created at `03:47:59Z` on a different
+branch and passed. Same repo, same workflow, seven seconds apart, opposite
+outcomes. All 13 renovate runs of `ci` have succeeded.
 
 Push-triggered `ci` on `main` also always passes, including pushes by
 `github-actions[bot]`. Same token, same workflow, outside the
@@ -61,7 +66,8 @@ and would keep CI off release PRs after the real fix below lands.
 ## The two real fixes, both a human's call
 
 1. **Approve per release.** No code change, no new secret. Costs a manual click
-   each time.
+   each time. This is known to work, not a guess: all 3 approved runs on the
+   release branch passed, on 2026-08-18, 2026-09-07 and 2026-09-27.
 2. **Give release-please an app token or PAT** instead of `secrets.GITHUB_TOKEN`.
    GitHub documents that this removes the approval prompt. It also widens what the
    release workflow can reach, so it is a deliberate trade rather than a cleanup.
