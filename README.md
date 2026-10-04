@@ -251,7 +251,7 @@ herdr plugin action invoke herdr-desk.timeline  # one lane per job, next 7 days
 herdr plugin action invoke herdr-desk.heatmap   # 7x24 cron density (heatmap-actual: from the ledger)
 herdr plugin action invoke herdr-desk.analytics # success rate, skip/failure causes, last 30 days
 herdr plugin action invoke herdr-desk.board     # static HTML board in the state dir
-herdr plugin action invoke herdr-desk.serve     # dashboard page and JSON on 127.0.0.1:8787
+herdr plugin action invoke herdr-desk.serve     # dashboard on 127.0.0.1:8787, plus Tailscale when this node is online
 herdr plugin action invoke herdr-desk.last      # today's changes.md from each repo
 herdr plugin action invoke herdr-desk.summary   # preview the summary prompt
 herdr plugin action invoke herdr-desk.list      # discovered repos
@@ -275,7 +275,7 @@ bun src/cli.ts dash --json
 bun src/cli.ts serve
 ```
 
-`dash` is the terminal view (sessions, agents, PRs, runs for 24h). `serve` binds 127.0.0.1:8787 — `/` is the page, `/api/dashboard` and `/api/analytics?since=7d` are the JSON. It reads the session index; it does not rescan agent files. `sessions index` is what refreshes that index.
+`dash` is the terminal view (sessions, agents, PRs, runs for 24h). `serve` binds 127.0.0.1:8787 — `/` is the page, `/api/dashboard` and `/api/analytics?since=7d` are the JSON. When `tailscale status` shows this node online, it also binds that node's Tailscale addresses and prints the MagicDNS URL. `--host` pins one address and skips that detection. It reads the session index; it does not rescan agent files. `sessions index` is what refreshes that index.
 
 Manage jobs without editing JSON (a job is `JOB --repo DIR`, like `run`):
 

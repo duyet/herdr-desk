@@ -87,6 +87,7 @@ import {
   summaryOutPath,
 } from './summary'
 import { textTable } from './table'
+import { bindHosts, dashboardUrls, detectTailnet } from './tailscale'
 import { termOpts } from './term'
 import {
   formatAgenda,
@@ -139,7 +140,7 @@ function usage(): never {
   herdr-desk hub [--send] [--json] [--force]
   herdr-desk summary [--since 1d] [--repo DIR] [--dry-run] [--notify]
   herdr-desk dash [--json] [--no-color]
-  herdr-desk serve [--port 8787] [--host 127.0.0.1]
+  herdr-desk serve [--port 8787] [--host ADDR]
   herdr-desk prompts list | check | apply [--accept] | pin REPO SHA
   herdr-desk update [--check]
   herdr-desk uninstall-cron
@@ -862,17 +863,29 @@ async function main() {
     const portText = arg('--port', argv)
     const port = argv.includes('--port') ? Number(portText) : 8787
     if (!Number.isInteger(port) || port < 1 || port > 65535) usage()
-    const hostname = arg('--host', argv) ?? '127.0.0.1'
-    const server = serve({
-      port,
-      hostname,
-      deps: {
-        dashboard: () => collect(),
-        analytics: (sinceText) =>
-          analyticsPayload(new Date(parseSince(sinceText))),
-      },
-    })
-    console.log(`desk http://${hostname}:${server.port}`)
+    const explicit = arg('--host', argv)
+    // `--host` pins one address. Otherwise listen on localhost, and on this
+    // node's Tailscale addresses when `tailscale status` says it is online.
+    const tailnet = explicit ? null : await detectTailnet()
+    const deps = {
+      dashboard: () => collect(),
+      analytics: (sinceText: string) =>
+        analyticsPayload(new Date(parseSince(sinceText))),
+    }
+    const bound: string[] = []
+    for (const hostname of bindHosts(explicit, tailnet)) {
+      try {
+        serve({ port, hostname, deps })
+        bound.push(hostname)
+      } catch (err) {
+        if (bound.length === 0) throw err
+        const message = err instanceof Error ? err.message : String(err)
+        console.error(`not bound ${hostname}: ${message}`)
+      }
+    }
+    for (const url of dashboardUrls(port, bound, tailnet)) {
+      console.log(`desk ${url}`)
+    }
     return
   }
 
