@@ -1,16 +1,8 @@
 import { outcomeOf, pct, type Rollup } from './analytics'
 import type { RunRecord } from './history'
+import { escapeHtml } from './html'
 import type { SessionRow } from './sessions/types'
 import { DENSE, type Fire } from './timeline'
-
-const esc = (s: string): string =>
-  s.replace(
-    /[&<>"']/g,
-    (c) =>
-      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[
-        c
-      ] ?? c,
-  )
 
 const p = (n: number) => String(n).padStart(2, '0')
 const DAY = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
@@ -82,7 +74,7 @@ function slotGrid(fires: Fire[], now: Date, days: number): string {
         const items = fs
           .map(
             ({ f, text }) =>
-              `<div class="fire" title="${esc(f.agent)}">${text} ${esc(f.repo)}/${esc(f.job)}</div>`,
+              `<div class="fire" title="${escapeHtml(f.agent)}">${text} ${escapeHtml(f.repo)}/${escapeHtml(f.job)}</div>`,
           )
           .join('')
         return `<td class="${fs.length > 1 ? 'busy' : 'on'}">${items}</td>`
@@ -99,7 +91,7 @@ function runsTable(runs: RunRecord[]): string {
     .reverse()
     .map((r) => {
       const o = outcomeOf(r)
-      return `<tr><td>${esc(local(r.at))}</td><td><span class="st ${o.kind}">${o.kind}</span></td><td>${esc(r.name)}/${esc(r.task)}</td><td class="muted">${esc(o.cause ?? '')}</td></tr>`
+      return `<tr><td>${escapeHtml(local(r.at))}</td><td><span class="st ${o.kind}">${o.kind}</span></td><td>${escapeHtml(r.name)}/${escapeHtml(r.task)}</td><td class="muted">${escapeHtml(o.cause ?? '')}</td></tr>`
     })
     .join('\n')
   return `<div class="scroll"><table><thead><tr><th>When</th><th>Status</th><th>Job</th><th>Cause</th></tr></thead><tbody>\n${rows}\n</tbody></table></div>`
@@ -110,7 +102,7 @@ function rateTable(r: Rollup): string {
   const rows = r.jobs
     .map((j) => {
       const w = j.rate === null ? 0 : Math.round(j.rate * 100)
-      return `<tr><td>${esc(j.job)}</td><td>${j.ran}</td><td>${j.skipped}</td><td>${j.failed}</td><td><span class="bar"><span style="width:${w}%"></span></span> ${pct(j.rate)}</td></tr>`
+      return `<tr><td>${escapeHtml(j.job)}</td><td>${j.ran}</td><td>${j.skipped}</td><td>${j.failed}</td><td><span class="bar"><span style="width:${w}%"></span></span> ${pct(j.rate)}</td></tr>`
     })
     .join('\n')
   return `<div class="scroll"><table><thead><tr><th>Job</th><th>Ran</th><th>Skip</th><th>Fail</th><th>Success</th></tr></thead><tbody>\n${rows}\n</tbody></table></div>`
@@ -122,7 +114,7 @@ function sessionsTable(sessions: SessionRow[]): string {
     .slice(0, 50)
     .map(
       (s) =>
-        `<tr><td>${esc(local(s.started))}</td><td>${esc(s.agent)}</td><td>${esc(s.repo ?? '')}</td><td>${esc(s.title ?? '')}</td></tr>`,
+        `<tr><td>${escapeHtml(local(s.started))}</td><td>${escapeHtml(s.agent)}</td><td>${escapeHtml(s.repo ?? '')}</td><td>${escapeHtml(s.title ?? '')}</td></tr>`,
     )
     .join('\n')
   return `<div class="scroll"><table><thead><tr><th>Started</th><th>Agent</th><th>Repo</th><th>Title</th></tr></thead><tbody>\n${rows}\n</tbody></table></div>`
@@ -167,10 +159,10 @@ th,td{border-bottom:1px solid var(--line);padding:4px 8px;text-align:left;vertic
 <body>
 <main>
 <h1>Desk board</h1>
-<div class="muted">Snapshot ${esc(local(d.now.toISOString()))}</div>
+<div class="muted">Snapshot ${escapeHtml(local(d.now.toISOString()))}</div>
 <div class="kpi">
 <div><b>${d.fires.length}</b><span class="muted">fires next ${d.days}d</span></div>
-<div><b>${d.rollup.total}</b><span class="muted">runs since ${esc(d.rollup.since.toISOString().slice(0, 10))}</span></div>
+<div><b>${d.rollup.total}</b><span class="muted">runs since ${escapeHtml(d.rollup.since.toISOString().slice(0, 10))}</span></div>
 <div><b>${pct(d.rollup.rate)}</b><span class="muted">success</span></div>
 <div><b>${d.sessions.length}</b><span class="muted">sessions</span></div>
 </div>

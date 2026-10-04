@@ -1,6 +1,7 @@
 import { bar, color, gauge, gb, label, plainMode, sparkline } from './chart'
 import { type Budget, defaultBudget, fmtLoad, readHealth } from './health'
 import { loadRunsSince } from './history'
+import { escapeHtml } from './html'
 import { type HubSnapshot, snapshot } from './hub'
 import { countParts, type Insights, insightsOf } from './insights'
 import { type QueueView, view as queueView } from './queue'
@@ -184,26 +185,17 @@ function insightLines(d: Dashboard): string[] {
   return lines
 }
 
-const escHtml = (s: string): string =>
-  s.replace(
-    /[&<>"']/g,
-    (ch) =>
-      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[
-        ch
-      ] ?? ch,
-  )
-
 function queueHtml(d: Dashboard): string {
   const q = d.queue
   if (q.jobs.length === 0 && q.expired.length === 0) return ''
   const items = [
     ...q.jobs.map(
       (j) =>
-        `<li>${escHtml(j.repo)}/${escHtml(j.task)} <span class="muted">${escHtml(j.reason)} · ${j.tries} tries</span></li>`,
+        `<li>${escapeHtml(j.repo)}/${escapeHtml(j.task)} <span class="muted">${escapeHtml(j.reason)} · ${j.tries} tries</span></li>`,
     ),
     ...q.expired.map(
       (j) =>
-        `<li>${escHtml(j.repo)}/${escHtml(j.task)} gave up <span class="muted">held since ${escHtml(j.since.slice(0, 16).replace('T', ' '))}</span></li>`,
+        `<li>${escapeHtml(j.repo)}/${escapeHtml(j.task)} gave up <span class="muted">held since ${escapeHtml(j.since.slice(0, 16).replace('T', ' '))}</span></li>`,
     ),
   ]
   return `<section><h2>queue</h2><p>${q.jobs.length} held</p><ul>${items.join('')}</ul></section>`
@@ -233,7 +225,7 @@ function deskListHtml(d: Dashboard): string {
       ]
         .filter(Boolean)
         .join(' · ')
-      return `<li>${escHtml(desk)} <span class="muted">${detail}</span></li>`
+      return `<li>${escapeHtml(desk)} <span class="muted">${detail}</span></li>`
     })
   return `<ul>${items.join('')}</ul>`
 }
@@ -243,14 +235,17 @@ function insightsHtml(d: Dashboard): string {
   const agents = agentBreakdown(d)
   const prs = d.insights.prs
   if (parts.length === 0 && !agents && prs.length === 0) return ''
-  const counts = parts.length ? `<p>${parts.map(escHtml).join(' · ')}</p>` : ''
-  const by = agents ? `<p class="muted">${escHtml(agents)}</p>` : ''
+  const counts = parts.length
+    ? `<p>${parts.map(escapeHtml).join(' · ')}</p>`
+    : ''
+  const by = agents ? `<p class="muted">${escapeHtml(agents)}</p>` : ''
   const links =
     prs.length === 0
       ? ''
       : `<ul>${prs
           .map(
-            (url) => `<li><a href="${escHtml(url)}">${escHtml(url)}</a></li>`,
+            (url) =>
+              `<li><a href="${escapeHtml(url)}">${escapeHtml(url)}</a></li>`,
           )
           .join('')}</ul>`
   return `<section><h2>insights</h2>${counts}${by}${links}</section>`
@@ -290,8 +285,8 @@ a{color:inherit}
 <h1>desk</h1>
 <section>
 <h2>host</h2>
-<p>${escHtml(fmtLoad(d.host))} · ${d.host.cores} cores</p>
-<p>${escHtml(mem)}</p>
+<p>${escapeHtml(fmtLoad(d.host))} · ${d.host.cores} cores</p>
+<p>${escapeHtml(mem)}</p>
 <p>${d.host.agents} sessions · ${d.host.busy} working</p>
 </section>
 <section>
