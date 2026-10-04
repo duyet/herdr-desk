@@ -62,6 +62,21 @@ function requireHerdrKind(
   }
 }
 
+function validateKindField(
+  o: Record<string, unknown>,
+  path: string,
+  errors: string[],
+): void {
+  if (o.kind === undefined) return
+  if (typeof o.kind !== 'string' || !RUNG.test(o.kind.trim())) {
+    errors.push(`${path}.kind: must be a non-empty string`)
+  } else if (o.agent !== undefined) {
+    errors.push(`${path}.kind: ignored because 'agent' is also set`)
+  } else {
+    requireHerdrKind([o.kind], `${path}.kind`, errors)
+  }
+}
+
 /**
  * Validate an `agent` field.
  *
@@ -234,15 +249,7 @@ export function validateDeskJson(
     errors.push(...validateSchedule(o.schedule, `${path}.schedule`))
   if (o.agent !== undefined) validateAgent(o.agent, `${path}.agent`, errors)
   if (o.notify !== undefined) validateNotify(o.notify, `${path}.notify`, errors)
-  if (o.kind !== undefined) {
-    if (typeof o.kind !== 'string' || !RUNG.test(o.kind.trim())) {
-      errors.push(`${path}.kind: must be a non-empty string`)
-    } else if (o.agent !== undefined) {
-      errors.push(`${path}.kind: ignored because 'agent' is also set`)
-    } else {
-      requireHerdrKind([o.kind], `${path}.kind`, errors)
-    }
-  }
+  validateKindField(o, path, errors)
   if (o.tasks !== undefined) {
     if (!Array.isArray(o.tasks) || o.tasks.length < 1) {
       errors.push(`${path}.tasks: if set, must be a non-empty array`)
@@ -331,14 +338,6 @@ function validateTask(raw: unknown, path: string, repo?: string): string[] {
     errors.push(...validateSchedule(o.schedule, `${path}.schedule`))
   if (o.agent !== undefined) validateAgent(o.agent, `${path}.agent`, errors)
   if (o.notify !== undefined) validateNotify(o.notify, `${path}.notify`, errors)
-  if (o.kind !== undefined) {
-    if (typeof o.kind !== 'string' || !RUNG.test(o.kind.trim())) {
-      errors.push(`${path}.kind: must be a non-empty string`)
-    } else if (o.agent !== undefined) {
-      errors.push(`${path}.kind: ignored because 'agent' is also set`)
-    } else {
-      requireHerdrKind([o.kind], `${path}.kind`, errors)
-    }
-  }
+  validateKindField(o, path, errors)
   return errors
 }
