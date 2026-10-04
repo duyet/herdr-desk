@@ -630,7 +630,7 @@ export function formatHub(s: HubSnapshot): string {
   const head = countsLine(s)
   const rows = s.jobs.map((j) => [
     j.state,
-    `${j.desk || basenameOf(j.repo)}/${j.task}`,
+    deskOf(j),
     ago(j.ageMs),
     (j.headline ?? '').slice(0, 60),
   ])
