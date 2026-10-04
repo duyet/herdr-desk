@@ -474,19 +474,20 @@ bun src/cli.ts report --repo /path/to/anyrouter --settle 45 # send
 Every job gets the same verdict line: dot, level, `repo/job`, agent, duration,
 PR and issue counts (from the fragment's GitHub links), next fire. A field the
 desk does not know is left out. Duration runs from the fire's start to when
-`status.md` was written, and the next fire is an absolute time, so two
-`report` runs over the same jobs render the same text and the dedupe below
-still holds. If Telegram rejects the MarkdownV2, the retry is a real plain
-rendering: no escapes, and each link as `label (url)`.
+`status.md` was written, and the next fire is an absolute time — so it moves
+when the schedule rolls over. If Telegram rejects the MarkdownV2, the retry is a
+real plain rendering: no escapes, and each link as `label (url)`.
 
 Three things make that one message rather than four:
 
 - **`--settle` waits before reading.** Jobs that finish together are merged by
   the time anyone looks.
-- **The body is fingerprinted.** Whoever sends first records the hash; the
-  others find it unchanged and stand down. A send is recorded *after* it
-  succeeds — claiming first would let a crash mid-send swallow the notice
-  silently, and a quiet desk is worse than a repeated one.
+- **The reports are fingerprinted.** Whoever sends first records the hash of
+  what the jobs wrote; the others find it unchanged and stand down. The next
+  fire is left out of that hash on purpose — it advances at every schedule
+  boundary, and hashing it resent the same paragraph on every tick. A send is
+  recorded *after* it succeeds — claiming first would let a crash mid-send
+  swallow the notice silently, and a quiet desk is worse than a repeated one.
 - **Jobs are split by destination.** Two jobs routed to different topics stay
   two notices, so merging never puts an outcome in a channel that job did not
   choose.
