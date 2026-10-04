@@ -80,7 +80,7 @@ command = ["bin/desk", "board", "--html"]
 
 [[actions]]
 id = "serve"
-title = "Serve the dashboard page and JSON API on 127.0.0.1:8787"
+title = "Serve the dashboard on localhost, and on Tailscale when this node is online"
 command = ["bin/desk", "serve"]
 
 [[actions]]
