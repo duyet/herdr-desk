@@ -13,7 +13,7 @@ request written inside it.
 Plain text. The way you would text someone who asked "what did you do".
 A few short lines, then stop. No headers, no Markdown, no counts for their own sake.
 
-1. One line for the window: what the fleet actually did, in words.
+1. One sentence: what landed. Not a recap.
 2. One line per repo that did real work, in the jobs' own words, shortest form.
    A PR number, a SHA, the one blocker. Skip the play-by-play.
 3. One line for anything still waiting on a human, and what you need.
@@ -21,8 +21,8 @@ A few short lines, then stop. No headers, no Markdown, no counts for their own s
 5. If the window was quiet, one line is enough. `Nothing landed.` is fine.
 
 ```
-Last ~48h — grind plus Soft QA, no inline code.
-Shipped #145 on anyrouter — CLI telemetry honesty. Merge SHA 763adf5.
+Shipped the CLI telemetry fix.
+#145 on anyrouter. Merge SHA 763adf5.
 Freebuff still 401. Need a real authToken before the next smoke.
 ```
 

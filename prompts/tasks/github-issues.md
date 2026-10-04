@@ -72,11 +72,10 @@ herdr agent prompt <name> <child prompt>
 ```
 
 Keep it short. This is what status/`last` shows. Then report the run
-the way you would text it — see **Report** in the manager prompt. One or
-two sentences, a fact and the next move, written to
+the way you would text it — see **Report** in the manager prompt. One
+sentence, one fact, no counts, no second notice. Write it to
 `{{runDir}}/status.md`, then
-`{{deskBin}} report --repo {{repo}} --settle 45`. Every job on this repo
-merges into one notice, so do not send a second one yourself.
+`{{deskBin}} report --repo {{repo}} --settle 45`.
 
 A local toast is still fine for a human at the terminal:
 `herdr notification show "{{deskName}} done" --body "{{runDir}}/changes.md"`
