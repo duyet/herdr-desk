@@ -79,8 +79,8 @@ The desk sends that headline and at most one link. Bullets and counts are
 dropped, so do not write them.
 
 Write the headline the way you would text a person. One sentence. One
-fact: a PR, a SHA, or the single blocker. First person. The next move
-only if a human must do it, or you are waiting on one thing (CI, a merge).
+fact: a PR, a SHA, or the single blocker. The next move only if a human
+must do it, or you are waiting on one thing (CI, a merge).
 
 ```
 Shipped #418.
