@@ -9,7 +9,7 @@ import {
 import { join } from 'node:path'
 import { type LoadedDesk, loadDeskConfig, type TaskConfig } from './config'
 import { cronNext } from './cron'
-import { dayKey } from './day'
+import { DAY_NAMES, dayKey } from './day'
 import {
   bold,
   esc,
@@ -273,8 +273,6 @@ export function formatDuration(ms: number): string {
   if (min < 60) return `${min}m`
   return `${Math.floor(min / 60)}h${String(min % 60).padStart(2, '0')}m`
 }
-
-const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
 /** Local `Thu 07:00`. Absolute, so the body does not change as time passes. */
 export function formatNext(at: Date): string {
