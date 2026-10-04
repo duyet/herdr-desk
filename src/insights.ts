@@ -38,6 +38,40 @@ export function pullUrls(text: string | undefined): string[] {
   return text.match(PULL_URL) ?? []
 }
 
+const noun = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
+
+const COUNT_ORDER = ['sessions', 'agents', 'prs', 'runs', 'failed'] as const
+
+type CountKey = (typeof COUNT_ORDER)[number]
+
+const COUNT_LABEL: Record<CountKey, (v: number) => string> = {
+  sessions: (v) => noun(v, 'session'),
+  agents: (v) => noun(v, 'agent'),
+  prs: (v) => noun(v, 'PR'),
+  runs: (v) => noun(v, 'run'),
+  failed: (v) => `${v} failed`,
+}
+
+/**
+ * The counts worth showing, in a fixed order.
+ *
+ * A zero is left out. `1 PRs` is the kind of line that makes the rest of
+ * the numbers look uncounted, so the noun agrees with the number. Pass
+ * `keys` to print a subset: the analytics table already states runs and
+ * failures, and repeating them is the noise this line exists to avoid.
+ */
+export function countParts(
+  n: InsightCounts,
+  keys: readonly CountKey[] = COUNT_ORDER,
+): string[] {
+  const parts: string[] = []
+  for (const key of keys) {
+    const v = n[key]
+    if (v > 0) parts.push(COUNT_LABEL[key](v))
+  }
+  return parts
+}
+
 /**
  * One pass over the runs and sessions already in memory.
  *

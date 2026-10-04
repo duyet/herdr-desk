@@ -26,7 +26,7 @@ import { defaultHerdrBin } from './herdr'
 import { formatHistory, loadRuns, loadRunsSince } from './history'
 import { serve } from './http'
 import { formatHub, publish, snapshot } from './hub'
-import { insightsOf } from './insights'
+import { countParts, insightsOf } from './insights'
 import { stripAllDeskCrons } from './install'
 import { readLastChanges } from './last'
 import {
@@ -174,17 +174,25 @@ function sessionsSince(since: Date): SessionRow[] {
 }
 
 /**
- * JSON for `analytics --json` and `GET /api/analytics`.
+ * One read of the ledger and the session index for both renders.
  *
- * Same runs and sessions the text view loads. `agents` stays on the rollup
- * the text view prints; it is not part of this object.
+ * The text view and `GET /api/analytics` have to count the same PRs.
+ * Loading twice would let a run land between them.
  */
-function analyticsPayload(since: Date) {
+function loadAnalytics(since: Date) {
   const runs = loadRunsSince(since)
   const sessions = sessionsSince(since)
-  const rolled = rollup(runs, sessions, since)
   return {
+    rolled: rollup(runs, sessions, since),
     insights: insightsOf({ runs, sessions, since }),
+  }
+}
+
+/** JSON for `analytics --json` and `GET /api/analytics`. */
+function analyticsPayload(since: Date) {
+  const { rolled, insights } = loadAnalytics(since)
+  return {
+    insights,
     jobs: rolled.jobs,
     failCauses: rolled.failCauses,
     skipCauses: rolled.skipCauses,
@@ -539,13 +547,16 @@ async function main() {
       console.log(JSON.stringify(analyticsPayload(since), null, 2))
       return
     }
-    console.log(
-      formatAnalytics(
-        rollup(loadRunsSince(since), sessionsSince(since), since),
-        termOpts(),
-        argv.includes('--wide'),
-      ),
-    )
+    const { rolled, insights } = loadAnalytics(since)
+    // Runs and failures are the next line. This one is only the counts
+    // that line does not have: sessions, agents, pull URLs.
+    const counts = countParts(insights.counts, [
+      'sessions',
+      'agents',
+      'prs',
+    ]).join(' · ')
+    if (counts) console.log(counts)
+    console.log(formatAnalytics(rolled, termOpts(), argv.includes('--wide')))
     return
   }
 

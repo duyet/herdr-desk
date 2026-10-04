@@ -1,8 +1,8 @@
 import { bar, color, gauge, gb, label, plainMode, sparkline } from './chart'
 import { type Budget, defaultBudget, fmtLoad, readHealth } from './health'
-import { loadRuns } from './history'
+import { loadRunsSince } from './history'
 import { type HubSnapshot, snapshot } from './hub'
-import { type InsightCounts, type Insights, insightsOf } from './insights'
+import { countParts, type Insights, insightsOf } from './insights'
 import { type QueueView, view as queueView } from './queue'
 import { loadSessions } from './sessions'
 
@@ -43,9 +43,11 @@ export type Dashboard = {
 /** Assemble from live state. Split from `render` so the view is testable. */
 export function collect(now = new Date()): Dashboard {
   const hub = snapshot(now)
-  const runs = loadRuns(200)
   const since = new Date(now.getTime() - 24 * 60 * 60 * 1000)
-  const day = runs.filter((r) => Date.parse(r.at) >= since.getTime())
+  // The whole day, not the newest 200 ledger rows. `loadRuns` stops at 200,
+  // and a busy machine crosses that before the day is over — the sparkline
+  // and the insight line would then under-count the same window.
+  const day = loadRunsSince(since)
   // Index only. `sessions index` already walked the agent files; doing it
   // again on every paint is the slow path that command exists to avoid.
   const sessions = loadSessions()
@@ -64,7 +66,7 @@ export function collect(now = new Date()): Dashboard {
       // where the bad ones are instead of a flat line of identical 1s.
       recent: day.slice(-48).map((r) => (r.ok ? 1 : 2)),
     },
-    insights: insightsOf({ runs, sessions, since }),
+    insights: insightsOf({ runs: day, sessions, since }),
     plain: plainMode(),
   }
 }
@@ -162,24 +164,13 @@ export function dashboardJson(d: Dashboard) {
   }
 }
 
-/** Counts worth a line. A zero is noise, so it is left out. */
-function insightCountParts(n: InsightCounts): string[] {
-  const parts: string[] = []
-  if (n.sessions > 0) parts.push(`${n.sessions} sessions`)
-  if (n.agents > 0) parts.push(`${n.agents} agents`)
-  if (n.prs > 0) parts.push(`${n.prs} PRs`)
-  if (n.runs > 0) parts.push(`${n.runs} runs`)
-  if (n.failed > 0) parts.push(`${n.failed} failed`)
-  return parts
-}
-
 function agentBreakdown(d: Dashboard): string {
   return d.insights.byAgent.map((a) => `${a.agent} ${a.sessions}`).join(' · ')
 }
 
 /** The insight block. Empty when every count is zero. */
 function insightLines(d: Dashboard): string[] {
-  const parts = insightCountParts(d.insights.counts)
+  const parts = countParts(d.insights.counts)
   if (parts.length === 0) return []
   const c = color(!d.plain)
   const painted = parts.map((part) =>
@@ -248,7 +239,7 @@ function deskListHtml(d: Dashboard): string {
 }
 
 function insightsHtml(d: Dashboard): string {
-  const parts = insightCountParts(d.insights.counts)
+  const parts = countParts(d.insights.counts)
   const agents = agentBreakdown(d)
   const prs = d.insights.prs
   if (parts.length === 0 && !agents && prs.length === 0) return ''

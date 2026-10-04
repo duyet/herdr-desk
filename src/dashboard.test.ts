@@ -89,7 +89,7 @@ describe('render', () => {
   test('shows non-zero sessions, agents, and PRs, and skips a zero count', () => {
     const out = render(sample())
     expect(insightLine(out)).toBe(
-      'insights  3 sessions · 2 agents · 1 PRs · 4 runs',
+      'insights  3 sessions · 2 agents · 1 PR · 4 runs',
     )
     // Zero failures stay off this line. The 24h row still reports its own.
     expect(insightLine(out)).not.toContain('failed')

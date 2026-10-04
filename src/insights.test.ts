@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import type { RunRecord } from './history'
-import { insightsOf, MAX_PRS_LISTED, pullUrls } from './insights'
+import { countParts, insightsOf, MAX_PRS_LISTED, pullUrls } from './insights'
 import type { SessionRow } from './sessions/types'
 
 const SINCE = new Date('2026-09-01T00:00:00Z')
@@ -34,6 +34,40 @@ function sess(
     path: '',
   }
 }
+
+describe('countParts', () => {
+  test('drops zeros and agrees with the number', () => {
+    // `1 PRs` reads as an uncounted line. The noun is part of the count.
+    expect(
+      countParts({
+        sessions: 1,
+        agents: 2,
+        prs: 1,
+        runs: 0,
+        ran: 0,
+        skipped: 0,
+        failed: 0,
+      }),
+    ).toEqual(['1 session', '2 agents', '1 PR'])
+  })
+
+  test('a subset leaves out counts another line already states', () => {
+    expect(
+      countParts(
+        {
+          sessions: 4,
+          agents: 2,
+          prs: 0,
+          runs: 9,
+          ran: 8,
+          skipped: 0,
+          failed: 1,
+        },
+        ['sessions', 'agents', 'prs'],
+      ),
+    ).toEqual(['4 sessions', '2 agents'])
+  })
+})
 
 describe('pullUrls', () => {
   test('counts a pull URL and ignores a bare issue number', () => {

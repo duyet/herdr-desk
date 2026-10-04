@@ -151,7 +151,7 @@ describe('countsLine', () => {
 })
 
 describe('renderDigest', () => {
-  test('many running jobs share one line', () => {
+  test('running jobs are a count, not a list', () => {
     // Eleven `running` lines were noise. The count is the information, so the
     // digest has no bullet that is just running jobs.
     for (let i = 0; i < 11; i++) {
