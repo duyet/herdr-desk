@@ -281,11 +281,7 @@ describe('renderMerged', () => {
     const body = renderMerged([
       job({
         task: 'desk:github-issues',
-        links: [
-          ['#1', 'https://github.com/o/aidr/issues/1'],
-          pr(9),
-          pr(10),
-        ],
+        links: [['#1', 'https://github.com/o/aidr/issues/1'], pr(9), pr(10)],
       }),
       job({
         task: 'local:deps',
