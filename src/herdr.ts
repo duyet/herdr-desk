@@ -201,14 +201,6 @@ export function projectWorkspaceForRepo(
   return projectRootOf(workspaces, best)
 }
 
-/** @deprecated use projectWorkspaceForRepo */
-export function primaryWorkspaceForRepo(
-  workspaces: ListedWorkspace[],
-  repo: string,
-): ListedWorkspace | undefined {
-  return projectWorkspaceForRepo(workspaces, { repo })
-}
-
 export function pickPane(createJson: unknown): {
   workspaceId: string
   paneId: string
@@ -231,13 +223,6 @@ export function pickPane(createJson: unknown): {
     throw new Error(`no pane id in create: ${JSON.stringify(createJson)}`)
   }
   return { workspaceId, paneId }
-}
-
-export function agentNames(listJson: unknown): string[] {
-  const agents =
-    (listJson as { result?: { agents?: Array<{ name?: string }> } })?.result
-      ?.agents ?? []
-  return agents.map((a) => a.name).filter((n): n is string => Boolean(n))
 }
 
 export type ListedAgent = {
