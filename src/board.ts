@@ -1,12 +1,11 @@
 import { outcomeOf, pct, type Rollup } from './analytics'
-import { formatLocal } from './day'
+import { DAY_NAMES, formatLocal } from './day'
 import type { RunRecord } from './history'
 import { escapeHtml } from './html'
 import type { SessionRow } from './sessions/types'
 import { DENSE, type Fire } from './timeline'
 
 const p = (n: number) => String(n).padStart(2, '0')
-const DAY = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const local = (iso: string) => {
   const d = new Date(iso)
   return Number.isNaN(d.getTime()) ? iso : formatLocal(d)
@@ -63,7 +62,7 @@ function slotGrid(fires: Fire[], now: Date, days: number): string {
   const head = Array.from({ length: days }, (_, i) => {
     const d = new Date(start)
     d.setDate(d.getDate() + i)
-    return `<th>${DAY[d.getDay()]} ${p(d.getMonth() + 1)}-${p(d.getDate())}</th>`
+    return `<th>${DAY_NAMES[d.getDay()]} ${p(d.getMonth() + 1)}-${p(d.getDate())}</th>`
   }).join('')
   const rows = hours
     .map((h) => {

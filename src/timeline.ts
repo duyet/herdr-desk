@@ -1,5 +1,5 @@
 import { cronNext } from './cron'
-import { dayKey } from './day'
+import { DAY_NAMES, dayKey } from './day'
 import type { Discovered } from './discover'
 import {
   describePause,
@@ -16,7 +16,6 @@ export type Fire = { at: Date; repo: string; job: string; agent: string }
 /** A job firing more often than this in one day is shown as one summary line. */
 export const DENSE = 6
 
-const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const p = (n: number) => String(n).padStart(2, '0')
 const hhmm = (d: Date) => `${p(d.getHours())}:${p(d.getMinutes())}`
 
