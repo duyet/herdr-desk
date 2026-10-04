@@ -1,5 +1,6 @@
-import { describe, expect, test } from 'bun:test'
+import { afterEach, describe, expect, test } from 'bun:test'
 import {
+  chmodSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -10,6 +11,7 @@ import {
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { TaskConfig } from './config'
+import { recordAnnounced, shouldAnnounce } from './failures'
 import type { ListedAgent } from './herdr'
 import {
   announceable,
@@ -22,6 +24,7 @@ import {
   launchKind,
   preconditionSkip,
   runDirFor,
+  runTask,
   writeLatestPointer,
 } from './run'
 
@@ -319,5 +322,117 @@ describe('launchKind', () => {
 
   test('fails loud when no rung is a Herdr agent kind', () => {
     expect(() => launchKind(['opencode2'])).toThrow(/opencode2/)
+  })
+})
+
+describe('runTask', () => {
+  // Everything a run reads off the host, so a test tick cannot pick up the
+  // developer's own Herdr, desk configs or Telegram token.
+  const HOST_ENV = [
+    'HERDR_PLUGIN_STATE_DIR',
+    'HERDR_PLUGIN_CONFIG_DIR',
+    'HERDR_BIN_PATH',
+    'HERDR_SOCKET_PATH',
+    'HERDR_DESK_TELEGRAM_TOKEN',
+    'HERDR_DESK_TELEGRAM_CHAT_ID',
+  ] as const
+  const prevEnv = HOST_ENV.map((k) => [k, process.env[k]] as const)
+  const temps: string[] = []
+
+  function tempDir(prefix: string): string {
+    const dir = mkdtempSync(join(tmpdir(), prefix))
+    temps.push(dir)
+    return dir
+  }
+
+  const TASK_ID = 'local:babysit'
+  const FAULT = 'agent_name_taken: agent name chm-babysit is already used'
+
+  /**
+   * A one-task desk on a temp repo, and a Herdr that answers.
+   *
+   * The fake binary is a shell script rather than a stub of `herdrCall`, so this
+   * drives the real path: the project Space is found in `workspace list`, the
+   * manager is promptable in `agent list`, and `agent prompt` is accepted. No
+   * Telegram token exists anywhere, so `announce` gets as far as its decision
+   * and never reaches the network.
+   *
+   * `herdrDown` leaves the socket missing, which is the precondition-skip path.
+   */
+  function desk(herdrDown = false): string {
+    const state = tempDir('herdr-desk-run-')
+    const repo = tempDir('herdr-desk-repo-')
+    process.env.HERDR_PLUGIN_STATE_DIR = state
+    process.env.HERDR_PLUGIN_CONFIG_DIR = tempDir('herdr-desk-config-')
+    delete process.env.HERDR_DESK_TELEGRAM_TOKEN
+    delete process.env.HERDR_DESK_TELEGRAM_CHAT_ID
+
+    writeFileSync(
+      join(repo, '.herdr-desk.json'),
+      `${JSON.stringify({
+        name: 'chmonitor',
+        tasks: [
+          {
+            id: TASK_ID,
+            schedule: '0 7 * * *',
+            agentName: 'chm-babysit',
+          },
+        ],
+      })}\n`,
+    )
+
+    const bin = join(state, 'herdr')
+    writeFileSync(
+      bin,
+      `#!/bin/sh
+case "$1 $2" in
+  "workspace list") echo '{"result":{"workspaces":[{"workspace_id":"wProj","cwd":"${repo}"}]}}' ;;
+  "agent list") echo '{"result":{"agents":[{"name":"chm-babysit","status":"working"}]}}' ;;
+  *) echo '{}' ;;
+esac
+`,
+    )
+    chmodSync(bin, 0o755)
+    process.env.HERDR_BIN_PATH = bin
+    const socket = join(state, 'herdr.sock')
+    if (herdrDown) process.env.HERDR_SOCKET_PATH = join(state, 'gone.sock')
+    else {
+      writeFileSync(socket, '')
+      process.env.HERDR_SOCKET_PATH = socket
+    }
+    return repo
+  }
+
+  afterEach(() => {
+    for (const [k, v] of prevEnv) {
+      if (v === undefined) delete process.env[k]
+      else process.env[k] = v
+    }
+    for (const dir of temps.splice(0))
+      rmSync(dir, { recursive: true, force: true })
+  })
+
+  test('a run that reached its manager forgets the faults it had', async () => {
+    // The dedupe must not outlive the fault it was written for. Without this
+    // clear, a job that failed, recovered, and failed again the same way is
+    // treated as repeating a fault that is already fixed — and the second
+    // outage is silent.
+    const repo = desk()
+    recordAnnounced(repo, TASK_ID, FAULT)
+    expect(shouldAnnounce(repo, TASK_ID, FAULT)).toBe(false)
+
+    expect((await runTask({ repo })).prompted).toBe(true)
+    expect(shouldAnnounce(repo, TASK_ID, FAULT)).toBe(true)
+  })
+
+  test('a job that never started keeps its faults held back', async () => {
+    // Herdr being down is not recovery. Clearing on anything short of reaching
+    // the manager would hand every standing fault on the machine back its first
+    // notice on every tick — the exact repetition this dedupe exists to stop.
+    const repo = desk(true)
+    recordAnnounced(repo, TASK_ID, FAULT)
+
+    expect((await runTask({ repo })).skipped).toContain('socket')
+    expect(shouldAnnounce(repo, TASK_ID, FAULT)).toBe(false)
   })
 })
