@@ -87,20 +87,16 @@ export async function selfSource(): Promise<SelfSource> {
   return src
 }
 
-/** Latest release tag, e.g. `v0.1.7`. Unauthenticated, with a timeout. */
-export async function fetchLatestTag(
-  owner: string,
-  repo: string,
-  fetchImpl: typeof fetch = fetch,
-): Promise<string> {
-  const url = `https://api.github.com/repos/${owner}/${repo}/releases/latest`
+const GH_HEADERS = {
+  Accept: 'application/vnd.github+json',
+  'User-Agent': PLUGIN_ID,
+}
+
+async function ghGet(url: string, fetchImpl: typeof fetch): Promise<unknown> {
   let res: Response
   try {
     res = await fetchImpl(url, {
-      headers: {
-        Accept: 'application/vnd.github+json',
-        'User-Agent': PLUGIN_ID,
-      },
+      headers: GH_HEADERS,
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     })
   } catch (err) {
@@ -109,11 +105,83 @@ export async function fetchLatestTag(
     )
   }
   if (!res.ok) throw new Error(`${url}: HTTP ${res.status}`)
-  const body = (await res.json()) as { tag_name?: unknown }
+  return res.json()
+}
+
+/** Latest release tag, e.g. `v0.1.7`. Unauthenticated, with a timeout. */
+export async function fetchLatestTag(
+  owner: string,
+  repo: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<string> {
+  const url = `https://api.github.com/repos/${owner}/${repo}/releases/latest`
+  const body = (await ghGet(url, fetchImpl)) as { tag_name?: unknown }
   if (typeof body.tag_name !== 'string') {
     throw new Error(`${url}: no tag_name`)
   }
   return body.tag_name
+}
+
+export type ReleaseNote = { tag: string; body: string }
+
+/** Newest releases first. Enough to cover a desk that skipped a few tags. */
+export async function fetchReleaseNotes(
+  owner: string,
+  repo: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<ReleaseNote[]> {
+  const url = `https://api.github.com/repos/${owner}/${repo}/releases?per_page=15`
+  const body = await ghGet(url, fetchImpl)
+  if (!Array.isArray(body)) throw new Error(`${url}: not a list`)
+  const out: ReleaseNote[] = []
+  for (const row of body) {
+    const tag = (row as { tag_name?: unknown }).tag_name
+    const text = (row as { body?: unknown }).body
+    if (typeof tag !== 'string') continue
+    out.push({ tag, body: typeof text === 'string' ? text : '' })
+  }
+  return out
+}
+
+/** How many changelog lines an update prints. The rest is a count. */
+export const CHANGELOG_LINES = 8
+
+/**
+ * One compact line per release-please bullet newer than `installed`.
+ * Links, issue numbers, and SHAs are dropped. Empty when the body has
+ * no `* ` bullets.
+ */
+export function changelogLines(
+  installed: string,
+  releases: ReleaseNote[],
+  max = CHANGELOG_LINES,
+): string[] {
+  const lines: string[] = []
+  let extra = 0
+  for (const rel of releases) {
+    let newer: boolean
+    try {
+      newer = compareVersions(rel.tag, installed) > 0
+    } catch {
+      continue
+    }
+    if (!newer) continue
+    const ver = rel.tag.replace(/^v/, '')
+    for (const raw of rel.body.split('\n')) {
+      const bullet = /^\*\s+(.+)$/.exec(raw.trim())
+      if (!bullet) continue
+      let text = bullet[1].replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+      text = text.replace(/\s*\([0-9a-f]{7,40}\)/gi, '')
+      text = text.replace(/\s*\(#\d+\)/g, '')
+      text = text.replace(/,?\s*closes\s+#\d+/gi, '')
+      text = text.replace(/\*\*/g, '').replace(/\s+/g, ' ').trim()
+      if (!text) continue
+      if (lines.length < max) lines.push(`${ver} ${text}`)
+      else extra++
+    }
+  }
+  if (extra > 0) lines.push(`+${extra} more`)
+  return lines
 }
 
 export type UpdateCheck = {
@@ -123,6 +191,8 @@ export type UpdateCheck = {
   source: SelfSource
   /** Why an apply would not happen, even though a newer version exists. */
   blocked?: string
+  /** Compact lines newer than `installed`. Empty when nothing parsed. */
+  changes?: string[]
 }
 
 export async function checkForUpdate(
@@ -130,6 +200,7 @@ export async function checkForUpdate(
     source?: () => Promise<SelfSource>
     latest?: (owner: string, repo: string) => Promise<string>
     installed?: () => string
+    notes?: (owner: string, repo: string) => Promise<ReleaseNote[]>
   } = {},
 ): Promise<UpdateCheck> {
   const source = await (deps.source ?? selfSource)()
@@ -143,7 +214,16 @@ export async function checkForUpdate(
   // it anyway. A pin is a choice the user made, so it is never moved silently.
   if (source.kind !== 'github') blocked = `installed as ${source.kind}`
   else if (source.requestedRef) blocked = `pinned to ${source.requestedRef}`
-  return { installed, latest, newer, source, blocked }
+  let changes: string[] | undefined
+  if (newer) {
+    try {
+      const notes = await (deps.notes ?? fetchReleaseNotes)(owner, repo)
+      changes = changelogLines(installed, notes)
+    } catch {
+      changes = []
+    }
+  }
+  return { installed, latest, newer, source, blocked, changes }
 }
 
 /** `herdr plugin install owner/repo --yes`. Plain output, so not herdrJson. */
@@ -271,7 +351,10 @@ export async function maybeAutoUpdate(
   }
   saveLastCheck(now, `updated ${what}`)
   log(`updated ${what}`)
-  await send(`herdr-desk updated ${what}`).catch(() => {})
+  const changes = check.changes?.length
+    ? `\n${check.changes.map((l) => `· ${l}`).join('\n')}`
+    : ''
+  await send(`herdr-desk updated ${what}${changes}`).catch(() => {})
   return 'updated'
 }
 
