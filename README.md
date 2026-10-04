@@ -148,6 +148,17 @@ a stray file in a parent directory cannot steer your repos by accident.
 Precedence, highest first: `HERDR_DESK_*` env → repo → nearest group config →
 machine `config.json` → built-in defaults.
 
+The repo layer is whatever `.herdr-desk.json` says in that checkout's working
+tree, at whatever commit it is on — nothing pulls it first, and a path-shaped
+`extra` is read out of that same tree. So a config fix that merged changes
+nothing on a checkout that is behind, and reports nothing about it. (`gh:`
+playbooks are the exception: the registry locks each to an approved commit.)
+To unstick one:
+
+```sh
+git -C ~/project/myrepo pull --ff-only
+```
+
 Not sure why a value is what it is?
 
 ```sh
