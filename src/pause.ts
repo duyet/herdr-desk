@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { formatLocal } from './day'
 import { pluginStateDir } from './paths'
 
 /** `until` is an ISO instant; absent means paused until `resume`. */
@@ -74,8 +75,7 @@ export function pausedNow(
 export function describePause(e: PauseEntry): string {
   if (!e.until) return 'paused'
   const d = new Date(e.until)
-  const p = (n: number) => String(n).padStart(2, '0')
-  return `paused until ${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+  return `paused until ${formatLocal(d)}`
 }
 
 /** `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`, read as local time like the crons. */
