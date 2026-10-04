@@ -1,4 +1,5 @@
 import { outcomeOf, pct, type Rollup } from './analytics'
+import { formatLocal } from './day'
 import type { RunRecord } from './history'
 import { escapeHtml } from './html'
 import type { SessionRow } from './sessions/types'
@@ -8,9 +9,7 @@ const p = (n: number) => String(n).padStart(2, '0')
 const DAY = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const local = (iso: string) => {
   const d = new Date(iso)
-  return Number.isNaN(d.getTime())
-    ? iso
-    : `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+  return Number.isNaN(d.getTime()) ? iso : formatLocal(d)
 }
 
 export type BoardData = {
