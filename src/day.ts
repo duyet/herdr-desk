@@ -1,3 +1,13 @@
+export const DAY_NAMES = [
+  'Sun',
+  'Mon',
+  'Tue',
+  'Wed',
+  'Thu',
+  'Fri',
+  'Sat',
+] as const
+
 /** Local `YYYY-MM-DD HH:MM`. */
 export function formatLocal(at: Date): string {
   const p = (n: number) => String(n).padStart(2, '0')
