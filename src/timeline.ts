@@ -1,4 +1,5 @@
 import { cronNext } from './cron'
+import { dayKey } from './day'
 import type { Discovered } from './discover'
 import {
   describePause,
@@ -18,8 +19,6 @@ export const DENSE = 6
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const p = (n: number) => String(n).padStart(2, '0')
 const hhmm = (d: Date) => `${p(d.getHours())}:${p(d.getMinutes())}`
-const dayOf = (d: Date) =>
-  `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
 
 /**
  * Every fire of every job from `from` up to `days` ahead, oldest first.
@@ -91,7 +90,7 @@ export function formatAgenda(
 
   const byDay = new Map<string, Fire[]>()
   for (const f of fires) {
-    const k = dayOf(f.at)
+    const k = dayKey(f.at)
     const list = byDay.get(k) ?? []
     list.push(f)
     byDay.set(k, list)
@@ -189,7 +188,7 @@ export function formatNext(
   const table = textTable(
     ['When', 'In', 'Repo', 'Job', 'Agent'],
     fires.map((f) => [
-      `${dayOf(f.at)} ${hhmm(f.at)}`,
+      `${dayKey(f.at)} ${hhmm(f.at)}`,
       formatIn(f.at.getTime() - from.getTime()),
       f.repo,
       f.job,
