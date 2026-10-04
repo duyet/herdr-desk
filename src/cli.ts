@@ -19,12 +19,14 @@ import {
   stopDaemon,
   tickOnce,
 } from './daemon'
-import { collect, render } from './dashboard'
+import { collect, dashboardJson, render } from './dashboard'
 import { dayKey } from './day'
 import { discoverDesks, formatScan } from './discover'
 import { defaultHerdrBin } from './herdr'
 import { formatHistory, loadRuns, loadRunsSince } from './history'
+import { serve } from './http'
 import { formatHub, publish, snapshot } from './hub'
+import { countParts, insightsOf } from './insights'
 import { stripAllDeskCrons } from './install'
 import { readLastChanges } from './last'
 import {
@@ -118,7 +120,7 @@ function usage(): never {
   herdr-desk resume JOB|--all [--repo DIR]
   herdr-desk timeline
   herdr-desk heatmap [--actual] [--since 30d]
-  herdr-desk analytics [--since 30d] [--wide]
+  herdr-desk analytics [--since 30d] [--wide] [--json]
   herdr-desk calendar [--ics FILE]
   herdr-desk board --html [FILE]
   herdr-desk history [N]
@@ -137,6 +139,7 @@ function usage(): never {
   herdr-desk hub [--send] [--json] [--force]
   herdr-desk summary [--since 1d] [--repo DIR] [--dry-run] [--notify]
   herdr-desk dash [--json] [--no-color]
+  herdr-desk serve [--port 8787] [--host 127.0.0.1]
   herdr-desk prompts list | check | apply [--accept] | pin REPO SHA
   herdr-desk update [--check]
   herdr-desk uninstall-cron
@@ -168,6 +171,36 @@ function sinceArg(argv: string[]): Date {
 /** Index rows that started at or after `since`, skipping rows with no usable start. */
 function sessionsSince(since: Date): SessionRow[] {
   return loadSessions().filter((s) => Date.parse(s.started) >= since.getTime())
+}
+
+/**
+ * One read of the ledger and the session index for both renders.
+ *
+ * The text view and `GET /api/analytics` have to count the same PRs.
+ * Loading twice would let a run land between them.
+ */
+function loadAnalytics(since: Date) {
+  const runs = loadRunsSince(since)
+  const sessions = sessionsSince(since)
+  return {
+    rolled: rollup(runs, sessions, since),
+    insights: insightsOf({ runs, sessions, since }),
+  }
+}
+
+/** JSON for `analytics --json` and `GET /api/analytics`. */
+function analyticsPayload(since: Date) {
+  const { rolled, insights } = loadAnalytics(since)
+  return {
+    insights,
+    jobs: rolled.jobs,
+    failCauses: rolled.failCauses,
+    skipCauses: rolled.skipCauses,
+    rate: rolled.rate,
+    total: rolled.total,
+    perDay: rolled.perDay,
+    since: rolled.since,
+  }
 }
 
 /** Show which layer chose the chat, so "it went to the wrong place" is answerable. */
@@ -510,13 +543,20 @@ async function main() {
 
   if (cmd === 'analytics') {
     const since = sinceArg(argv)
-    console.log(
-      formatAnalytics(
-        rollup(loadRunsSince(since), sessionsSince(since), since),
-        termOpts(),
-        argv.includes('--wide'),
-      ),
-    )
+    if (argv.includes('--json')) {
+      console.log(JSON.stringify(analyticsPayload(since), null, 2))
+      return
+    }
+    const { rolled, insights } = loadAnalytics(since)
+    // Runs and failures are the next line. This one is only the counts
+    // that line does not have: sessions, agents, pull URLs.
+    const counts = countParts(insights.counts, [
+      'sessions',
+      'agents',
+      'prs',
+    ]).join(' · ')
+    if (counts) console.log(counts)
+    console.log(formatAnalytics(rolled, termOpts(), argv.includes('--wide')))
     return
   }
 
@@ -811,27 +851,28 @@ async function main() {
     const d = collect()
     if (argv.includes('--no-color')) d.plain = true
     if (argv.includes('--json')) {
-      console.log(
-        JSON.stringify(
-          {
-            host: d.host,
-            budget: d.budget,
-            hub: {
-              running: d.hub.running,
-              stuck: d.hub.stuck,
-              settled: d.hub.settled,
-              byLevel: d.hub.byLevel,
-            },
-            queue: { jobs: d.queue.jobs, expired: d.queue.expired },
-            today: d.today,
-          },
-          null,
-          2,
-        ),
-      )
+      console.log(JSON.stringify(dashboardJson(d), null, 2))
       return
     }
     console.log(render(d))
+    return
+  }
+
+  if (cmd === 'serve') {
+    const portText = arg('--port', argv)
+    const port = argv.includes('--port') ? Number(portText) : 8787
+    if (!Number.isInteger(port) || port < 1 || port > 65535) usage()
+    const hostname = arg('--host', argv) ?? '127.0.0.1'
+    const server = serve({
+      port,
+      hostname,
+      deps: {
+        dashboard: () => collect(),
+        analytics: (sinceText) =>
+          analyticsPayload(new Date(parseSince(sinceText))),
+      },
+    })
+    console.log(`desk http://${hostname}:${server.port}`)
     return
   }
 

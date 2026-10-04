@@ -177,8 +177,9 @@ export function readJobReport(runDir: string, task: string): JobReport | null {
 
 /** Bounds. A merged notice is read on a phone, not audited. */
 export const MAX_JOBS = 8
-export const MAX_ITEMS_PER_JOB = 4
-export const MAX_LINKS = 5
+
+/** A GitHub pull URL. Issue links are not the insight, so they do not count. */
+const PULL_URL = /\/pull\/\d+/
 
 /**
  * Merge every job's fragment into one body, in one fixed shape.
@@ -187,20 +188,21 @@ export const MAX_LINKS = 5
  * read by scanning can be scanned:
  *
  * ```
- * 🟢 *ok* aidr/desk:github-issues · grok · 12m · 2 PRs · 1 issue · next Thu 07:00
- *   3 PRs merged
- *   • PR #418 merged
+ * 🟢 *ok* aidr/desk:github-issues · grok · 12m · 2 PRs
+ *   2 PRs merged
  *   • [PR #418](https://…)
  * #ok #desk
  * ```
  *
- * A field the desk does not know is left out rather than shown as `?`. Several
- * jobs add one count line on top; the tag line is always last.
+ * The headline is the one insight. Items are the play-by-play and are left
+ * out. Each job keeps at most one link: the first pull, or its first link if
+ * it opened no pull. A field the desk does not know is left out rather than
+ * shown as `?`. Several jobs add one count line on top; the tag line is
+ * always last.
  *
- * Nothing here reads the clock: duration comes from two stored stamps and the
- * next fire is an absolute time, not a countdown. `next` still moves when the
- * schedule rolls over — it is there for a human checking that a job is alive —
- * so `fingerprint` leaves it out rather than the renderer dropping it.
+ * Nothing here reads the clock. Duration comes from two stored stamps. The
+ * next fire is a schedule, not an insight, so it is not on the line. Two
+ * concurrent `report` runs of the same fragments render the same text.
  */
 export function renderMerged(reports: JobReport[]): string {
   if (reports.length === 0) return ''
@@ -210,24 +212,20 @@ export function renderMerged(reports: JobReport[]): string {
 
   const out: string[] = []
   if (reports.length > 1) {
+    const pulls = pullCount(shown)
+    const head = `${LEVEL_DOT[level]} ${bold(level)} ${esc(`${reports.length} jobs`)} · ${esc(summaryLine(shown))}`
     out.push(
-      `${LEVEL_DOT[level]} ${bold(level)} ${esc(`${reports.length} jobs`)} · ${esc(summaryLine(shown))}`,
+      pulls > 0
+        ? `${head} · ${esc(`${pulls} PR${pulls === 1 ? '' : 's'}`)}`
+        : head,
     )
   }
 
-  let linksLeft = MAX_LINKS
   for (const r of shown) {
     out.push(verdictLine(r))
     if (r.headline) out.push(`  ${esc(r.headline)}`)
-    for (const item of r.items.slice(0, MAX_ITEMS_PER_JOB)) {
-      out.push(`  • ${esc(item)}`)
-    }
-    const more = r.items.length - MAX_ITEMS_PER_JOB
-    if (more > 0) out.push(`  • ${esc(`… +${more} more`)}`)
-    for (const [label, url] of r.links.slice(0, linksLeft)) {
-      out.push(`  • ${link(label, url)}`)
-      linksLeft -= 1
-    }
+    const one = shownLink(r)
+    if (one) out.push(`  • ${link(one[0], one[1])}`)
   }
   if (hidden > 0) {
     out.push(`• ${esc(`… +${hidden} more job${hidden === 1 ? '' : 's'}`)}`)
@@ -238,17 +236,33 @@ export function renderMerged(reports: JobReport[]): string {
   return out.join('\n')
 }
 
-/** `<dot> *level* repo/job · agent · 12m · 2 PRs · 1 issue · next Thu 07:00` */
+/** The first pull, else the first link. One line, then stop. */
+function shownLink(r: JobReport): [string, string] | undefined {
+  return r.links.find(([, url]) => PULL_URL.test(url)) ?? r.links[0]
+}
+
+/**
+ * Distinct pull URLs. The caller passes the shown jobs: a pull that exists
+ * only on a hidden job is not part of the notice.
+ */
+function pullCount(reports: JobReport[]): number {
+  const urls = new Set<string>()
+  for (const r of reports) {
+    for (const [, url] of r.links) {
+      if (PULL_URL.test(url)) urls.add(url)
+    }
+  }
+  return urls.size
+}
+
+/** `<dot> *level* repo/job · agent · 12m · 2 PRs` */
 export function verdictLine(r: JobReport): string {
   const who = r.repo ? `${r.repo}/${r.task}` : r.task
   const parts = [`${LEVEL_DOT[r.level]} ${bold(r.level)} ${esc(who)}`]
   if (r.agent) parts.push(esc(r.agent))
   if (r.durationMs !== undefined) parts.push(esc(formatDuration(r.durationMs)))
-  const prs = r.links.filter(([, url]) => /\/pull\/\d+/.test(url)).length
-  const issues = r.links.filter(([, url]) => /\/issues\/\d+/.test(url)).length
+  const prs = r.links.filter(([, url]) => PULL_URL.test(url)).length
   if (prs) parts.push(esc(`${prs} PR${prs === 1 ? '' : 's'}`))
-  if (issues) parts.push(esc(`${issues} issue${issues === 1 ? '' : 's'}`))
-  if (r.nextAt) parts.push(esc(`next ${formatNext(r.nextAt)}`))
   return parts.join(' · ')
 }
 
@@ -292,10 +306,9 @@ function summaryLine(reports: JobReport[]): string {
  * stand down instead of posting a duplicate — which is the whole reason merging
  * is worth doing at all.
  *
- * Hashing the rendered body does not work. The body carries `next Thu 07:00`,
- * and the next fire moves at every schedule boundary, so a desk whose fragments
- * had not changed resent the same paragraph on each tick: three notices in one
- * day over one byte-identical `status.md`.
+ * Hashing the rendered body does not work. Duration is still on the verdict
+ * line and changes with every re-fire of an identical fragment, so a desk whose
+ * words had not changed would resent the same paragraph.
  *
  * Two fields are left out, because neither is something a manager wrote and
  * both move on their own: `nextAt`, which advances when the schedule rolls over,

@@ -423,34 +423,21 @@ export function countsLine(s: HubSnapshot): string {
   return bits.length ? bits.join(' · ') : 'nothing running'
 }
 
-const MAX_RUNNING_LISTED = 6
 const MAX_ATTENTION_LISTED = 5
 const MAX_LINKS = 4
 
 /**
  * The hub message: one headline of counts, then what needs a human.
  *
- * Running jobs get one shared line rather than a line each — the count is the
- * information, and eleven lines of `anyrouter/local:collect 4m` is the same wall
- * of text this was built to remove. Blocked, failed, and stuck jobs each get a
- * line with their own headline, because those are the ones a human is being
- * woken for.
+ * Running work stays in the count (`2 running`). A list of every live job is
+ * the wall of text this was built to remove. Blocked, failed, and stuck jobs
+ * each get a line with their own headline, because those are the ones a human
+ * is being woken for.
  */
 export function renderDigest(s: HubSnapshot): string {
   if (s.jobs.length === 0) return ''
   const level = DOT_LEVEL[s.worst]
   const out: string[] = [`${LEVEL_DOT[level]} ${esc(countsLine(s))}`]
-
-  const running = s.jobs.filter((j) => j.state === 'running')
-  if (running.length) {
-    const shown = running.slice(0, MAX_RUNNING_LISTED)
-    const rest = running.length - shown.length
-    out.push(
-      `• ${esc(
-        shown.map((j) => `${deskOf(j)}  ${ago(j.ageMs)}`).join(' · '),
-      )}${rest > 0 ? esc(` · +${rest} more`) : ''}`,
-    )
-  }
 
   for (const j of s.jobs
     .filter(

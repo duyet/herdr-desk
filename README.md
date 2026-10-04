@@ -213,6 +213,7 @@ herdr plugin action invoke herdr-desk.timeline  # one lane per job, next 7 days
 herdr plugin action invoke herdr-desk.heatmap   # 7x24 cron density (heatmap-actual: from the ledger)
 herdr plugin action invoke herdr-desk.analytics # success rate, skip/failure causes, last 30 days
 herdr plugin action invoke herdr-desk.board     # static HTML board in the state dir
+herdr plugin action invoke herdr-desk.serve     # dashboard page and JSON on 127.0.0.1:8787
 herdr plugin action invoke herdr-desk.last      # today's changes.md from each repo
 herdr plugin action invoke herdr-desk.summary   # preview the summary prompt
 herdr plugin action invoke herdr-desk.list      # discovered repos
@@ -231,7 +232,12 @@ bun src/cli.ts heatmap --actual --since 14d
 bun src/cli.ts analytics --since 7d
 bun src/cli.ts calendar --ics ~/desk.ics    # writes a file only with --ics
 bun src/cli.ts board --html /tmp/board.html # no scripts, no network
+bun src/cli.ts dash
+bun src/cli.ts dash --json
+bun src/cli.ts serve
 ```
+
+`dash` is the terminal view (sessions, agents, PRs, runs for 24h). `serve` binds 127.0.0.1:8787 — `/` is the page, `/api/dashboard` and `/api/analytics?since=7d` are the JSON. It reads the session index; it does not rescan agent files. `sessions index` is what refreshes that index.
 
 Manage jobs without editing JSON (a job is `JOB --repo DIR`, like `run`):
 

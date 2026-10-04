@@ -151,8 +151,9 @@ describe('countsLine', () => {
 })
 
 describe('renderDigest', () => {
-  test('many running jobs share one line', () => {
-    // Eleven separate `running` lines is the wall of text this replaces.
+  test('running jobs are a count, not a list', () => {
+    // Eleven `running` lines were noise. The count is the information, so the
+    // digest has no bullet that is just running jobs.
     for (let i = 0; i < 11; i++) {
       markRunning({
         repo: `/p/repo${i}`,
@@ -162,10 +163,9 @@ describe('renderDigest', () => {
       })
     }
     const body = renderDigest(snapshot())
-    const runningLines = body.split('\n').filter((l) => l.startsWith('• '))
-    expect(runningLines).toHaveLength(1)
-    // `+` is reserved in MarkdownV2; bare, it 400s the whole digest.
-    expect(runningLines[0]).toContain('\\+5 more')
+    expect(body).toBe(['🔵 11 running', '#info #desk #hub'].join('\n'))
+    expect(body).not.toContain('repo0')
+    expect(body.split('\n').filter((l) => l.startsWith('• '))).toHaveLength(0)
   })
 
   test('a job that needs a human gets its own line with the reason', () => {

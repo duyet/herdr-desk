@@ -18,7 +18,6 @@ import {
   formatNext,
   isLevel,
   type JobReport,
-  MAX_ITEMS_PER_JOB,
   MAX_JOBS,
   parseReport,
   type ReportGroup,
@@ -126,11 +125,13 @@ describe('worstLevel', () => {
 describe('renderMerged', () => {
   test('overflow markers are escaped for MarkdownV2', () => {
     // `+` is reserved; a bare `+2 more` makes Telegram reject the notice.
+    // Items are not rendered, so the only overflow is hidden jobs, and its
+    // `+` stays escaped.
     const many = Array.from({ length: MAX_JOBS + 2 }, (_, i) =>
       job({ task: `t${i}`, items: ['a', 'b', 'c', 'd', 'e', 'f'] }),
     )
     const body = renderMerged(many)
-    expect(body).toContain('  • … \\+2 more')
+    expect(body).not.toContain('  • … \\+2 more')
     expect(body).toContain('• … \\+2 more jobs')
     expect(body).not.toMatch(/[^\\]\+\d/)
   })
@@ -140,7 +141,7 @@ describe('renderMerged', () => {
     `https://github.com/o/aidr/pull/${n}`,
   ]
 
-  test('ok: one fixed verdict line, then headline, items, links', () => {
+  test('ok: one fixed verdict line, then headline and one link', () => {
     const body = renderMerged([
       job({
         task: 'desk:github-issues',
@@ -160,13 +161,12 @@ describe('renderMerged', () => {
     expect(body).toBe(
       [
         // `-` and `#` are reserved in MarkdownV2 and arrive escaped; `:` is
-        // not. Telegram renders each escape as the plain character.
-        '🟢 *ok* aidr/desk:github\\-issues · grok · 12m · 2 PRs · 1 issue · next Thu 07:00',
+        // not. Telegram renders each escape as the plain character. Next
+        // fire, the issue count, and the play-by-play are not the insight.
+        // One pull link: the first, not the issue.
+        '🟢 *ok* aidr/desk:github\\-issues · grok · 12m · 2 PRs',
         '  2 PRs merged',
-        '  • \\#412 filed',
         '  • [PR \\#418](https://github.com/o/aidr/pull/418)',
-        '  • [PR \\#419](https://github.com/o/aidr/pull/419)',
-        '  • [\\#412](https://github.com/o/aidr/issues/412)',
         '#ok #desk',
       ].join('\n'),
     )
@@ -215,9 +215,9 @@ describe('renderMerged', () => {
     expect(body).toBe(
       [
         '🟠 *blocked* 2 jobs · 1 ok · 1 blocked',
-        '🟢 *ok* aidr/desk:github\\-issues · grok · next Thu 07:00',
+        '🟢 *ok* aidr/desk:github\\-issues · grok',
         '  3 PRs merged',
-        '🟠 *blocked* aidr/local:deps · grok · <1m · next Thu 07:00',
+        '🟠 *blocked* aidr/local:deps · grok · <1m',
         '  upgrade needs a human',
         '#blocked #desk',
       ].join('\n'),
@@ -226,6 +226,8 @@ describe('renderMerged', () => {
 
   test('a busy morning stays inside the notice body cap', () => {
     // The tag line is last, so an over-long body loses `#fail` to the clip.
+    // Each job still carries items, a next fire, and a second link. None of
+    // that is rendered, and the tag still survives.
     const tasks = ['desk:github-issues', 'local:deps', 'local:prod']
     const body = renderMerged(
       tasks.map((task, i) =>
@@ -238,11 +240,13 @@ describe('renderMerged', () => {
           nextAt: NEXT,
           headline: 'merged the dependency bumps',
           items: ['CI green on main'],
-          links: [pr(3651 + i)],
+          links: [pr(3651 + i), pr(3700 + i)],
         }),
       ),
     )
     expect(body.length).toBeLessThan(MAX_BODY)
+    expect(body).not.toContain('CI green on main')
+    expect(body).not.toContain('next ')
     expect(body.split('\n').pop()).toBe('#fail #desk')
   })
 
@@ -256,23 +260,28 @@ describe('renderMerged', () => {
   test('escapes text an agent wrote, so a title cannot 400 the notice', () => {
     // `fix *auth* in _middleware_` unescaped makes Telegram reject the whole
     // message. Notice would then retry as plain text, silently losing the
-    // formatting instead of the notice — so escape here, once.
+    // formatting instead of the notice — so escape here, once. An unescaped
+    // `*` 400s the notice. Items are not the insight, so they are not rendered.
     const body = renderMerged([
       job({
         task: 'desk:github-issues',
-        headline: 'fix *auth* race',
+        headline: 'fix *auth* in _middleware_',
         items: ['a_b.c'],
       }),
     ])
-    expect(body).toContain('fix \\*auth\\* race')
-    expect(body).toContain('a\\_b\\.c')
+    expect(body).toContain('fix \\*auth\\* in \\_middleware\\_')
+    expect(body).not.toContain('a_b.c')
+    expect(body).not.toContain('a\\_b')
   })
 
-  test('links from every job are collected, and capped', () => {
+  test('each job contributes at most one link', () => {
+    // A merged notice cannot grow a link list. Each job shows one link: the
+    // first pull if it has one, otherwise its first link, even when that
+    // first link is not a pull. Two jobs with several links yield two lines.
     const body = renderMerged([
       job({
         task: 'desk:github-issues',
-        links: [['PR #1', 'https://example.com/1']],
+        links: [['#1', 'https://github.com/o/aidr/issues/1'], pr(9), pr(10)],
       }),
       job({
         task: 'local:deps',
@@ -285,28 +294,51 @@ describe('renderMerged', () => {
       }),
     ])
     const lines = body.split('\n').filter((l) => l.includes(']('))
-    expect(lines).toHaveLength(5)
+    expect(lines).toEqual([
+      '  • [PR \\#9](https://github.com/o/aidr/pull/9)',
+      '  • [dep a](https://example.com/a)',
+    ])
+    // Both pulls on the first job count, not only the one link it shows.
+    expect(body.split('\n')[0]).toContain('· 2 PRs')
+  })
+
+  test('the header counts distinct pull URLs on the shown jobs', () => {
+    // The same PR linked from two jobs is one PR, not two.
+    const shared = pr(7)
+    const body = renderMerged([
+      job({ task: 'a', links: [shared] }),
+      job({ task: 'b', links: [shared] }),
+    ])
+    expect(body.split('\n')[0]).toBe('🟢 *ok* 2 jobs · 2 ok · 1 PR')
   })
 
   test('a long job is summarised rather than pasted', () => {
-    const items = Array.from(
-      { length: MAX_ITEMS_PER_JOB + 3 },
-      (_, i) => `item ${i}`,
-    )
-    const body = renderMerged([job({ task: 'desk:github-issues', items })])
-    expect(body).toContain(`… \\+3 more`)
-    expect(body.split('\n').filter((l) => l.startsWith('  • ')).length).toBe(
-      MAX_ITEMS_PER_JOB + 1,
-    )
+    // Items are the play-by-play. The headline is the insight, so none of
+    // the bullets are rendered, including the old "+N more" overflow.
+    const items = ['item 0', 'item 1', 'item 2', 'item 3', 'item 4', 'item 5']
+    const body = renderMerged([
+      job({ task: 'desk:github-issues', headline: 'shipped the fix', items }),
+    ])
+    for (const item of items) expect(body).not.toContain(item)
+    expect(body).toContain('shipped the fix')
   })
 
   test('more jobs than fit are counted, not dropped silently', () => {
+    // Pulls that exist only on a hidden job are not part of the notice, so
+    // they do not add a PR count to the header.
     const body = renderMerged(
       Array.from({ length: MAX_JOBS + 2 }, (_, i) =>
-        job({ task: `local:j${i}` }),
+        job({
+          task: `local:j${i}`,
+          links:
+            i >= MAX_JOBS
+              ? [['PR #1', `https://github.com/o/r/pull/${i}`]]
+              : [],
+        }),
       ),
     )
     expect(body).toContain('• … \\+2 more jobs')
+    expect(body.split('\n')[0]).not.toContain('PR')
   })
 
   test('no reports render as nothing at all', () => {
@@ -327,9 +359,9 @@ describe('fingerprint', () => {
   })
 
   test('fields that move on their own do not change the hash', () => {
-    // `next Thu 07:00` advances at every schedule boundary and the duration
-    // changes on every re-fire of the same fragment. Hashing either resent the
-    // same paragraph, which is the bug.
+    // `nextAt` rolls with the schedule and duration changes on every re-fire
+    // of the same fragment. Neither is something the manager wrote. Hashing
+    // either resent a notice whose words had not changed.
     const base = { task: 't', nextAt: NEXT, durationMs: 7 * 60_000 }
     expect(fingerprint([job(base)])).toBe(
       fingerprint([
@@ -400,10 +432,11 @@ describe('sendReports', () => {
     })
     expect(again.sent).toBe(false)
     expect(again.reason).toBe('unchanged since last notice')
-    // One send, and the body it stood down on differs from the one it sent — so
-    // this cannot pass by the render having stopped moving.
+    // Next is not on the notice, so the stood-down body is the same text. The
+    // fingerprint still ignores `nextAt`: hashing it would send again for a
+    // paragraph that did not change.
     expect(bodies).toHaveLength(1)
-    expect(again.body).not.toBe(bodies[0])
+    expect(again.body).toBe(bodies[0])
   })
 
   test('a changed level sends again', async () => {
