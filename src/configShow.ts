@@ -1,7 +1,6 @@
 import { relative, resolve } from 'node:path'
 import { type DeskConfig, loadDeskConfig } from './config'
 import { applyDefaults } from './defaults'
-import type { Discovered } from './discover'
 import { resolveConfig } from './layers'
 import { textTable } from './table'
 
@@ -85,8 +84,4 @@ export function explainTasks(repo: string): string {
     String(t.maxChildren ?? 5),
   ])
   return textTable(['JOB', 'LADDER', 'PERM', 'CRON', 'MAX'], rows)
-}
-
-export function explainDesk(desk: Discovered): string {
-  return explainConfig(desk.repo)
 }
