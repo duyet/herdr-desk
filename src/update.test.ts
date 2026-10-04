@@ -6,6 +6,7 @@ import { startDaemon } from './daemon'
 import { validateDeskJson } from './schema'
 import {
   autoUpdateEnabled,
+  changelogLines,
   checkDue,
   checkForUpdate,
   compareVersions,
@@ -72,6 +73,7 @@ describe('checkForUpdate', () => {
     source: async () => source as typeof github,
     latest: async () => 'v0.2.0',
     installed: () => '0.1.6',
+    notes: async () => [{ tag: 'v0.2.0', body: '* **notify:** shorter texts' }],
   })
 
   test('a local link is never applicable', async () => {
@@ -83,6 +85,11 @@ describe('checkForUpdate', () => {
   test('a pinned ref is never moved', async () => {
     const r = await checkForUpdate(deps({ ...github, requestedRef: 'v0.1.6' }))
     expect(r.blocked).toContain('pinned')
+  })
+
+  test('attaches a compact changelog when a release is newer', async () => {
+    const r = await checkForUpdate(deps())
+    expect(r.changes).toEqual(['0.2.0 notify: shorter texts'])
   })
 
   test('parses its own entry from herdr plugin list', () => {
@@ -103,6 +110,47 @@ describe('checkForUpdate', () => {
       requestedRef: undefined,
       pluginRoot: '/x',
     })
+  })
+})
+
+describe('changelogLines', () => {
+  const body = [
+    '### Features',
+    '',
+    '* **notify:** write telegram notices like a short text ([20c6bff](https://github.com/duyet/herdr-desk/commit/20c6bff))',
+    '* **cli:** add next, trigger, pause and resume ([#52](https://github.com/duyet/herdr-desk/issues/52)) ([750ccb7](https://github.com/duyet/herdr-desk/commit/750ccb7))',
+    '',
+    '### Bug Fixes',
+    '',
+    '* **daemon:** a signal-driven stop leaves a line ([#62](https://github.com/duyet/herdr-desk/issues/62)) ([d7a79af](https://github.com/duyet/herdr-desk/commit/d7a79af))',
+  ].join('\n')
+
+  test('keeps scope and subject, drops links, issues, and SHAs', () => {
+    expect(changelogLines('0.1.6', [{ tag: 'v0.1.7', body }])).toEqual([
+      '0.1.7 notify: write telegram notices like a short text',
+      '0.1.7 cli: add next, trigger, pause and resume',
+      '0.1.7 daemon: a signal-driven stop leaves a line',
+    ])
+  })
+
+  test('skips the installed release and older ones', () => {
+    expect(
+      changelogLines('0.1.7', [
+        { tag: 'v0.1.7', body },
+        { tag: 'v0.1.6', body: '* **old:** stays out' },
+      ]),
+    ).toEqual([])
+  })
+
+  test('caps the list and counts the rest', () => {
+    const many = Array.from({ length: 10 }, (_, i) => `* item ${i}`).join('\n')
+    const lines = changelogLines('0.1.0', [{ tag: 'v0.1.1', body: many }], 3)
+    expect(lines).toEqual([
+      '0.1.1 item 0',
+      '0.1.1 item 1',
+      '0.1.1 item 2',
+      '+7 more',
+    ])
   })
 })
 

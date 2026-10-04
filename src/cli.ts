@@ -885,6 +885,9 @@ async function main() {
     const check = await checkForUpdate()
     saveLastCheck(new Date(), `manual ${check.installed} -> ${check.latest}`)
     const what = `${check.installed} -> ${check.latest}`
+    const showChanges = () => {
+      for (const line of check.changes ?? []) console.log(`  ${line}`)
+    }
     if (!check.newer) {
       console.log(
         `already current (${check.installed}, latest ${check.latest})`,
@@ -895,12 +898,15 @@ async function main() {
       console.log(
         `update available ${what}${check.blocked ? ` (not applicable: ${check.blocked})` : ''}`,
       )
+      showChanges()
       return
     }
     if (check.blocked) {
       console.log(`update available ${what}, refusing: ${check.blocked}`)
+      showChanges()
       process.exit(1)
     }
+    showChanges()
     // Stop, then install, then start: installing under a running daemon leaves
     // it reading files that are being replaced.
     takeUpdateLock()

@@ -65,6 +65,44 @@ If it comes up after a daily slot, it still fires that slot once the same
 day. `start` / `on-focus` restart the process when plugin source is newer
 than the live daemon (stale code after a plugin pull).
 
+## Update
+
+There is no `herdr plugin update`. These reinstall the plugin and restart
+the daemon. `config.json`, `notify.json`, and run history stay where they are.
+
+Latest GitHub release (what the daily auto-update does). Run the desk
+binary. `herdr plugin action invoke` answers with Herdr's JSON envelope
+and hides this text inside a log.
+
+```sh
+desk=$(echo "$HOME"/.config/herdr/plugins/github/herdr-desk-*/bin/desk)
+"$desk" update --check
+"$desk" update
+```
+
+`update --check` only prints. Both print a short changelog of what is
+newer than the installed version (eight lines, then a count):
+
+```text
+update available 0.1.6 -> v0.1.7
+  0.1.7 notify: write telegram notices like a short text
+  0.1.7 daemon: a signal-driven stop leaves a line
+  +12 more
+```
+
+`update` stops the daemon, installs `duyet/herdr-desk`, and starts it
+again. It moves only when a release tag is newer than the installed
+version. A linked checkout or a `--ref` pin refuses. `"autoUpdate": false`
+in the machine `config.json` stops the daily run; the commands above still
+work.
+
+Tip of `main`, before that tag exists:
+
+```sh
+herdr plugin install duyet/herdr-desk --yes
+herdr plugin action invoke herdr-desk.start
+```
+
 ## Paste to a coding agent
 
 Lightweight. Do not copy this plugin into the target repo. Use **today’s
@@ -659,11 +697,8 @@ worktrees of the same parent. Writes under `stateDir/<YYYY-MM-DD>/`.
 and updates `CHANGELOG.md`. `feat` / `fix` bump the patch, not 0.2.
 Merge that PR yourself — do not auto-merge it.
 
-There is no `herdr plugin update` in Herdr v1, so upgrading means reinstalling.
-Config and state live outside the plugin checkout, so a reinstall keeps both.
-`desk update [--check]` does the reinstall against the latest GitHub release,
-and the daemon does it once a day unless the machine `config.json` sets
-`"autoUpdate": false`. See [docs/setup.md](docs/setup.md#upgrading).
+Upgrading means reinstalling. See [Update](#update). The daemon does that
+once a day unless the machine `config.json` sets `"autoUpdate": false`.
 `bun src/cli.ts status` reports the installed version.
 
 ## Dev
