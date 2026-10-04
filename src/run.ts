@@ -7,6 +7,7 @@ import {
   type TaskConfig,
 } from './config'
 import { dayKey } from './day'
+import { clearFailures, recordAnnounced, shouldAnnounce } from './failures'
 import type { NoticeLevel } from './format'
 import {
   herdrCall,
@@ -119,6 +120,10 @@ export async function runTask(opts: {
   const task = resolveTask(config, opts.taskId)
   try {
     const result = await execute(config, repo, task, opts.trigger)
+    // Reaching the manager means the job is no longer broken in the way it was.
+    // Clearing here is what makes the *next* fault on this job announce, instead
+    // of being held back as a repeat of one that is already over.
+    if (result.spawned || result.prompted) clearFailures(repo, task.id)
     await announce(repo, task, result)
     return result
   } catch (err) {
@@ -159,6 +164,11 @@ export async function runTask(opts: {
  * Skips are still recorded in the ledger and printed to stdout, so `status` and
  * `history` answer "why did this not run" without a phone alert.
  *
+ * A fault that cannot fix itself is said once and then held back: this runs per
+ * tick, so a pane that Herdr killed and no one will fix announces the same
+ * sentence every 30 minutes for as long as it lasts. The first one always goes
+ * out, and `failures.ts` decides whether this one is that first one.
+ *
  * Best-effort in the strongest sense: it resolves rather than rejects, and its
  * result is never recorded as a run outcome. A failed notice must not be able
  * to turn a successful run into a failed one, because that self-amplifies into
@@ -176,12 +186,22 @@ async function announce(
       taskNotify: task.notify,
     })
     if (!notifyConfig.enabled) return
+    // Keyed on the line the reader is shown, not on the raw error. That line is
+    // the identity of the notice — two faults that differ only past the cap are
+    // one message to anyone reading it — and hashing the raw text would let a
+    // detail nobody can see decide whether the fault is worth repeating.
+    const said = briefReason(result.error ?? result.skipped ?? '')
+    if (!shouldAnnounce(repo, task.id, said)) return
     // `announceable` already established there is something to say, so the
     // body is never null here.
-    await notify(
+    const sent = await notify(
       { message: announceBody(result) as string, repo, label: task.id },
       notifyConfig,
     )
+    // Recorded only now that the notice has landed. A send that failed leaves the
+    // fault armed for the next tick, because a repeat nobody ever read is not a
+    // repeat.
+    if (sent.sent) recordAnnounced(repo, task.id, said)
   } catch {
     // Intentionally silent. Reaching here means notify misbehaved; the run
     // outcome is already recorded and must not be altered by it.
