@@ -9,6 +9,7 @@ import {
 } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
+import { formatLocal } from '../day'
 import { pluginStateDir } from '../paths'
 import { textTable } from '../table'
 import { claudeReader } from './claude'
@@ -230,9 +231,7 @@ export function formatDuration(ms: number): string {
 }
 
 export function localStamp(iso: string): string {
-  const d = new Date(iso)
-  const p = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+  return formatLocal(new Date(iso))
 }
 
 export function sessionLength(r: SessionRow): string {

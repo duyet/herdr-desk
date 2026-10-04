@@ -1,4 +1,5 @@
 import { cronNext } from './cron'
+import { formatLocal } from './day'
 import { describeJob } from './describe'
 import type { Discovered } from './discover'
 import { failureStreak, loadRuns } from './history'
@@ -8,8 +9,7 @@ import { textTable } from './table'
 
 function fmt(d: Date | null): string {
   if (!d) return '-'
-  const p = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+  return formatLocal(d)
 }
 
 export function formatSchedule(

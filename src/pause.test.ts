@@ -3,6 +3,7 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
+  describePause,
   emptyPause,
   isPaused,
   loadPaused,
@@ -60,6 +61,14 @@ describe('parseUntil', () => {
     )
     expect(() => parseUntil('2026-09-01', NOW)).toThrow('past')
     expect(() => parseUntil('tomorrow', NOW)).toThrow('use YYYY')
+  })
+})
+
+describe('describePause', () => {
+  test('stamps until as a padded local date then time', () => {
+    expect(
+      describePause({ until: new Date(2026, 0, 5, 8, 5).toISOString() }),
+    ).toBe('paused until 2026-01-05 08:05')
   })
 })
 
