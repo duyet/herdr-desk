@@ -21,6 +21,7 @@ import {
 } from './format'
 import { type NotifyConfig, notify } from './notify'
 import { pluginStateDir } from './paths'
+import { textTable } from './table'
 
 /**
  * The hub: one place that knows what every job on the machine is doing.
@@ -636,20 +637,6 @@ export function formatHub(s: HubSnapshot): string {
   return [
     `${head}`,
     '',
-    textTableLines(['STATE', 'JOB', 'AGE', 'INSIGHT'], rows),
-  ].join('\n')
-}
-
-/** Local copy of the table renderer, to keep this module free of CLI imports. */
-function textTableLines(headers: string[], rows: string[][]): string {
-  const widths = headers.map((h, i) =>
-    Math.max(h.length, ...rows.map((r) => (r[i] ?? '').length)),
-  )
-  const line = (cells: string[]) =>
-    `| ${cells.map((c, i) => (c ?? '').padEnd(widths[i])).join(' | ')} |`
-  return [
-    line(headers),
-    `| ${widths.map((w) => '-'.repeat(w)).join(' | ')} |`,
-    ...rows.map((r) => line(r)),
+    textTable(['STATE', 'JOB', 'AGE', 'INSIGHT'], rows),
   ].join('\n')
 }
