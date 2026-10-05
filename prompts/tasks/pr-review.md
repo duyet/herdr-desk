@@ -107,6 +107,13 @@ The bar is this repo's, from `{{repo}}/AGENTS.md` and `prompts/identity.md`:
 - Push to the PR's head branch: `git push origin HEAD:refs/heads/<head-ref>`
   from the child worktree. Do not open a second PR for the same work, and do
   not merge.
+- **A PR from a fork cannot be pushed to, and the event says so**: `headFork` is
+  `true` on it. Do not fight it and do not try to work around it with a
+  maintainer token. Leave the review as a comment
+  (`gh pr review <n> --comment --body-file <file>`), say in the report that the
+  finding is on a branch the desk cannot write to, and let a human decide. A
+  watcher that pushes to a fork it happens to have access to is a desk editing
+  someone else's repository.
 
 ## CI
 

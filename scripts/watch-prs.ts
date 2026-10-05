@@ -35,7 +35,7 @@ type Pr = {
   html_url: string
   created_at: string
   user: { login: string; type: string }
-  head: { ref: string }
+  head: { ref: string; repo?: { full_name?: string; fork?: boolean } | null }
   base: { ref: string }
 }
 
@@ -149,6 +149,11 @@ function toEvent(pr: Pr): Record<string, unknown> {
     author: pr.user.login,
     base: pr.base.ref,
     head: pr.head.ref,
+    // Whether the desk can push a fix to this branch at all. A PR from a fork
+    // cannot be pushed to, and the reviewer has to know that from the event
+    // rather than by discovering it from a rejected push.
+    headRepo: pr.head.repo?.full_name ?? null,
+    headFork: pr.head.repo?.fork === true,
   }
 }
 
