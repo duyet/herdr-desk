@@ -129,6 +129,11 @@ export type DeskConfig = {
    * cannot silently start steering a repo.
    */
   group?: boolean
+  /**
+   * The repo these jobs are keyed on, when it is not the directory the config
+   * was found in. `discoverDesks` and every state file key on this value, so a
+   * consumer that resolves it differently is addressing a different queue.
+   */
   repo?: string
   extra?: string
   playbook?: string

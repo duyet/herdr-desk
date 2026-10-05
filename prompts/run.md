@@ -125,15 +125,20 @@ When the run is done, write `changes.md`. Leave the project Space, your own
 manager worktree, and any child that still has work open.
 
 <!-- events -->
-## Woken by an event
+## Repo events on this run
 
-This run was woken by a repo event, not by a slot. `{{eventCount}}` event(s)
-waited, and they are in the `# Event` section below with their fields in
+This run was triggered by `{{triggerKind}}`, and `{{eventCount}}` repo event(s)
+were waiting. They are in the `# Event` section below with their fields in
 `{{eventPath}}`.
 
-Work those events and stop. Do not go looking for the rest of the backlog — the
-slot that sweeps it is a separate run, and a run that does both spends the
-whole budget on work nobody woke you for.
+If `{{triggerKind}}` is `event`, the events woke this run: work them and stop.
+Do not go looking for the rest of the backlog. The slot that sweeps it is a
+separate run, and a run that does both spends the whole budget on work nobody
+woke you for.
+
+If `{{triggerKind}}` is `cron` or `manual`, the events arrived while another
+path was working, and this run drains them on the way through. Do the run's
+normal work *and* handle the events; they are already yours.
 
 If the events say there is nothing to do — already fixed, already merged, not
 yours — write `status.md` with `level: skip` and stop. That is a real answer,

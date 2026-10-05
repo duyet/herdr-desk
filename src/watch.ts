@@ -155,6 +155,24 @@ export function watchKey(repo: string, taskId: string): string {
   return `${repo}::${taskId}`
 }
 
+/**
+ * The repo path a task's state is keyed on.
+ *
+ * `config.repo` wins over the directory the config was found in, because that
+ * is what `discoverDesks` hands the daemon as `Discovered.repo` — so it is also
+ * what the daemon writes `watch.json` under. A CLI that keys on the directory
+ * instead is not reading a different spelling of the same state; it is reading a
+ * key nothing writes, which is how `watch status` reported `never polled` for a
+ * task whose events were sitting in the file and `watch reset` reported success
+ * while resetting nothing.
+ *
+ * One helper, both callers: `watchedRows` and `oneWatchedTask` in `cli.ts` and
+ * `tryLoad` in `discover.ts` all resolve the key through here.
+ */
+export function watchRepo(config: { repo?: string }, root: string): string {
+  return config.repo ?? root
+}
+
 export function watchStatePath(): string {
   return join(pluginStateDir(), 'watch.json')
 }

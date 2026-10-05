@@ -22,7 +22,7 @@ import {
 } from './daemon'
 import { collect, dashboardJson, render } from './dashboard'
 import { dayKey } from './day'
-import { discoverDesks, formatScan } from './discover'
+import { discoverAll, discoverDesks, formatScan } from './discover'
 import { defaultHerdrBin } from './herdr'
 import { formatHistory, loadRuns, loadRunsSince } from './history'
 import { serve } from './http'
@@ -113,6 +113,7 @@ import {
   resetTask,
   runWatchCommand,
   saveWatchState,
+  watchRepo,
 } from './watch'
 
 function usage(): never {
@@ -135,9 +136,9 @@ function usage(): never {
   herdr-desk board --html [FILE]
   herdr-desk history [N]
   herdr-desk watch --repo DIR [--task ID]
-  herdr-desk watch status
+  herdr-desk watch status [--repo DIR] [--task ID]
   herdr-desk watch test --repo DIR [--task ID]
-  herdr-desk watch reset --repo DIR [--task ID]
+  herdr-desk watch reset [--repo DIR] [--task ID]
   herdr-desk cleanup [--dry-run]
   herdr-desk last
   herdr-desk sessions index
@@ -244,7 +245,11 @@ async function watchedRows(
   return desks.flatMap((d) =>
     d.config.tasks
       .filter((t) => t.watch)
-      .map((t) => ({ repo: d.repo, taskId: t.id })),
+      // `watchRepo`, not `d.repo`: on the `--repo` path the row above is a
+      // hand-built desk whose `repo` is the directory, and a config naming a
+      // different `repo` keys its state somewhere else — the same key the tick
+      // writes, or the CLI reads a queue that does not exist.
+      .map((t) => ({ repo: watchRepo(d.config, d.repo), taskId: t.id })),
   )
 }
 
@@ -256,22 +261,40 @@ async function oneWatchedTask(
   const root = resolve(repo ?? process.cwd())
   const desk = loadDeskConfig(root)
   const watched = desk.tasks.filter((t) => t.watch)
-  const hit = taskId
-    ? watched.find((t) => t.id === taskId)
-    : watched.length === 1
-      ? watched[0]
-      : undefined
-  if (!hit?.watch) {
-    const known = desk.tasks.map((t) => t.id).join(', ')
+  if (taskId) {
+    // `resolveTask` says `unknown task 'x'` for an id the desk does not have.
+    // "pass --task" for the same id reads as a forgotten flag rather than a
+    // wrong one, and sends the reader looking at their command line instead of
+    // their config.
+    const hit = desk.tasks.find((t) => t.id === taskId)
+    if (!hit) throw new Error(`unknown task '${taskId}'`)
+    if (!hit.watch) {
+      throw new Error(
+        `task '${taskId}' has no 'watch' block (watched: ${watched.map((t) => t.id).join(', ')})`,
+      )
+    }
+    return { repo: watchRepo(desk, root), taskId: hit.id, watch: hit.watch }
+  }
+  if (watched.length === 0) {
     throw new Error(
-      watched.length === 0
-        ? `no task in ${root} has a 'watch' block (tasks: ${known})`
-        : `pass --task (watched: ${watched.map((t) => t.id).join(', ')})`,
+      `no task in ${root} has a 'watch' block (tasks: ${desk.tasks.map((t) => t.id).join(', ')})`,
     )
   }
-  // `config.repo` is what the tick keys on when the config names a different
-  // path, so the CLI has to agree with it or the two address different queues.
-  return { repo: desk.repo ?? root, taskId: hit.id, watch: hit.watch }
+  if (watched.length > 1) {
+    throw new Error(
+      `pass --task (watched: ${watched.map((t) => t.id).join(', ')})`,
+    )
+  }
+  const only = watched[0]
+  if (!only?.watch) {
+    // Unreachable given the checks above; kept so the return type is honest
+    // rather than asserted with a non-null assertion.
+    throw new Error(`no watched task in ${root}`)
+  }
+  // `watchRepo`, not `root`: the tick keys on `config.repo` when the config
+  // names a different path, so the CLI has to agree or the two address
+  // different queues.
+  return { repo: watchRepo(desk, root), taskId: only.id, watch: only.watch }
 }
 
 /**
@@ -283,11 +306,11 @@ async function oneWatchedTask(
  * because someone looked at it. It parses the same `parseWatchOutput` the tick
  * uses, so what it prints is what the desk would queue.
  */
-async function watchOnce(argv: string[]): Promise<void> {
-  const { repo, taskId, watch } = await oneWatchedTask(
-    arg('--repo', argv),
-    arg('--task', argv),
-  )
+async function watchOnce(
+  repoArg: string | undefined,
+  taskArg: string | undefined,
+): Promise<void> {
+  const { repo, taskId, watch } = await oneWatchedTask(repoArg, taskArg)
   console.log(`watch ${taskId}  ${repo}`)
   console.log(`  argv  ${watch.command.join(' ')}`)
   const result = await runWatchCommand({ repo, taskId, watch })
@@ -325,11 +348,11 @@ async function watchOnce(argv: string[]): Promise<void> {
  * the order the questions get asked in. Writes no state, for the same reason
  * `watch` does.
  */
-async function watchTest(argv: string[]): Promise<void> {
-  const { repo, taskId, watch } = await oneWatchedTask(
-    arg('--repo', argv),
-    arg('--task', argv),
-  )
+async function watchTest(
+  repoArg: string | undefined,
+  taskArg: string | undefined,
+): Promise<void> {
+  const { repo, taskId, watch } = await oneWatchedTask(repoArg, taskArg)
   console.log(`watch test ${taskId}  ${repo}`)
   console.log(`  argv   ${watch.command.join(' ')}`)
   console.log(`  cwd    ${repo}`)
@@ -367,16 +390,77 @@ async function watchTest(argv: string[]): Promise<void> {
  */
 const WATCH_SUBS = new Set(['status', 'test', 'reset'])
 
+const WATCH_USAGE =
+  'usage: herdr-desk watch [--repo DIR] [--task ID] | watch status [--repo DIR] [--task ID] | watch test --repo DIR [--task ID] | watch reset --repo DIR [--task ID]'
+
+/**
+ * A watch-family flag's value, or the reason it has none.
+ *
+ * Every flag in this family *narrows* scope, so a valueless one has to be an
+ * error. `arg` answers `undefined` both for "absent" and for "present with
+ * nothing after it", and reading those the same way meant `desk watch reset
+ * --repo DIR --task` — a flag written to reset one task — reset every watched
+ * task in the repo and printed `reset a, b, c` as if that were what was asked
+ * for. The next token being another flag counts as valueless too, for the same
+ * reason: `--task --repo DIR` is a typo, not a task id.
+ */
+function watchFlag(
+  flag: string,
+  argv: string[],
+): { value: string | undefined; error: string | null } {
+  const i = argv.indexOf(flag)
+  if (i === -1) return { value: undefined, error: null }
+  const v = argv[i + 1]
+  if (v === undefined || v.startsWith('--')) {
+    return { value: undefined, error: `${flag} needs a value` }
+  }
+  return { value: v, error: null }
+}
+
+/**
+ * Read `--repo` and `--task`, or exit 2 rather than run with a widened scope.
+ *
+ * `--flag=value` is not a form this CLI parses anywhere, so `--task=local:x`
+ * would read as no `--task` at all — and "no filter" is the wide reading. Named
+ * here because the failure it produces is silent and the opposite of the intent.
+ */
+function watchFlags(argv: string[]): {
+  repo: string | undefined
+  task: string | undefined
+} {
+  const joined = argv.find((a) => /^--[^=]+=/.test(a))
+  const repo = watchFlag('--repo', argv)
+  const task = watchFlag('--task', argv)
+  const bad = joined
+    ? `${joined.split('=')[0]}=<value> is not parsed here; write ${joined.split('=')[0]} <value>`
+    : (repo.error ?? task.error)
+  if (bad) {
+    console.error(`${bad}\n${WATCH_USAGE}`)
+    process.exit(2)
+  }
+  return { repo: repo.value, task: task.value }
+}
+
 async function watchCommand(argv: string[]): Promise<void> {
-  // `argv[0]` is `watch` itself, so the subcommand is `argv[1]` — and only if it
-  // is one. `desk watch --repo DIR` has a flag there instead, and must read as
-  // the one-pass form rather than as a subcommand called `--repo`.
-  const sub = WATCH_SUBS.has(argv[1] ?? '') ? argv[1] : undefined
-  const repo = arg('--repo', argv)
-  if (sub === undefined) return watchOnce(argv)
+  // `argv[0]` is `watch` itself, so the subcommand is `argv[1]`. A flag there
+  // instead (`desk watch --repo DIR`) is the one-pass form, not a subcommand
+  // called `--repo`. Anything else that is not a bare flag *is* claimed as a
+  // subcommand, and an unknown one is a usage error: falling through to the
+  // one-pass form ran a real poll pass and ignored the stray word, so a typo
+  // cost a repo script run and told the reader nothing.
+  const head = argv[1]
+  const sub = head !== undefined && !head.startsWith('--') ? head : undefined
+  if (sub !== undefined && !WATCH_SUBS.has(sub)) {
+    console.error(`unknown watch subcommand '${sub}'\n${WATCH_USAGE}`)
+    process.exit(2)
+  }
+  const { repo, task } = watchFlags(argv)
+  if (sub === undefined) return watchOnce(repo, task)
   if (sub === 'status') {
     const state = loadWatchState()
-    const rows = await watchedRows(repo)
+    const rows = (await watchedRows(repo)).filter(
+      (r) => !task || r.taskId === task,
+    )
     if (rows.length === 0) {
       console.log(repo ? 'no watched tasks' : 'no watched desks')
       return
@@ -384,28 +468,22 @@ async function watchCommand(argv: string[]): Promise<void> {
     console.log(formatWatchStatus(state, rows))
     return
   }
-  if (sub === 'test') return watchTest(argv)
-  if (sub === 'reset') {
-    const state = loadWatchState()
-    const rows = await watchedRows(repo)
-    const only = arg('--task', argv)
-    const targets = only ? rows.filter((r) => r.taskId === only) : rows
-    if (targets.length === 0) {
-      console.error('no watched task to reset')
-      process.exit(1)
-    }
-    const now = new Date()
-    for (const { repo: r, taskId } of targets) resetTask(state, r, taskId, now)
-    saveWatchState(state, now)
-    console.log(
-      `reset ${targets.map((t) => t.taskId).join(', ')} — pending and dedupe forgotten`,
+  if (sub === 'test') return watchTest(repo, task)
+  const state = loadWatchState()
+  const rows = await watchedRows(repo)
+  const targets = task ? rows.filter((r) => r.taskId === task) : rows
+  if (targets.length === 0) {
+    console.error(
+      task ? `no watched task '${task}' to reset` : 'no watched task to reset',
     )
-    return
+    process.exit(1)
   }
-  console.error(
-    'usage: herdr-desk watch [--repo DIR] [--task ID] | watch status | watch test | watch reset',
+  const now = new Date()
+  for (const { repo: r, taskId } of targets) resetTask(state, r, taskId, now)
+  saveWatchState(state, now)
+  console.log(
+    `reset ${targets.map((t) => t.taskId).join(', ')} — pending and dedupe forgotten`,
   )
-  process.exit(2)
 }
 
 /**
@@ -565,7 +643,11 @@ async function main() {
   }
 
   if (cmd === 'scan') {
-    console.log(formatScan(await discoverDesks()))
+    // Reports the repos it could not read, not just the ones that loaded: `scan`
+    // is what a person runs to answer "is this repo even being read", so a repo
+    // missing from it with no error is the #97 shape all over again.
+    const { desks, failed } = await discoverAll()
+    console.log(formatScan(desks, failed))
     return
   }
 
@@ -585,7 +667,7 @@ async function main() {
   }
 
   if (cmd === 'validate') {
-    const desks = await discoverDesks()
+    const { desks, failed } = await discoverAll()
     const problems: string[] = []
     for (const d of desks) {
       const desk = loadDeskConfig(d.repo)
@@ -596,6 +678,12 @@ async function main() {
       problems.push(
         ...unapprovedPlaybooks(desk.tasks).map((p) => `${desk.name}: ${p}`),
       )
+    }
+    // A repo that failed to load is the loudest thing this command can say, and
+    // it exits non-zero: before #97 a broken config was simply not visited here,
+    // so `validate` reported `0 errors` over a desk that was not being read.
+    for (const f of failed) {
+      problems.push(`${f.repo}: ${f.error.replace(/\n/g, '\n  ')}`)
     }
     if (problems.length) {
       console.error(problems.join('\n'))
@@ -609,8 +697,17 @@ async function main() {
 
   if (cmd === 'status') {
     const pid = daemonPid()
+    const { desks, failed } = await discoverAll()
     console.log(`daemon: ${pid ? `running (pid ${pid})` : 'stopped'}`)
-    console.log(formatSchedule(await discoverDesks(), new Date(), loadPaused()))
+    console.log(formatSchedule(desks, new Date(), loadPaused()))
+    // A count, not a table: `status` is what a phone notification carries, and
+    // the per-repo detail is one command away in `scan`. A desk that is not
+    // being read at all is otherwise a healthy machine doing nothing.
+    if (failed.length) {
+      console.log(
+        `${failed.length} desk(s) skipped: unreadable config (desk scan)`,
+      )
+    }
     return
   }
 
@@ -1177,7 +1274,10 @@ async function main() {
       }
       return
     }
-    console.log(formatScan(await discoverDesks()))
+    // Same reporting as `scan`: this renders the same list, so a repo missing
+    // from it should say why in both places rather than only one.
+    const { desks, failed } = await discoverAll()
+    console.log(formatScan(desks, failed))
     return
   }
 

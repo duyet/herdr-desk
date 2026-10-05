@@ -9,7 +9,7 @@
       "schedule": [],
       "maxChildren": 2,
       "watch": {
-        "command": ["bun", "scripts/watch-prs.ts"],
+        "command": ["bun", "scripts/watch-events.ts"],
         "intervalSec": 60,
         "timeoutSec": 45,
         "maxPending": 8
