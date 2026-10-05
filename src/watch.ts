@@ -29,11 +29,11 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs'
-import { isAbsolute, join, resolve } from 'node:path'
+import { join, resolve } from 'node:path'
 import type { WatchConfig } from './config'
 import { formatLocal } from './day'
 import { pluginStateDir } from './paths'
-import { looksLikePathArg } from './schema'
+import { insideRepo, looksLikePathArg } from './schema'
 
 /**
  * One event, as the script printed it.
@@ -427,26 +427,18 @@ export function resolveWatchArgv(
   const [head, ...rest] = command
   if (head === undefined) return { argv: [], error: 'command is empty' }
   if (!looksLikePathArg(head)) return { argv: [head, ...rest], error: null }
-  // Path-shaped: resolve against the repo root and refuse to leave it. The
-  // validator already rejects `../escape` in the repo's own file, but a group
+  // Path-shaped: it must resolve inside the repo, and it must exist in *this*
+  // checkout — the desk resolves config from the project root, never from a
+  // worktree child, so a relative path and an absolute one name the same file.
+  // The validator already refuses `../escape` in a repo's own file, but a group
   // layer's tasks are never validated, so this has to hold at run time too.
-  if (!isAbsolute(head)) {
-    const abs = resolve(repo, head)
-    if (abs !== resolve(repo) && !abs.startsWith(`${resolve(repo)}/`)) {
-      return {
-        argv: [],
-        error: `command[0] '${head}' must stay inside the repo`,
-      }
+  if (!insideRepo(repo, head)) {
+    return {
+      argv: [],
+      error: `command[0] '${head}' must stay inside the repo`,
     }
-    return { argv: [abs, ...rest], error: null }
   }
-  // An absolute path cannot be checked against a repo the desk did not open,
-  // but a watcher that reaches outside the checkout is a watcher the config was
-  // not allowed to write.
-  return {
-    argv: [head, ...rest],
-    error: `command[0] '${head}' must stay inside the repo`,
-  }
+  return { argv: [resolve(repo, head), ...rest], error: null }
 }
 
 export type WatchCommandResult = {

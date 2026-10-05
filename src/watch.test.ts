@@ -596,9 +596,21 @@ describe('command resolution', () => {
     expect(error).toContain('inside the repo')
   })
 
-  test('an absolute path is refused: a watcher may not reach out of the checkout', () => {
+  test('an absolute path outside the checkout is refused', () => {
     const { error } = resolveWatchArgv(REPO, ['/bin/echo'])
     expect(error).toContain('inside the repo')
+  })
+
+  test('an absolute path inside the checkout is allowed', () => {
+    // `validate` accepts one — `insideRepo` resolves an absolute path against
+    // the root and it lands inside — so the runner has to run it. Refusing here
+    // made a config that passes `desk validate` fail every poll, which is the
+    // worst kind of drift: the check said yes and the desk said no.
+    const { argv, error } = resolveWatchArgv(REPO, [
+      `${REPO}/scripts/watch-prs.ts`,
+    ])
+    expect(error).toBeNull()
+    expect(argv).toEqual([`${REPO}/scripts/watch-prs.ts`])
   })
 
   test('a bare name stays on PATH', () => {
