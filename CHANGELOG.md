@@ -3,6 +3,39 @@
 Versions stay on **0.1.x**. `feat` and `fix` bump the patch. Do not merge a
 1.0 or 0.2 release PR.
 
+## [0.1.8](https://github.com/duyet/herdr-desk/compare/v0.1.7...v0.1.8) (2026-10-05)
+
+
+### Features
+
+* **desk:** arm the PR watcher on this repo ([#92](https://github.com/duyet/herdr-desk/issues/92)) ([#95](https://github.com/duyet/herdr-desk/issues/95)) ([0b07915](https://github.com/duyet/herdr-desk/commit/0b079156e547c498f6e1428c8698679d247106b5))
+* **notify:** shorter notices and one dashboard for the tui and api ([#74](https://github.com/duyet/herdr-desk/issues/74)) ([679c65e](https://github.com/duyet/herdr-desk/commit/679c65ed6a033859b99ab521c817bfb8cfa50e1f))
+* **serve:** open the dashboard on the tailnet ([#87](https://github.com/duyet/herdr-desk/issues/87)) ([d49c171](https://github.com/duyet/herdr-desk/commit/d49c17105dfc4fa8541182ef4fdd335dc4cd38f9))
+* **update:** print a short changelog before install ([#75](https://github.com/duyet/herdr-desk/issues/75)) ([d8d653f](https://github.com/duyet/herdr-desk/commit/d8d653f6ae8b92bb1fc705e66ac5bb95501412b4))
+* **watch:** PR watcher and review playbook for [#92](https://github.com/duyet/herdr-desk/issues/92) ([#93](https://github.com/duyet/herdr-desk/issues/93)) ([f055cef](https://github.com/duyet/herdr-desk/commit/f055cef1195ec64e093e23c22ea7d5ced10b1acc))
+* **watch:** wake a desk task on repo events ([#94](https://github.com/duyet/herdr-desk/issues/94)) ([4b95e72](https://github.com/duyet/herdr-desk/commit/4b95e72134f0a40822ea9175cffdb56322d538c9))
+
+
+### Bug Fixes
+
+* **daemon:** measure downtime from the last tick, not local midnight ([#65](https://github.com/duyet/herdr-desk/issues/65)) ([05ccff0](https://github.com/duyet/herdr-desk/commit/05ccff045f2523b692b219afe041f30c8a495066))
+* **desk:** name the app checks that also report on a PR ([#72](https://github.com/duyet/herdr-desk/issues/72)) ([384e368](https://github.com/duyet/herdr-desk/commit/384e368113c08742b4fd5f4bd97861f0a4953cd1))
+* **desk:** name the real CI job and drop the --auto gate ([#71](https://github.com/duyet/herdr-desk/issues/71)) ([1eab579](https://github.com/duyet/herdr-desk/commit/1eab57981abeb5df25eb000e1244f681ae65fb7b))
+* **desk:** un-arm the watcher until a release carries it ([#96](https://github.com/duyet/herdr-desk/issues/96)) ([2bbfe3f](https://github.com/duyet/herdr-desk/commit/2bbfe3f0b9981dc62d3c060848eef87e3822f297))
+* **report:** fingerprint the reports, not the rendered notice ([#70](https://github.com/duyet/herdr-desk/issues/70)) ([0c14b79](https://github.com/duyet/herdr-desk/commit/0c14b79dca6a06c820c19b37f4b39fe50b6c0776)), closes [#69](https://github.com/duyet/herdr-desk/issues/69)
+* **run:** announce a fault that cannot fix itself once ([#88](https://github.com/duyet/herdr-desk/issues/88)) ([b4dbd65](https://github.com/duyet/herdr-desk/commit/b4dbd6572026e1250f3bab62436af7996f618888))
+* **run:** name the real base-ref git, and pin --short ([#63](https://github.com/duyet/herdr-desk/issues/63)) ([ec36bd6](https://github.com/duyet/herdr-desk/commit/ec36bd6ba403e0be3fec4e1cc04412f5fbb1ea37))
+
+
+### Documentation
+
+* a merged config fix stays inert until the checkout pulls ([#73](https://github.com/duyet/herdr-desk/issues/73)) ([9b5eb9d](https://github.com/duyet/herdr-desk/commit/9b5eb9db255f88e8099983bc8b854789e8f1058c))
+* **ci:** correct release-please CI run counts and approval evidence ([#67](https://github.com/duyet/herdr-desk/issues/67)) ([8d134c3](https://github.com/duyet/herdr-desk/commit/8d134c386b6382c7fd60d1ca63c42873ddedd5c6)), closes [#64](https://github.com/duyet/herdr-desk/issues/64)
+* **ci:** date the approvals from run_started_at, not created_at ([#68](https://github.com/duyet/herdr-desk/issues/68)) ([73ad459](https://github.com/duyet/herdr-desk/commit/73ad459337d54cee0102f99d5752988257061160)), closes [#64](https://github.com/duyet/herdr-desk/issues/64)
+* **ci:** explain why release-please PRs never run CI ([#66](https://github.com/duyet/herdr-desk/issues/66)) ([2ed085f](https://github.com/duyet/herdr-desk/commit/2ed085f9c2ca3ce30d503030acf3124eee7cd54b))
+* **prune:** stop claiming the weekly run deletes branches ([#90](https://github.com/duyet/herdr-desk/issues/90)) ([5d1461d](https://github.com/duyet/herdr-desk/commit/5d1461de88575e31071b2403ebbe587677058cf8))
+* refresh the release CI tally and say why it goes red again ([#78](https://github.com/duyet/herdr-desk/issues/78)) ([666b140](https://github.com/duyet/herdr-desk/commit/666b14082d1850cd850b5eedd9b254a60c6a2b87))
+
 ## [0.1.7](https://github.com/duyet/herdr-desk/compare/v0.1.6...v0.1.7) (2026-10-03)
 
 
