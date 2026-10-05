@@ -700,19 +700,6 @@ export async function watchStep(
 }
 
 /**
- * Say a dead watcher once.
- *
- * A watcher whose script broke on day one looks exactly like a watcher with
- * nothing to report, and the ledger records both as "no events" — so silence
- * here is indistinguishable from a quiet night. Five consecutive failures is the
- * line: enough that a flaky network does not page anyone, few enough that a
- * script which died on deployment is caught the same evening.
- *
- * Dedupe comes from `failures.ts` rather than a counter here, so one dead script
- * is one message rather than one per poll, and so the fault clears on recovery
- * through the same door every other announced fault uses.
- */
-/**
  * The text announced for a dead watcher.
  *
  * Deliberately carries no failure count. `shouldAnnounce` keys on a hash of this
@@ -729,6 +716,20 @@ export async function watchStep(
 export function watchFailureMessage(error: string): string {
   return `watch poll failed: ${error}`
 }
+
+/**
+ * Say a dead watcher once.
+ *
+ * A watcher whose script broke on day one looks exactly like a watcher with
+ * nothing to report, and the ledger records both as "no events" — so silence
+ * here is indistinguishable from a quiet night. Five consecutive failures is the
+ * line: enough that a flaky network does not page anyone, few enough that a
+ * script which died on deployment is caught the same evening.
+ *
+ * Dedupe comes from `failures.ts` rather than a counter here, so one dead script
+ * is one message rather than one per poll, and so the fault clears on recovery
+ * through the same door every other announced fault uses.
+ */
 
 async function announceWatchFailure(
   repo: string,
