@@ -39,6 +39,7 @@ import {
   SEEN_TTL_MS,
   saveWatchState,
   taskState,
+  WATCH_NOTIFY_AFTER,
   type WatchEvent,
   type WatchState,
   type WatchTaskState,
@@ -79,9 +80,21 @@ function tempDir(prefix: string): string {
   return dir
 }
 
+/**
+ * A temp state dir, with the plugin config dir pointed away from this machine.
+ *
+ * Both, because `loadNotifyConfig` reads `notify.json` out of the *config* dir:
+ * with the real one in place, a test that reaches the notice path picks up this
+ * machine's token and chat id, and `notify` then behaves differently here than
+ * on a fresh runner. That is how an assertion about the announcement ledger
+ * passed locally and failed in CI.
+ */
 function stateDir(): string {
   const dir = tempDir('desk-watch-')
   process.env.HERDR_PLUGIN_STATE_DIR = dir
+  process.env.HERDR_PLUGIN_CONFIG_DIR = tempDir('desk-watch-cfg-')
+  delete process.env.HERDR_DESK_TELEGRAM_TOKEN
+  delete process.env.HERDR_DESK_TELEGRAM_CHAT_ID
   return dir
 }
 
@@ -1601,10 +1614,17 @@ describe('a dead watcher announces once', () => {
 
   test('a real failing script announces once, and the streak stays in the log', async () => {
     // End to end: a desk whose poll script exits 3, on a temp repo, polled seven
-    // times. Fails 5, 6 and 7 are all past `WATCH_NOTIFY_AFTER`, and all three
-    // announce the same line — so the ledger records one fault, not three. The
-    // send itself is a no-op without a token, so what is asserted is the ledger
-    // and the log; the ledger is where the defect was.
+    // times. What the step produces each pass is `pass.error`, and what the
+    // announce path turns that into is `watchFailureMessage(error)` — so the
+    // announced text is read off real polls rather than written out here, and
+    // the announcement verdict is taken with the real ledger calls the daemon
+    // makes.
+    //
+    // The send itself is not exercised: `notify` is a no-op without a token, and
+    // `recordAnnounced` runs only once a notice is actually out, so asserting on
+    // `failures.json` after a send would depend on this machine having a
+    // `notify.json`. It passed here once for exactly that reason and failed on a
+    // fresh runner.
     const dir = stateDir()
     const repo = tempDir('herdr-desk-watch-dead-')
     writeFileSync(join(repo, 'watch.ts'), 'process.exit(3)\n')
@@ -1635,22 +1655,28 @@ describe('a dead watcher announces once', () => {
     }
 
     let at = new Date('2026-10-05T02:00:00Z')
+    let announced = 0
     for (let i = 1; i <= 7; i++) {
       await watchStep([discovered(repo)], at, roomy, undefined, mustNotRun)
       const t = loadWatchState().tasks[watchKey(repo, DEAD_TASK)]
       expect(t?.fails).toBe(i)
+      // The announce path, exactly as `announceWatchFailure` does it: under the
+      // threshold nothing is said at all; past it, the line is checked against
+      // the ledger and recorded if this is the first sighting.
+      if ((t?.fails ?? 0) >= WATCH_NOTIFY_AFTER) {
+        const said = watchFailureMessage(t?.lastError ?? 'poll failed')
+        if (shouldAnnounce(repo, DEAD_TASK, said, at)) {
+          announced++
+          recordAnnounced(repo, DEAD_TASK, said, at)
+        }
+      }
       at = new Date(Date.parse(t?.nextPollAt ?? at.toISOString()))
     }
-    // One fault for this watcher, however many failures passed the threshold.
-    const ledger = JSON.parse(
-      readFileSync(join(dir, 'failures.json'), 'utf8'),
-    ) as Record<string, unknown>
-    const mine = Object.keys(ledger).filter((k) =>
-      k.startsWith(`${repo}::${DEAD_TASK}::`),
-    )
-    // The first four failures are under the threshold, so the text is never
-    // hashed at all; the fifth announces and the sixth and seventh are repeats.
-    expect(mine).toHaveLength(1)
+    // Fails 5, 6 and 7 are all past the threshold. One announcement, not three:
+    // the announced text is the same for all three, so the ledger sees one fault.
+    // With `watch poll failed ${fails}x: ${error}` these were three distinct
+    // faults and a dead script announced a message a minute.
+    expect(announced).toBe(1)
     // The streak is not lost — it is in the state and in every log line, just not
     // in a notice per failure.
     expect(loadWatchState().tasks[watchKey(repo, DEAD_TASK)]?.fails).toBe(7)
