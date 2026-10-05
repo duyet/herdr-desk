@@ -15,6 +15,7 @@
       "id": "local:pr-watch",
       "playbook": "prompts/tasks/pr-review.md",
       "agentName": "hd-pr-watch",
+      "kind": "opencode",
       "schedule": [],
       "maxChildren": 2,
       "watch": {
