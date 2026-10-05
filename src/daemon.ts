@@ -705,9 +705,11 @@ export async function watchStep(
  * Deliberately carries no failure count. `shouldAnnounce` keys on a hash of this
  * line, so `watch poll failed ${fails}x: ${error}` made every consecutive failure
  * of one watcher a *different* fault: fails 5, 6, 7 and 8 were four first
- * sightings, four notices, and a message a minute for a script that broke on day
- * one and cannot fix itself. The count belongs in the log line `watchStep` writes
- * on every failure, which already has it.
+ * sightings and four notices, where the intent was one. On a script dead since
+ * day one that is one message per poll — and because the poll interval backs off
+ * to `intervalSec * 8`, roughly one every eight minutes at the 60s default, not
+ * one a minute. The count belongs in the log line `watchStep` writes on every
+ * failure, which already has it.
  *
  * The error *is* in the text, and has to be: two different reasons are two
  * different faults, and a watcher that breaks a second way must say so rather
@@ -728,36 +730,60 @@ export function watchFailureMessage(error: string): string {
  *
  * Dedupe comes from `failures.ts` rather than a counter here, so one dead script
  * is one message rather than one per poll, and so the fault clears on recovery
- * through the same door every other announced fault uses.
+ * through the same door every other announced fault uses. "One" means one per
+ * `REANNOUNCE_MS` quiet period, not one ever.
  */
 
-async function announceWatchFailure(
+export type WatchAnnounceDeps = {
+  /**
+   * Send the notice, and report whether it went out.
+   *
+   * Injected for the same reason `maybeAutoUpdate` injects its notifier: the
+   * thing worth testing here is *which line* is announced and *when* it is held
+   * back, and `shouldAnnounce` keys on a hash of that line. With the real
+   * `notify` behind it, a test cannot get a notice out of a machine with no
+   * Telegram token, so the previous version of these tests re-implemented the
+   * dedupe in the test body and proved the test's own string was stable. An
+   * injected notifier makes the function itself the thing under test.
+   */
+  notify?: (repo: string, taskId: string, said: string) => Promise<boolean>
+  now?: () => Date
+}
+
+export async function announceWatchFailure(
   repo: string,
   taskId: string,
   fails: number,
   error: string,
+  deps: WatchAnnounceDeps = {},
 ): Promise<void> {
   if (fails < WATCH_NOTIFY_AFTER) return
   const said = watchFailureMessage(error)
+  const now = deps.now ?? (() => new Date())
   try {
     const config = loadNotifyConfig()
     if (!config.enabled) return
-    if (!shouldAnnounce(repo, taskId, said)) return
-    const sent = await notify(
-      {
-        message: noticeBody({
-          level: 'fail',
-          headline: said,
-          tags: ['desk', 'watch'],
-        }) as string,
-        repo,
-        label: taskId,
-      },
-      config,
-    )
+    const at = now()
+    if (!shouldAnnounce(repo, taskId, said, at)) return
+    const sent = deps.notify
+      ? await deps.notify(repo, taskId, said)
+      : (
+          await notify(
+            {
+              message: noticeBody({
+                level: 'fail',
+                headline: said,
+                tags: ['desk', 'watch'],
+              }) as string,
+              repo,
+              label: taskId,
+            },
+            config,
+          )
+        ).sent
     // Recorded only once the notice is out. A send that failed leaves the fault
     // armed, because a repeat nobody read is not a repeat.
-    if (sent.sent) recordAnnounced(repo, taskId, said)
+    if (sent) recordAnnounced(repo, taskId, said, at)
   } catch {
     // Reporting must never be able to stop the next poll, exactly as in `run.ts`.
   }

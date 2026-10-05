@@ -127,20 +127,33 @@ manager worktree, and any child that still has work open.
 <!-- events -->
 ## Repo events on this run
 
-This run was triggered by `{{triggerKind}}`, and `{{eventCount}}` repo event(s)
-were waiting. They are in the `# Event` section below with their fields in
-`{{eventPath}}`.
+This run was woken by a repo event. `{{eventCount}}` event(s) waited, and they
+are in the `# Event` section below with their fields in `{{eventPath}}`.
 
-If `{{triggerKind}}` is `event`, the events woke this run: work them and stop.
-Do not go looking for the rest of the backlog. The slot that sweeps it is a
-separate run, and a run that does both spends the whole budget on work nobody
-woke you for.
-
-If `{{triggerKind}}` is `cron` or `manual`, the events arrived while another
-path was working, and this run drains them on the way through. Do the run's
-normal work *and* handle the events; they are already yours.
+Work those events and stop. Do not go looking for the rest of the backlog. The
+slot that sweeps it is a separate run, and a run that does both spends the
+whole budget on work nobody woke you for.
 
 If the events say there is nothing to do — already fixed, already merged, not
 yours — write `status.md` with `level: skip` and stop. That is a real answer,
 and it is worth more than a run that goes looking for something to do.
 <!-- /events -->
+
+<!-- drained -->
+## A repo event queue on this run
+
+This is a `{{triggerKind}}` fire, and `{{eventCount}}` repo event(s) were
+waiting when it started. They are in the `# Event` section below with their
+fields in `{{eventPath}}`.
+
+The events were **not** what woke this run — the slot did, or the person did.
+The events arrived while another path was working, and this run drains the
+queue on its way through. Do this run's normal work *and* handle the events.
+
+**A queue of no-op events is not a reason to skip the run.** If they turn out
+to be already fixed, already merged, or not yours, that is a finding about the
+events, not about the slot: report what the slot itself found, and say in the
+headline that the events were already handled. `level: skip` is for a run that
+found nothing to do *of its own kind* — a person who ran this by hand asked for
+the slot's work, and a queue of no-ops does not answer that request.
+<!-- /drained -->

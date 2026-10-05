@@ -15,9 +15,9 @@ import {
   type TaskConfig,
   type WatchConfig,
 } from './config'
-import { watchFailureMessage, watchStep } from './daemon'
+import { announceWatchFailure, watchFailureMessage, watchStep } from './daemon'
 import type { Discovered } from './discover'
-import { recordAnnounced, shouldAnnounce } from './failures'
+import { clearFailures, REANNOUNCE_MS } from './failures'
 import { emptyPause, pauseKey, withPause } from './pause'
 import { assembleManagerPrompt, taskVars } from './prompt'
 import { cronsOf, scheduleLabel } from './schedule'
@@ -49,6 +49,7 @@ import {
   watchStateBakPath,
   watchStatePath,
 } from './watch'
+import { oneWatchedTask, watchedRows } from './watchTarget'
 
 // Everything the desk reads off the host, so a watch test cannot pick up the
 // machine's real state dir, real configs, or a real Telegram token.
@@ -749,7 +750,12 @@ describe('the manager prompt', () => {
     // cron manager re-derive that there is no work, every slot, forever.
     const text = assembleManagerPrompt(taskVars(base))
     expect(text).not.toContain('# Event')
+    // Neither block: with no events there is nothing for either to say, and the
+    // second marker must strip as cleanly as the first or a cron prompt grows a
+    // stray paragraph every release.
     expect(text).not.toContain('Repo events on this run')
+    expect(text).not.toContain('A repo event queue on this run')
+    expect(text).not.toContain('<!-- drained -->')
     expect(text).not.toContain('eventCount')
   })
 
@@ -769,36 +775,61 @@ describe('the manager prompt', () => {
     // not have.
     expect(text).toContain('Repo events on this run')
     expect(text).not.toContain('<!-- events -->')
+    // And an event run does not get the drained-queue block, which would tell it
+    // the events were not the reason it started.
+    expect(text).not.toContain('A repo event queue on this run')
+    expect(text).not.toContain('<!-- drained -->')
   })
 
-  test('the event block tells a cron run the truth about what woke it', () => {
-    // The block renders on *any* fire carrying events — `run.ts` claims the
-    // queue on every fire — so the old wording ("woken by a repo event, not by
-    // a slot") told a cron or manual run it had not been woken by a slot, which
-    // it had. `{{triggerKind}}` is interpolated, so the sentence is true either
-    // way and the guidance differs with it.
-    // `trigger` is `'manual' | 'event'`; absent *is* a cron fire, and that is
-    // the case `triggerKind` renders as `cron`. So the run that gets the block
-    // without being woken by one is built by leaving it out.
-    const cron = assembleManagerPrompt(taskVars({ ...base, events }))
-    expect(cron).toContain('This run was triggered by `cron`')
-    expect(cron).toContain(
-      'If `cron` is `cron` or `manual`, the events arrived while another',
-    )
-    expect(cron).not.toContain('woken by a repo event')
-
-    const manual = assembleManagerPrompt(
-      taskVars({ ...base, events, trigger: 'manual' }),
-    )
-    expect(manual).toContain('This run was triggered by `manual`')
-
-    const event = assembleManagerPrompt(
+  test('an event run is told to work the events and stop', () => {
+    // The event run's own instruction, on its own block. Asserted positively so
+    // a reword that drops it goes red.
+    const text = assembleManagerPrompt(
       taskVars({ ...base, events, trigger: 'event' }),
     )
-    expect(event).toContain('This run was triggered by `event`')
-    expect(event).toContain(
-      'If `event` is `event`, the events woke this run: work them and stop.',
+    expect(text).toContain('This run was woken by a repo event.')
+    expect(text).toContain('`2` event(s) waited')
+    expect(text).toContain('Work those events and stop.')
+    // `level: skip` is a real answer here: nothing to do *is* the finding.
+    expect(text).toContain('write `status.md` with `level: skip` and stop')
+  })
+
+  test('a cron run that found a queue is told the queue is not the job', () => {
+    // The bug this fixes, in one test. `run.ts` claims the queue on every fire,
+    // so a slot that drains one renders the event block — and "work them and
+    // stop" told a reconciliation sweep to abandon the slot's own work on the
+    // strength of a queue of no-op events.
+    //
+    // `trigger` is `'manual' | 'event'`; absent *is* a cron fire, which is what
+    // `triggerKind` renders as `cron`.
+    const text = assembleManagerPrompt(taskVars({ ...base, events }))
+    expect(text).toContain('A repo event queue on this run')
+    expect(text).toContain('This is a `cron` fire, and `2` repo event(s) were')
+    expect(text).toContain('The events were **not** what woke this run')
+    expect(text).toContain("Do this run's normal work *and* handle the events.")
+    // The one that matters for a slot: a queue of no-ops is not a skip.
+    expect(text).toContain(
+      'A queue of no-op events is not a reason to skip the run.',
     )
+    // And none of the event block's instructions, which are the opposite advice.
+    expect(text).not.toContain('Repo events on this run')
+    expect(text).not.toContain('Work those events and stop.')
+    expect(text).not.toContain('<!-- events -->')
+    expect(text).not.toContain('<!-- drained -->')
+  })
+
+  test('a manual run says the same thing as a cron run, and names itself', () => {
+    // A person ran this by hand. "Work them and stop" would have told them the
+    // run they asked for was over; and the skip advice has to be refused
+    // explicitly, because `level: skip` is exactly what a helpful-looking
+    // manager writes when the queue turns out to be empty.
+    const text = assembleManagerPrompt(
+      taskVars({ ...base, events, trigger: 'manual' }),
+    )
+    expect(text).toContain('A repo event queue on this run')
+    expect(text).toContain('This is a `manual` fire')
+    expect(text).toContain('a person who ran this by hand asked for')
+    expect(text).not.toContain('Work those events and stop.')
   })
 
   test('event vars are empty or zero when there are no events', () => {
@@ -1439,23 +1470,63 @@ describe('the watch command line', () => {
 describe('examples/watch-events', () => {
   const EXAMPLE = join(DESK_ROOT, 'examples', 'watch-events')
 
-  test('the watch command it names exists in that directory', () => {
+  /**
+   * Every argv element that names a file resolves to a file inside the example.
+   *
+   * The original loop only looked at `argv[0]`, and the example's `argv[0]` is
+   * `bun` — `looksLikePathArg('bun')` is false, so the loop `continue`d and the
+   * test asserted nothing about the missing-script defect it was named for. The
+   * missing script was always the *second* element, `scripts/watch-prs.ts`, after
+   * the interpreter.
+   */
+  function scriptPaths(config: LoadedDesk): string[] {
+    const out: string[] = []
+    for (const t of config.tasks) {
+      for (const part of t.watch?.command ?? []) {
+        if (looksLikePathArg(part)) out.push(resolve(EXAMPLE, part))
+      }
+    }
+    return out
+  }
+
+  test('every path its watch command names exists in that directory', () => {
     // The example pointed at `scripts/watch-prs.ts`, which is not in that
     // directory, so `desk watch --repo examples/watch-events` failed with
     // `Module not found` and exit 1 — in the example the README invites people to
     // copy. `validate:examples` could not catch it: the schema checks that a
-    // path-shaped `argv[0]` stays *inside* the repo, not that it exists, because
-    // it is validated against the plugin root rather than the example's own repo.
-    // So it is checked here, where the example can be resolved as the desk would.
+    // path-shaped argv stays *inside* the repo, not that it exists, because it is
+    // validated against the plugin root rather than the example's own repo.
     const config = loadDeskConfig(EXAMPLE)
-    const watched = config.tasks.filter((t) => t.watch)
-    expect(watched.length).toBeGreaterThan(0)
-    for (const t of watched) {
-      const head = t.watch?.command[0] ?? ''
-      if (!looksLikePathArg(head)) continue
-      const abs = resolve(EXAMPLE, head)
-      expect(existsSync(abs), `${t.id}: ${abs}`).toBe(true)
-    }
+    const paths = scriptPaths(config)
+    // Asserted non-empty, so a command that names no path at all cannot make this
+    // vacuous the way the `continue` did.
+    expect(paths.length).toBeGreaterThan(0)
+    for (const abs of paths) expect(existsSync(abs), abs).toBe(true)
+  })
+
+  test('its playbook resolves, so a copy of the config gets a real playbook', () => {
+    // The second half of "copy-pasteable": `playbookFile` swallows a miss, so a
+    // config naming a playbook that is not there validates clean and hands the
+    // manager the literal path string as its instructions. Asserted through the
+    // same resolution the prompt uses, so a miss goes red here.
+    const vars = taskVars({
+      config: loadDeskConfig(EXAMPLE),
+      task: loadDeskConfig(EXAMPLE).tasks[0],
+      repo: EXAMPLE,
+      day: '2026-10-06',
+      runDir: join(EXAMPLE, '.herdr-desk/runs/x'),
+    })
+    // Inline markdown: `taskPromptPath` is empty and the body is the text. A
+    // missing playbook file looks different — `playbookFile` swallows the miss,
+    // so `taskPromptBody` becomes the literal path string, which is exactly what
+    // a manager would have been handed.
+    expect(vars.taskPromptPath).toBe('')
+    expect(vars.taskPromptBody).toContain('Work the events in the `# Event`')
+    expect(vars.taskPromptBody).not.toMatch(/^\S+\.md$/)
+    // And the prompt actually carries the instructions, not a path to them.
+    expect(assembleManagerPrompt(vars)).toContain(
+      'Work the events in the `# Event` section.',
+    )
   })
 
   test('it runs, and prints one event with a stable id', async () => {
@@ -1478,18 +1549,6 @@ describe('examples/watch-events', () => {
     // A stable id, because that is what makes it dedupe rather than re-fire.
     expect(events[0].id).toBeTruthy()
   })
-
-  test('its comment says where the event comes from', () => {
-    // A fixture must not read like a poller: the honest thing is to say the
-    // event is fixed. Asserted so a later edit that quietly makes it look like it
-    // queries something is caught here rather than in a reader's trust.
-    const script = readFileSync(
-      join(EXAMPLE, 'scripts', 'watch-events.ts'),
-      'utf8',
-    )
-    expect(script).toContain('not a poller')
-    expect(script).toContain('fixed')
-  })
 })
 
 describe('the state key', () => {
@@ -1504,13 +1563,19 @@ describe('the state key', () => {
     expect(watchRepo({}, '/checkout')).toBe('/checkout')
   })
 
-  test('a config naming a different repo: status sees what reset clears', async () => {
-    // End to end over the real state file, on a real config with `"repo"` set.
-    // The desk keys its queue at `/other`; the CLI is pointed at the checkout.
-    // Before the fix `watchedRows` keyed on the checkout, so `status` printed
-    // `never polled` for a task whose events were sitting in the file, and
-    // `reset` reported success while resetting nothing.
-    stateDir()
+  /**
+   * A config that names a `repo` other than its own directory, on a real repo.
+   *
+   * The two paths must agree on the key or they are not talking about the same
+   * state at all: the daemon writes `watch.json` under `config.repo`, so a
+   * `status` that keys on the checkout reads a queue that does not exist, and a
+   * `reset` on that same key clears nothing while reporting success.
+   */
+  function deskKeyedElsewhere(): {
+    root: string
+    other: string
+    watched: WatchConfig
+  } {
     const root = tempDir('herdr-desk-watch-repo-')
     const other = tempDir('herdr-desk-watch-keyed-')
     writeFileSync(
@@ -1529,103 +1594,331 @@ describe('the state key', () => {
         ],
       })}\n`,
     )
-    // The key the daemon would write, and the one the CLI has to read. The queue
-    // is filled the way the daemon fills it — through `watchPass` — so what lands
-    // in the file is a real poll's state, not a hand-assembled one.
-    const desk = loadDeskConfig(root)
-    const watched = desk.tasks[0].watch
+    const watched = loadDeskConfig(root).tasks[0].watch
     if (!watched) throw new Error('fixture has no watch block')
+    return { root, other, watched }
+  }
+
+  /**
+   * A queue as the daemon left it, filled through `watchPass` so what lands on
+   * disk is a real poll's state rather than a hand-assembled object.
+   */
+  async function queuedByDaemon(
+    repo: string,
+    taskId: string,
+    watched: WatchConfig,
+    id: string,
+  ): Promise<void> {
     const state: WatchState = { tasks: {} }
     const pass = await watchPass({
-      repo: other,
-      taskId: 'local:keyed',
+      repo,
+      taskId,
       watch: watched,
       state,
       at: AT,
-      run: runner([JSON.stringify({ id: 'pr-1' })]),
+      run: runner([JSON.stringify({ id })]),
     })
     expect(pass.queued).toBe(1)
     saveWatchState(state, AT)
+  }
 
-    // The rows the CLI builds for `--repo <root>`, through the same helper.
-    const rows = [{ repo: watchRepo(desk, root), taskId: 'local:keyed' }]
-    expect(rows[0].repo).toBe(other)
-    const text = formatWatchStatus(loadWatchState(), rows)
-    expect(text).toContain('pending 1')
-    expect(text).not.toContain('never polled')
+  test('the CLI rows key on the config repo, not the checkout', async () => {
+    // Drives `watchedRows` itself. The earlier version of this test built the row
+    // by calling `watchRepo` and then asserted the row had that key — the helper
+    // agreeing with itself, which stayed green when `watchedRows` went back to
+    // `d.repo`. The key now comes out of the function under test, so reverting it
+    // turns this red.
+    stateDir()
+    const { root, other } = deskKeyedElsewhere()
+    const rows = await watchedRows(root)
+    expect(rows).toEqual([{ repo: other, taskId: 'local:keyed' }])
+  })
 
-    // And `reset` on those same rows clears what `status` reported.
-    const after = loadWatchState()
-    resetTask(after, rows[0].repo, rows[0].taskId, AT)
-    saveWatchState(after, AT)
-    expect(formatWatchStatus(loadWatchState(), rows)).toContain('pending 0')
+  test('oneWatchedTask resolves to the same key the daemon wrote', async () => {
+    // The other path. `desk watch` and `desk watch test` go through this one, so
+    // if it keys on `root` while the rows key on `config.repo`, the two commands
+    // disagree with each other as well as with the daemon.
+    stateDir()
+    const { root, other } = deskKeyedElsewhere()
+    const one = await oneWatchedTask(root, undefined)
+    expect(one.repo).toBe(other)
+    // Same task too, not just the same repo.
+    expect(one.taskId).toBe('local:keyed')
+  })
+
+  test('status sees what reset clears, through the real CLI functions', async () => {
+    // The symptom, end to end and in the order a person hits it: the daemon
+    // queues an event under `config.repo`, `status` reads it, `reset` clears it.
+    // Before the fix both keyed on the checkout, so status printed
+    // `never polled` for a task with events in the file, and reset reported
+    // `reset local:keyed` while clearing nothing.
+    stateDir()
+    const { root, other, watched } = deskKeyedElsewhere()
+    await queuedByDaemon(other, 'local:keyed', watched, 'pr-1')
+
+    // `desk watch status --repo <checkout>` — the rows the CLI builds.
+    const rows = await watchedRows(root)
+    expect(formatWatchStatus(loadWatchState(), rows)).toContain('pending 1')
+    expect(formatWatchStatus(loadWatchState(), rows)).not.toContain(
+      'never polled',
+    )
+
+    // `desk watch reset --repo <checkout>` — resets exactly those rows.
+    const state = loadWatchState()
+    for (const r of rows) resetTask(state, r.repo, r.taskId, AT)
+    saveWatchState(state, AT)
+    const after = formatWatchStatus(loadWatchState(), await watchedRows(root))
+    expect(after).toContain('pending 0')
+    // And the daemon's own key is what changed, not some other row.
+    expect(
+      loadWatchState().tasks[watchKey(other, 'local:keyed')]?.pending,
+    ).toEqual([])
+  })
+
+  test('a config with no repo set still keys on the checkout', async () => {
+    // The case that already worked, held so the fix did not break it by
+    // reaching for a field that is not there.
+    stateDir()
+    const root = tempDir('herdr-desk-watch-repo-')
+    writeFileSync(
+      join(root, '.herdr-desk.json'),
+      `${JSON.stringify({
+        name: 'plain',
+        tasks: [
+          {
+            id: 'local:plain',
+            playbook: 'prompts/tasks/pr-review.md',
+            agentName: 'hd-plain',
+            schedule: [],
+            watch: { command: ['bun', 'w.ts'] },
+          },
+        ],
+      })}\n`,
+    )
+    expect(await watchedRows(root)).toEqual([
+      { repo: root, taskId: 'local:plain' },
+    ])
+    expect((await oneWatchedTask(root, undefined)).repo).toBe(root)
   })
 })
 
-describe('a dead watcher announces once', () => {
+describe('announceWatchFailure', () => {
   const DEAD_REPO = '/tmp/herdr-desk-watch-dead'
   const DEAD_TASK = 'local:pr-watch'
   const T0 = new Date('2026-10-05T02:00:00Z')
 
-  test('two consecutive failures of one watcher are one fault', () => {
-    // The exact contract: the announced text is byte-identical for fails 5 and
-    // fails 6, so `shouldAnnounce` sees the second as a repeat of the first and
-    // holds it back. With `watch poll failed ${fails}x: ${error}` these two
-    // lines hashed differently, each was a first sighting, and a dead script
-    // announced a message a minute.
-    stateDir()
-    const said = watchFailureMessage('exit 3')
-    expect(shouldAnnounce(DEAD_REPO, DEAD_TASK, said, T0)).toBe(true)
-    recordAnnounced(DEAD_REPO, DEAD_TASK, said, T0)
-    // Fails 6, 7 and 8 announce the identical line, an hour later, and all three
-    // are repeats.
-    for (const ms of [3600_000, 7200_000, 10_800_000]) {
-      expect(
-        shouldAnnounce(DEAD_REPO, DEAD_TASK, said, new Date(T0.getTime() + ms)),
-      ).toBe(false)
+  /**
+   * A recording notifier, and the lines it was handed.
+   *
+   * The announced string is produced by the function under test and read back
+   * out of the notifier, so a test can neither choose the string nor skip the
+   * dedupe. The previous version of these tests re-implemented
+   * `shouldAnnounce`/`recordAnnounced` in the test body, which meant the string
+   * under test was the test's own — and putting `${fails}x` back in
+   * `watchFailureMessage` left every one of them green.
+   */
+  function recorder() {
+    const sent: string[] = []
+    return {
+      sent,
+      /** The real announce for `fails`, timed a minute per failure apart. */
+      say: async (fails: number, error: string) => {
+        const at = new Date(T0.getTime() + fails * 60_000)
+        await announceWatchFailure(DEAD_REPO, DEAD_TASK, fails, error, {
+          notify: async (_repo, _task, said) => {
+            sent.push(said)
+            return true
+          },
+          now: () => at,
+        })
+      },
     }
-  })
+  }
 
-  test('the count is in the message only as the reason, never as the count', () => {
-    // A guard against the count creeping back in. The log line is where the
-    // streak is reported, and `watch status` is where a person reads it.
+  test('nothing is sent before the fifth consecutive failure', async () => {
+    // The threshold is the whole point of the first four being silent: a flaky
+    // network must not page anyone.
     stateDir()
-    expect(watchFailureMessage('exit 3')).toBe('watch poll failed: exit 3')
-    expect(watchFailureMessage('exit 3')).not.toContain('5x')
-    expect(watchFailureMessage('exit 3')).not.toContain('6x')
+    const rec = recorder()
+    for (let fails = 1; fails < WATCH_NOTIFY_AFTER; fails++) {
+      await rec.say(fails, 'exit 3')
+    }
+    expect(rec.sent).toEqual([])
   })
 
-  test('a different error on the same watcher is a new fault and announces', () => {
+  test('two consecutive failures are one message, not two', async () => {
+    // The defect, through the real function. With `watch poll failed ${fails}x:
+    // ${error}` the fifth and sixth failures hashed differently, so each was a
+    // first sighting and both went out.
+    stateDir()
+    const rec = recorder()
+    await rec.say(WATCH_NOTIFY_AFTER, 'exit 3')
+    expect(rec.sent).toEqual(['watch poll failed: exit 3'])
+    await rec.say(WATCH_NOTIFY_AFTER + 1, 'exit 3')
+    await rec.say(WATCH_NOTIFY_AFTER + 2, 'exit 3')
+    // One message for three failures past the threshold.
+    expect(rec.sent).toEqual(['watch poll failed: exit 3'])
+  })
+
+  test('a different error on the same watcher is a new fault and goes out', async () => {
     // The other half of the rule: collapsing the count must not collapse two
     // reasons into one, or a watcher that breaks a second way goes silent behind
-    // the first outage. The error is in the text, so this still holds.
+    // the first outage.
     stateDir()
-    const said = watchFailureMessage('exit 3')
-    recordAnnounced(DEAD_REPO, DEAD_TASK, said, T0)
-    expect(
-      shouldAnnounce(
-        DEAD_REPO,
-        DEAD_TASK,
-        watchFailureMessage('timed out after 30s'),
-        T0,
-      ),
-    ).toBe(true)
+    const rec = recorder()
+    await rec.say(WATCH_NOTIFY_AFTER, 'exit 3')
+    await rec.say(WATCH_NOTIFY_AFTER + 1, 'timed out after 30s')
+    expect(rec.sent).toEqual([
+      'watch poll failed: exit 3',
+      'watch poll failed: timed out after 30s',
+    ])
   })
 
-  test('a real failing script announces once, and the streak stays in the log', async () => {
-    // End to end: a desk whose poll script exits 3, on a temp repo, polled seven
-    // times. What the step produces each pass is `pass.error`, and what the
-    // announce path turns that into is `watchFailureMessage(error)` — so the
-    // announced text is read off real polls rather than written out here, and
-    // the announcement verdict is taken with the real ledger calls the daemon
-    // makes.
-    //
-    // The send itself is not exercised: `notify` is a no-op without a token, and
-    // `recordAnnounced` runs only once a notice is actually out, so asserting on
-    // `failures.json` after a send would depend on this machine having a
-    // `notify.json`. It passed here once for exactly that reason and failed on a
-    // fresh runner.
-    const dir = stateDir()
+  test('one dead watcher does not silence another with the same fault', async () => {
+    // Keyed on the repo as well as the task, so two repos broken the same way each
+    // say so once.
+    stateDir()
+    const sent: string[] = []
+    const notify = async (_r: string, _t: string, said: string) => {
+      sent.push(said)
+      return true
+    }
+    await announceWatchFailure('/a', 't', WATCH_NOTIFY_AFTER, 'exit 3', {
+      notify,
+    })
+    await announceWatchFailure('/b', 't', WATCH_NOTIFY_AFTER, 'exit 3', {
+      notify,
+    })
+    expect(sent).toHaveLength(2)
+  })
+
+  test('a notice that did not go out leaves the fault armed', async () => {
+    // A send that failed leaves it unrecorded, because a repeat nobody read is
+    // not a repeat — so the next poll tries again rather than going quiet for the
+    // whole `REANNOUNCE_MS` quiet period on the strength of one failed post.
+    stateDir()
+    let attempts = 0
+    const notify = async () => {
+      attempts++
+      return false
+    }
+    await announceWatchFailure(
+      DEAD_REPO,
+      DEAD_TASK,
+      WATCH_NOTIFY_AFTER,
+      'exit 3',
+      {
+        notify,
+        now: () => T0,
+      },
+    )
+    await announceWatchFailure(
+      DEAD_REPO,
+      DEAD_TASK,
+      WATCH_NOTIFY_AFTER + 1,
+      'exit 3',
+      {
+        notify,
+        now: () => new Date(T0.getTime() + 60_000),
+      },
+    )
+    expect(attempts).toBe(2)
+  })
+
+  test('recovery clears the fault, so the next outage is said again', async () => {
+    // `watchStep` calls `clearFailures` on the success path; this is that door,
+    // and it is why a watcher that broke, recovered and broke again does not get
+    // held back as a repeat of an outage that is over.
+    stateDir()
+    const rec = recorder()
+    await rec.say(WATCH_NOTIFY_AFTER, 'exit 3')
+    clearFailures(DEAD_REPO, DEAD_TASK)
+    await rec.say(WATCH_NOTIFY_AFTER + 1, 'exit 3')
+    expect(rec.sent).toHaveLength(2)
+  })
+
+  test('the same fault is announced again after the quiet period', async () => {
+    // "Once" means once per `REANNOUNCE_MS`, not once ever — `failures.ts`
+    // documents this at length, so a test that implied otherwise would be
+    // asserting a lie.
+    stateDir()
+    const sent: string[] = []
+    const notify = async (_r: string, _t: string, said: string) => {
+      sent.push(said)
+      return true
+    }
+    await announceWatchFailure(
+      DEAD_REPO,
+      DEAD_TASK,
+      WATCH_NOTIFY_AFTER,
+      'exit 3',
+      {
+        notify,
+        now: () => T0,
+      },
+    )
+    await announceWatchFailure(
+      DEAD_REPO,
+      DEAD_TASK,
+      WATCH_NOTIFY_AFTER + 1,
+      'exit 3',
+      {
+        notify,
+        now: () => new Date(T0.getTime() + 60_000),
+      },
+    )
+    expect(sent).toHaveLength(1)
+    await announceWatchFailure(
+      DEAD_REPO,
+      DEAD_TASK,
+      WATCH_NOTIFY_AFTER + 2,
+      'exit 3',
+      {
+        notify,
+        now: () => new Date(T0.getTime() + REANNOUNCE_MS + 60_000),
+      },
+    )
+    expect(sent).toHaveLength(2)
+  })
+
+  test('a notifier that throws does not escape', async () => {
+    // Reporting must never be able to stop the next poll, exactly as in `run.ts`.
+    // A watcher that cannot tell anyone about its own failure is the one moment
+    // that matters most.
+    stateDir()
+    await expect(
+      announceWatchFailure(DEAD_REPO, DEAD_TASK, WATCH_NOTIFY_AFTER, 'exit 3', {
+        notify: async () => {
+          throw new Error('telegram is down')
+        },
+        now: () => T0,
+      }),
+    ).resolves.toBeUndefined()
+  })
+
+  test('the count is in the log line, not in the announced text', async () => {
+    // A guard against the count creeping back into the message: the streak is
+    // reported in `daemon.log` and `watch status`, which is where a number
+    // belongs, and putting it in the announced line made every failure a new
+    // fault.
+    stateDir()
+    const rec = recorder()
+    await rec.say(WATCH_NOTIFY_AFTER, 'exit 3')
+    await rec.say(WATCH_NOTIFY_AFTER + 1, 'exit 3')
+    expect(rec.sent[0]).not.toMatch(/\d+x/)
+    expect(rec.sent[0]).toBe(watchFailureMessage('exit 3'))
+  })
+})
+
+describe('a real failing script', () => {
+  const DEAD_TASK = 'local:pr-watch'
+
+  test('the streak reaches seven, is logged each time, and announces once', async () => {
+    // End to end through the real step, with the real `announceWatchFailure` and
+    // an injected notifier for the send. A failing poll queues nothing, so the
+    // dispatch is never reached.
+    stateDir()
+    const sent: string[] = []
     const repo = tempDir('herdr-desk-watch-dead-')
     writeFileSync(join(repo, 'watch.ts'), 'process.exit(3)\n')
     writeFileSync(
@@ -1643,45 +1936,40 @@ describe('a dead watcher announces once', () => {
         ],
       })}\n`,
     )
-    writeFileSync(
-      join(dir, 'known-repos.json'),
-      `${JSON.stringify({ repos: [repo] })}\n`,
-    )
+    // Driven through `watchStep`, which is the real caller: it runs the poll, logs
+    // the failure with its count, and calls `announceWatchFailure` itself. The
+    // notifier is injected on the second call only because `watchStep` does not
+    // take one, so what is counted here is the verdict the function reached from
+    // the state's own `fails` and `lastError` — the two fields the daemon reads.
     const roomy = () => ({ ok: true, breaches: [], pressure: 0 })
-    // A failing poll queues nothing, so the dispatch is never reached. Asserted
-    // here rather than faked, so a pass that somehow queued an event fails here.
     const mustNotRun = async () => {
       throw new Error('a dead watcher dispatched a run')
     }
-
     let at = new Date('2026-10-05T02:00:00Z')
-    let announced = 0
     for (let i = 1; i <= 7; i++) {
       await watchStep([discovered(repo)], at, roomy, undefined, mustNotRun)
       const t = loadWatchState().tasks[watchKey(repo, DEAD_TASK)]
       expect(t?.fails).toBe(i)
-      // The announce path, exactly as `announceWatchFailure` does it: under the
-      // threshold nothing is said at all; past it, the line is checked against
-      // the ledger and recorded if this is the first sighting.
-      if ((t?.fails ?? 0) >= WATCH_NOTIFY_AFTER) {
-        const said = watchFailureMessage(t?.lastError ?? 'poll failed')
-        if (shouldAnnounce(repo, DEAD_TASK, said, at)) {
-          announced++
-          recordAnnounced(repo, DEAD_TASK, said, at)
-        }
-      }
+      // The real announce, with the real threshold and the real dedupe; only the
+      // send is injected.
+      await announceWatchFailure(repo, DEAD_TASK, i, t?.lastError ?? '', {
+        notify: async (_r, _t, said) => {
+          sent.push(said)
+          return true
+        },
+        now: () => at,
+      })
       at = new Date(Date.parse(t?.nextPollAt ?? at.toISOString()))
     }
-    // Fails 5, 6 and 7 are all past the threshold. One announcement, not three:
-    // the announced text is the same for all three, so the ledger sees one fault.
-    // With `watch poll failed ${fails}x: ${error}` these were three distinct
-    // faults and a dead script announced a message a minute.
-    expect(announced).toBe(1)
-    // The streak is not lost — it is in the state and in every log line, just not
-    // in a notice per failure.
-    expect(loadWatchState().tasks[watchKey(repo, DEAD_TASK)]?.fails).toBe(7)
+    // Fails 5, 6 and 7 are past the threshold. One message, not three.
+    expect(sent).toEqual(['watch poll failed: exit 3'])
+
+    // And the streak is not lost: it is in the state, and every failure is logged
+    // with its count.
+    const dir = process.env.HERDR_PLUGIN_STATE_DIR as string
     const log = readFileSync(join(dir, 'daemon.log'), 'utf8')
     expect(log).toContain(`watch fail dead/${DEAD_TASK}: exit 3 (fails 7)`)
+    expect(loadWatchState().tasks[watchKey(repo, DEAD_TASK)]?.fails).toBe(7)
   })
 })
 

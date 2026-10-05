@@ -98,27 +98,44 @@ export function renderFile(path: string, vars: PromptVars): string {
 }
 
 /**
- * Event-only guidance in `prompts/run.md`, marked so it can be removed whole.
+ * Event guidance in `prompts/run.md`, marked so it can be removed whole.
  *
- * The paragraph has to live in the manager envelope — that is the file every run
- * reads — but a cron run must not gain a sentence it has no use for, because
- * `assembleManagerPrompt` promises a cron run's prompt is byte-identical to
- * before this feature existed. A marker is the cheapest way to have both: the
- * text is authored where the rest of the envelope is, and stripped entirely
- * rather than interpolated to an empty husk.
+ * The text has to live in the manager envelope — that is the file every run
+ * reads — but a cron run with an empty queue must not gain a sentence it has no
+ * use for, because `assembleManagerPrompt` promises such a prompt is
+ * byte-identical to before this feature existed. A marker is the cheapest way to
+ * have both: the text is authored where the rest of the envelope is, and
+ * stripped entirely rather than interpolated to an empty husk.
+ *
+ * **Two blocks, not one, because the two cases say opposite things.** A run
+ * woken by an event should work the events and stop. A cron or manual run that
+ * merely *found* a queue should do its own work and handle the events on the way
+ * through — and a single block covering both had to say "work them and stop" to
+ * the event run, which told a reconciliation sweep to abandon the slot's work on
+ * the strength of a queue of no-op events, and told a hand-triggered run to
+ * `level: skip`. `triggerKind` picks which one renders; the other is stripped
+ * either way.
  */
 const EVENT_BLOCK = /\n*<!-- events -->\n([\s\S]*?)\n?<!-- \/events -->/g
+
+/** The `cron`/`manual` counterpart: events present, but not the reason to run. */
+const DRAINED_BLOCK = /\n*<!-- drained -->\n([\s\S]*?)\n?<!-- \/drained -->/g
 
 function renderEnvelope(path: string, vars: PromptVars): string {
   const raw = readFileSync(path, 'utf8')
   const hasEvents = Number(vars.eventCount ?? '0') > 0
-  // The leading `\n*` is inside the pattern so removing the block removes the
-  // blank line that introduced it too — otherwise a cron prompt ends with one
-  // stray newline it did not have before this feature, which is the difference
+  const wokenBy = vars.triggerKind === 'event'
+  // The leading `\n*` is inside each pattern so removing a block removes the
+  // blank line that introduced it too — otherwise a cron prompt ends with stray
+  // newlines it did not have before this feature, which is the difference
   // between "identical" and "identical except for a byte".
-  const text = raw.replace(EVENT_BLOCK, (_all, body: string) =>
-    hasEvents ? `\n\n${body.trim()}` : '',
-  )
+  const text = raw
+    .replace(EVENT_BLOCK, (_all, body: string) =>
+      hasEvents && wokenBy ? `\n\n${body.trim()}` : '',
+    )
+    .replace(DRAINED_BLOCK, (_all, body: string) =>
+      hasEvents && !wokenBy ? `\n\n${body.trim()}` : '',
+    )
   return interpolate(text, vars)
 }
 

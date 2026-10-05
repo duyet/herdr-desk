@@ -4,7 +4,7 @@
   "tasks": [
     {
       "id": "local:pr-watch",
-      "playbook": "prompts/tasks/pr-review.md",
+      "playbook": "Work the events in the `# Event` section.\n\nFor each one: read it, decide whether it is already handled, and if it is not, do the work it names. One PR is one item — read its description, take the change, open a PR.\n\nWhen every event is handled, stop. Do not go looking for the rest of the backlog; the cron slot that sweeps it is a separate run.\n\nIf the events turn out to need nothing — already fixed, already merged, not yours — write `status.md` with `level: skip` and say so. That is a real answer.",
       "agentName": "hd-pr-watch",
       "schedule": [],
       "maxChildren": 2,

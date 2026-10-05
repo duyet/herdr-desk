@@ -344,7 +344,10 @@ describe('the commands a person runs', () => {
     writeConfig(good, goodConfig('good'))
     remember(state, good)
     const r = run(['status'], cwd, state)
-    expect(r.out).not.toContain('skipped')
+    // The precise line the command prints, not the word "skipped" — that word
+    // could appear in a desk name or a task id and make this vacuous.
+    expect(r.out).not.toContain('1 desk(s) skipped')
+    expect(r.out).toContain('good')
     expect(run(['validate'], cwd, state).code).toBe(0)
   })
 })
