@@ -104,6 +104,21 @@ title = "Show recent desk run history"
 command = ["bin/desk", "history"]
 
 [[actions]]
+id = "watch"
+title = "Poll a repo's watchers once, print what they saw (fires nothing)"
+command = ["bin/desk", "watch"]
+
+[[actions]]
+id = "watch-status"
+title = "Show every watched task: pending, overflow, fails, last and next poll"
+command = ["bin/desk", "watch", "status"]
+
+[[actions]]
+id = "watch-test"
+title = "Run a watcher directly: argv, cwd, exit, stderr, events parsed"
+command = ["bin/desk", "watch", "test"]
+
+[[actions]]
 id = "cleanup-dry-run"
 title = "List merged worktrees, old run dirs and stale panes a cleanup would remove"
 command = ["bin/desk", "cleanup", "--dry-run"]

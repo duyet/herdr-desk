@@ -67,15 +67,55 @@
       "pattern": "^\\S+\\s+\\S+\\s+\\S+\\s+\\S+\\s+\\S+$"
     },
     "schedule": {
-      "description": "When to run. One cron, or several crons that all run this playbook.",
+      "description": "When to run on cron. One cron, or several crons that all run this playbook. An empty array means never on cron — the event-only form, for a task with a `watch` block.",
       "oneOf": [
         { "$ref": "#/$defs/cron" },
+        {
+          "type": "array",
+          "maxItems": 0,
+          "items": { "$ref": "#/$defs/cron" }
+        },
         {
           "type": "array",
           "minItems": 1,
           "items": { "$ref": "#/$defs/cron" }
         }
       ]
+    },
+    "watch": {
+      "description": "Wake this task when a repo-owned command prints events. Task-level only, additive: with a `schedule` it gets both, with `\"schedule\": []` it is event-only. The command prints NDJSON on stdout, one object per line, and needs a stable `id` — that id is the dedupe key.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["command"],
+      "properties": {
+        "command": {
+          "type": "array",
+          "minItems": 1,
+          "description": "argv, never a shell string. argv[0] that looks like a path (./x, ../x, a/b, or absolute) resolves against the repo root and must stay inside it; anything else is looked up on PATH.",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "intervalSec": {
+          "type": "integer",
+          "minimum": 15,
+          "maximum": 3600,
+          "default": 60,
+          "description": "Seconds between polls."
+        },
+        "timeoutSec": {
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 300,
+          "default": 30,
+          "description": "Seconds before the poll is killed and counted as a failure."
+        },
+        "maxPending": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64,
+          "default": 8,
+          "description": "Events held for this task. Past this they are counted as overflow, not queued."
+        }
+      }
     },
     "rung": {
       "type": "string",
@@ -138,7 +178,8 @@
         "stateDir": { "type": "string" },
         "extra": { "type": "string" },
         "describe": { "type": "string" },
-        "schedule": { "$ref": "#/$defs/schedule" }
+        "schedule": { "$ref": "#/$defs/schedule" },
+        "watch": { "$ref": "#/$defs/watch" }
       }
     }
   },

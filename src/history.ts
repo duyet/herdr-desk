@@ -2,6 +2,15 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { pluginStateDir } from './paths'
 
+/**
+ * What woke a run.
+ *
+ * `cron` is the absence of a value rather than a field, because that is what
+ * every record written before this existed says, and `runs.jsonl` is append-only
+ * history that older readers still have to parse.
+ */
+export type RunTrigger = 'manual' | 'event'
+
 export type RunRecord = {
   at: string
   name: string
@@ -10,8 +19,8 @@ export type RunRecord = {
   mode: string
   ok: boolean
   detail?: string
-  /** Set when a person fired the job (`desk trigger`), not a cron slot. */
-  trigger?: 'manual'
+  /** Set when a person or a repo event fired the job, not a cron slot. */
+  trigger?: RunTrigger
 }
 
 /** How a job is identified in the ledger, independent of its display name. */
@@ -108,6 +117,9 @@ export function formatHistory(runs: RunRecord[]): string {
     .map((r) => {
       const mark = r.ok ? 'ok' : 'fail'
       const extra = r.detail ? `  ${r.detail}` : ''
+      // `(event)` reads next to `(manual)` on purpose: one column of "who woke
+      // this", and a reader scanning the ledger can tell an event-driven run
+      // from a person asking for one without counting fields.
       const how = r.trigger ? ` (${r.trigger})` : ''
       return `${r.at}  ${mark}  ${r.name}/${r.task}  ${r.mode}${how}${extra}`
     })

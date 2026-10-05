@@ -10,6 +10,7 @@ import {
   formatResult,
   planCleanup,
 } from './cleanup'
+import type { WatchConfig } from './config'
 import { listBundledTasks, loadDeskConfig, resolveTask } from './config'
 import { explainConfig, explainTasks, showConfig } from './configShow'
 import {
@@ -105,6 +106,14 @@ import {
   saveLastCheck,
   takeUpdateLock,
 } from './update'
+import {
+  formatWatchStatus,
+  loadWatchState,
+  parseWatchOutput,
+  resetTask,
+  runWatchCommand,
+  saveWatchState,
+} from './watch'
 
 function usage(): never {
   console.log(`herdr-desk — Herdr plugin. Each repo is .herdr-desk.json; the daemon picks them up.
@@ -125,6 +134,10 @@ function usage(): never {
   herdr-desk calendar [--ics FILE]
   herdr-desk board --html [FILE]
   herdr-desk history [N]
+  herdr-desk watch --repo DIR [--task ID]
+  herdr-desk watch status
+  herdr-desk watch test --repo DIR [--task ID]
+  herdr-desk watch reset --repo DIR [--task ID]
   herdr-desk cleanup [--dry-run]
   herdr-desk last
   herdr-desk sessions index
@@ -213,6 +226,186 @@ function describeDestination(
     ? ` (from ${provenance.chatId})`
     : ' (host default)'
   return `${chatId}${from}`
+}
+
+/**
+ * Watched tasks for one repo, or every repo on the machine.
+ *
+ * The repo is resolved first, because it is the state key: `discoverDesks`
+ * always hands back absolute paths, so a `--repo .` left unresolved would build
+ * a key the tick never writes and `watch reset` would silently reset nothing.
+ */
+async function watchedRows(
+  repo: string | undefined,
+): Promise<Array<{ repo: string; taskId: string }>> {
+  const desks = repo
+    ? [{ repo: resolve(repo), config: loadDeskConfig(resolve(repo)) }]
+    : await discoverDesks()
+  return desks.flatMap((d) =>
+    d.config.tasks
+      .filter((t) => t.watch)
+      .map((t) => ({ repo: d.repo, taskId: t.id })),
+  )
+}
+
+/** Resolve `--repo` / `--task` to exactly one watched task, or fail loudly. */
+async function oneWatchedTask(
+  repo: string | undefined,
+  taskId: string | undefined,
+): Promise<{ repo: string; taskId: string; watch: WatchConfig }> {
+  const root = resolve(repo ?? process.cwd())
+  const desk = loadDeskConfig(root)
+  const watched = desk.tasks.filter((t) => t.watch)
+  const hit = taskId
+    ? watched.find((t) => t.id === taskId)
+    : watched.length === 1
+      ? watched[0]
+      : undefined
+  if (!hit?.watch) {
+    const known = desk.tasks.map((t) => t.id).join(', ')
+    throw new Error(
+      watched.length === 0
+        ? `no task in ${root} has a 'watch' block (tasks: ${known})`
+        : `pass --task (watched: ${watched.map((t) => t.id).join(', ')})`,
+    )
+  }
+  // `config.repo` is what the tick keys on when the config names a different
+  // path, so the CLI has to agree with it or the two address different queues.
+  return { repo: desk.repo ?? root, taskId: hit.id, watch: hit.watch }
+}
+
+/**
+ * `desk watch` — one pass, printed, and nothing else.
+ *
+ * Fires nothing and writes no state, deliberately. This is the command for
+ * answering "what would this watcher see right now", and a dry run that quietly
+ * recorded a dedupe key would make the next real poll skip an event just
+ * because someone looked at it. It parses the same `parseWatchOutput` the tick
+ * uses, so what it prints is what the desk would queue.
+ */
+async function watchOnce(argv: string[]): Promise<void> {
+  const { repo, taskId, watch } = await oneWatchedTask(
+    arg('--repo', argv),
+    arg('--task', argv),
+  )
+  console.log(`watch ${taskId}  ${repo}`)
+  console.log(`  argv  ${watch.command.join(' ')}`)
+  const result = await runWatchCommand({ repo, taskId, watch })
+  if (result.error) {
+    console.log(`  error ${result.error}`)
+    process.exit(1)
+  }
+  if (result.timedOut) {
+    console.log(`  timed out after ${watch.timeoutSec}s`)
+    process.exit(1)
+  }
+  console.log(`  exit ${result.code}  ${result.durationMs}ms`)
+  if (result.stderr.trim()) {
+    for (const line of result.stderr.trim().split('\n'))
+      console.log(`  stderr ${line}`)
+  }
+  const { events, warnings } = parseWatchOutput(result.stdout)
+  for (const w of warnings) console.log(`  warning ${w}`)
+  console.log(`  ${events.length} event(s), ${warnings.length} warning(s)`)
+  for (const e of events) {
+    console.log(
+      `  - ${e.id}${e.type ? `  ${e.type}` : ''}${e.summary ? `  ${e.summary}` : ''}`,
+    )
+  }
+  // Non-zero when the poll failed, so this is usable as a cron or a check.
+  if (result.failure) process.exit(1)
+}
+
+/**
+ * `desk watch test` — the `notify-test` of this feature.
+ *
+ * Debugging a watcher at 03:00 from a phone must not mean reading
+ * `daemon.log`. Prints what was run, where, how it ended, what it said on
+ * stderr, and what the desk made of its output — in that order, because that is
+ * the order the questions get asked in. Writes no state, for the same reason
+ * `watch` does.
+ */
+async function watchTest(argv: string[]): Promise<void> {
+  const { repo, taskId, watch } = await oneWatchedTask(
+    arg('--repo', argv),
+    arg('--task', argv),
+  )
+  console.log(`watch test ${taskId}  ${repo}`)
+  console.log(`  argv   ${watch.command.join(' ')}`)
+  console.log(`  cwd    ${repo}`)
+  const result = await runWatchCommand({ repo, taskId, watch })
+  console.log(
+    result.error
+      ? `  error  ${result.error}`
+      : result.timedOut
+        ? `  timed out after ${watch.timeoutSec}s (killed)`
+        : `  exit   ${result.code}  ${result.durationMs}ms`,
+  )
+  const tail = result.stderr.trim().split('\n').slice(-10)
+  console.log('  stderr (tail)')
+  for (const line of tail) console.log(`    ${line}`)
+  const { events, warnings } = parseWatchOutput(result.stdout)
+  console.log(`  events ${events.length}  warnings ${warnings.length}`)
+  for (const e of events) {
+    console.log(
+      `    - ${e.id}${e.type ? `  ${e.type}` : ''}${e.summary ? `  ${e.summary}` : ''}`,
+    )
+  }
+  for (const w of warnings) console.log(`    ! ${w}`)
+  if (result.failure) {
+    console.log(`  poll failed: ${result.failure}`)
+    process.exit(1)
+  }
+}
+
+/**
+ * `desk watch` and its three subcommands.
+ *
+ * The subcommand form follows `config`/`prompts`/`sessions`: `status` and
+ * `reset` are machine-wide reads and writes, and `reset` takes `--task` because
+ * a desk with several watchers is the case where it matters.
+ */
+const WATCH_SUBS = new Set(['status', 'test', 'reset'])
+
+async function watchCommand(argv: string[]): Promise<void> {
+  // `argv[0]` is `watch` itself, so the subcommand is `argv[1]` — and only if it
+  // is one. `desk watch --repo DIR` has a flag there instead, and must read as
+  // the one-pass form rather than as a subcommand called `--repo`.
+  const sub = WATCH_SUBS.has(argv[1] ?? '') ? argv[1] : undefined
+  const repo = arg('--repo', argv)
+  if (sub === undefined) return watchOnce(argv)
+  if (sub === 'status') {
+    const state = loadWatchState()
+    const rows = await watchedRows(repo)
+    if (rows.length === 0) {
+      console.log(repo ? 'no watched tasks' : 'no watched desks')
+      return
+    }
+    console.log(formatWatchStatus(state, rows))
+    return
+  }
+  if (sub === 'test') return watchTest(argv)
+  if (sub === 'reset') {
+    const state = loadWatchState()
+    const rows = await watchedRows(repo)
+    const only = arg('--task', argv)
+    const targets = only ? rows.filter((r) => r.taskId === only) : rows
+    if (targets.length === 0) {
+      console.error('no watched task to reset')
+      process.exit(1)
+    }
+    const now = new Date()
+    for (const { repo: r, taskId } of targets) resetTask(state, r, taskId, now)
+    saveWatchState(state, now)
+    console.log(
+      `reset ${targets.map((t) => t.taskId).join(', ')} — pending and dedupe forgotten`,
+    )
+    return
+  }
+  console.error(
+    'usage: herdr-desk watch [--repo DIR] [--task ID] | watch status | watch test | watch reset',
+  )
+  process.exit(2)
 }
 
 /**
@@ -482,6 +675,11 @@ async function main() {
     console.log(
       JSON.stringify(await runTask({ repo, taskId: job, trigger: 'manual' })),
     )
+    return
+  }
+
+  if (cmd === 'watch') {
+    await watchCommand(argv)
     return
   }
 

@@ -55,6 +55,33 @@ export type AgentInput =
     }
 
 /**
+ * A repo-owned command that prints events as NDJSON.
+ *
+ * Authoring form — every field but `command` has a default. Deliberately has no
+ * `env`: `.herdr-desk.json` is committed, so a block that could carry a token
+ * would be a secret in git history. The command inherits the daemon's
+ * environment and the plugin adds four `HERDR_DESK_*` variables of its own.
+ */
+export type WatchSpec = {
+  /** argv, never a shell string. argv[0] may be a path inside the repo. */
+  command: string[]
+  /** Seconds between polls. */
+  intervalSec?: number
+  /** Seconds before the poll is killed and counted as a failure. */
+  timeoutSec?: number
+  /** Events held for this task before the rest are counted as overflow. */
+  maxPending?: number
+}
+
+/** A {@link WatchSpec} with every default filled in. */
+export type WatchConfig = {
+  command: string[]
+  intervalSec: number
+  timeoutSec: number
+  maxPending: number
+}
+
+/**
  * Per-desk notification *destination*.
  *
  * Deliberately has no `token` field. The bot token is a host secret read only
@@ -81,8 +108,13 @@ export type TaskConfig = {
   maxChildren?: number
   /** Authoring form (string or list). */
   schedule?: Schedule
-  /** Normalized cron list after defaults. */
+  /** Normalized cron list after defaults. Empty means never on cron. */
   crons: string[]
+  /**
+   * Event trigger for this task, after defaults. Task-level only — a group
+   * config must not be able to point a whole tree at one repo-specific script.
+   */
+  watch?: WatchConfig
   stateDir?: string
   extra?: string
   describe?: string

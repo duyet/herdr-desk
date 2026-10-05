@@ -6,12 +6,45 @@ import {
   type DeskConfig,
   type LoadedDesk,
   type TaskConfig,
+  type WatchConfig,
+  type WatchSpec,
 } from './config'
 import { cronsOf } from './schedule'
 import { deskSlug } from './text'
 
 const BUNDLED_PREFIX = 'desk:'
 const LOCAL_PREFIX = 'local:'
+
+/**
+ * Watch defaults.
+ *
+ * `intervalSec: 60` is a minute because that is the cadence a repo-side poll
+ * loop is normally written at, so a watcher added today behaves like the loop it
+ * replaces. `timeoutSec: 30` is half an interval on purpose: a poll that hangs
+ * must be killed before its own successor is due, or one broken script costs two
+ * ticks instead of one.
+ */
+export const DEFAULT_WATCH: Omit<WatchConfig, 'command'> = {
+  intervalSec: 60,
+  timeoutSec: 30,
+  maxPending: 8,
+}
+
+/**
+ * Fill in a task's watch defaults.
+ *
+ * Task-level only. There is no root-level `watch` to inherit: the command is
+ * repo-specific, and a group config that could name one would silently point
+ * every repo in a tree at a script that only exists in one of them.
+ */
+export function applyWatch(spec: WatchSpec): WatchConfig {
+  return {
+    command: spec.command,
+    intervalSec: spec.intervalSec ?? DEFAULT_WATCH.intervalSec,
+    timeoutSec: spec.timeoutSec ?? DEFAULT_WATCH.timeoutSec,
+    maxPending: spec.maxPending ?? DEFAULT_WATCH.maxPending,
+  }
+}
 
 /**
  * Merge an `agent` block over a lower-priority spec.
@@ -96,6 +129,7 @@ export function applyDefaults(raw: DeskConfig, repo: string): LoadedDesk {
       extra,
       crons,
       schedule: crons.length === 1 ? crons[0] : crons,
+      watch: t.watch ? applyWatch(t.watch) : undefined,
       stateDir: t.stateDir ?? stateDirFor(id, playbook),
     } satisfies TaskConfig
   })

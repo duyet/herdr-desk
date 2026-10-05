@@ -9,6 +9,7 @@ import {
 } from './config'
 import { interpolate } from './interpolate'
 import { looksLikePath, resolveText } from './text'
+import type { WatchEvent } from './watch'
 
 export type PromptVars = Record<string, string>
 
@@ -20,10 +21,15 @@ export function taskVars(opts: {
   runDir: string
   workspaceId?: string
   paneId?: string
+  /** What woke this run. Absent means a cron slot. */
+  trigger?: 'manual' | 'event'
+  /** Events claimed for this run. Empty on every run that is not event-driven. */
+  events?: WatchEvent[]
 }): PromptVars {
   const extra = resolveText(opts.repo, opts.task.extra)
   const playbook = resolveText(opts.repo, opts.task.playbook)
   const bundled = playbookFile(opts.repo, opts.task)
+  const events = opts.events ?? []
   return {
     day: opts.day,
     repo: opts.repo,
@@ -50,7 +56,27 @@ export function taskVars(opts: {
     // agent to improvise, and it improvises by pasting the whole run into a
     // Telegram message itself.
     deskBin: join(DESK_ROOT, 'bin', 'desk'),
+    // Event vars. Every one of them is empty or zero when the run carries no
+    // events, which is what lets `assembleManagerPrompt` leave a cron run's
+    // prompt byte-for-byte what it has always been.
+    eventCount: String(events.length),
+    eventSummary: eventSummary(events),
+    eventJson: events.length ? JSON.stringify(events, null, 2) : '',
+    eventPath: events.length ? join(opts.runDir, 'events.json') : '',
+    triggerKind: opts.trigger ?? 'cron',
   }
+}
+
+/** One bullet per event: `- type — summary`. */
+function eventSummary(events: WatchEvent[]): string {
+  return events
+    .map((e) => {
+      const type = typeof e.type === 'string' && e.type ? e.type : 'event'
+      const summary =
+        typeof e.summary === 'string' && e.summary ? e.summary : e.id
+      return `- ${type} — ${summary}`
+    })
+    .join('\n')
 }
 
 function playbookFile(repo: string, task: TaskConfig): string {
@@ -71,8 +97,33 @@ export function renderFile(path: string, vars: PromptVars): string {
   return interpolate(readFileSync(path, 'utf8'), vars)
 }
 
+/**
+ * Event-only guidance in `prompts/run.md`, marked so it can be removed whole.
+ *
+ * The paragraph has to live in the manager envelope — that is the file every run
+ * reads — but a cron run must not gain a sentence it has no use for, because
+ * `assembleManagerPrompt` promises a cron run's prompt is byte-identical to
+ * before this feature existed. A marker is the cheapest way to have both: the
+ * text is authored where the rest of the envelope is, and stripped entirely
+ * rather than interpolated to an empty husk.
+ */
+const EVENT_BLOCK = /\n*<!-- events -->\n([\s\S]*?)\n?<!-- \/events -->/g
+
+function renderEnvelope(path: string, vars: PromptVars): string {
+  const raw = readFileSync(path, 'utf8')
+  const hasEvents = Number(vars.eventCount ?? '0') > 0
+  // The leading `\n*` is inside the pattern so removing the block removes the
+  // blank line that introduced it too — otherwise a cron prompt ends with one
+  // stray newline it did not have before this feature, which is the difference
+  // between "identical" and "identical except for a byte".
+  const text = raw.replace(EVENT_BLOCK, (_all, body: string) =>
+    hasEvents ? `\n\n${body.trim()}` : '',
+  )
+  return interpolate(text, vars)
+}
+
 export function assembleManagerPrompt(vars: PromptVars): string {
-  const envelope = renderFile(promptPath('run'), vars)
+  const envelope = renderEnvelope(promptPath('run'), vars)
   const identity = renderFile(vars.identityPath, vars)
   const taskBody = vars.taskPromptPath
     ? renderFile(vars.taskPromptPath, vars)
@@ -83,5 +134,22 @@ export function assembleManagerPrompt(vars: PromptVars): string {
     : vars.extraPath && existsSync(vars.extraPath)
       ? `\n\n---\n# Repo addendum\n\n${renderFile(vars.extraPath, vars)}`
       : ''
-  return `${envelope}\n\n---\n${identity}\n\n---\n${taskBody}${extra}\n`
+  const event = eventSection(vars)
+  return `${envelope}${event}\n\n---\n${identity}\n\n---\n${taskBody}${extra}\n`
+}
+
+/**
+ * The `# Event` section, and only when the run has events.
+ *
+ * Absent rather than empty, because a manager reading an empty "nothing is
+ * waiting" heading spends a run deciding there is nothing to do — which is the
+ * exact cost the cron path already pays once a slot. The pretty JSON is here for
+ * fields the bullets do not carry; `events.json` is the path for anything too
+ * big to belong in a prompt.
+ */
+function eventSection(vars: PromptVars): string {
+  if (Number(vars.eventCount ?? '0') <= 0) return ''
+  const bullets = vars.eventSummary ?? ''
+  const json = vars.eventJson ?? ''
+  return `\n\n---\n# Event\n\n${bullets}\n\n\`\`\`json\n${json}\n\`\`\`\n\nFull events: ${vars.eventPath}\n`
 }

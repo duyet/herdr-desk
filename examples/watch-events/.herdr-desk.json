@@ -1,0 +1,19 @@
+{
+  "$schema": "https://raw.githubusercontent.com/duyet/herdr-desk/main/herdr-desk.schema.json",
+  "name": "watch-events",
+  "tasks": [
+    {
+      "id": "local:pr-watch",
+      "playbook": "prompts/tasks/pr-review.md",
+      "agentName": "hd-pr-watch",
+      "schedule": [],
+      "maxChildren": 2,
+      "watch": {
+        "command": ["bun", "scripts/watch-prs.ts"],
+        "intervalSec": 60,
+        "timeoutSec": 45,
+        "maxPending": 8
+      }
+    }
+  ]
+}
