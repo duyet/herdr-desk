@@ -203,6 +203,16 @@ function main(): void {
   const prs = ghJson<Pr[]>(
     `repos/${slug}/pulls?state=all&sort=created&direction=desc&per_page=${PER_PAGE}`,
   )
+  // A full page means the window overflowed, so anything older than the page is
+  // invisible to this poll and will never be seen: the next poll asks for the
+  // same newest 30. Thirty PRs inside one interval is not a quiet week, but if
+  // it happens the right answer is a human reading this line, not a watcher that
+  // reports "no new PRs" forever.
+  if (prs.length >= PER_PAGE) {
+    log(
+      `window full: ${PER_PAGE} PRs is all this poll can see — anything older is missed`,
+    )
+  }
 
   const cursor = loadCursor(path, slug)
   if (!cursor) {
