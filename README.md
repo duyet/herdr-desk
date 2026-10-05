@@ -722,10 +722,14 @@ bun run prune:branches          # report what is spent
 bun run prune:branches:apply    # delete it
 ```
 
-A weekly workflow does the second one. The safety is in the script, not the
-workflow — a branch is only deleted if it has at least one **merged** PR, no
-open PR, and is not ahead of `main`. A branch with no PR history is never
-touched, which is what protects work that was pushed but not yet proposed.
+A weekly workflow runs the first one, never the second, so nothing clears these
+for you and they stay on the remote until someone runs `prune:branches:apply` by
+hand. Its Monday log is just a list.
+
+The safety is in the script, not the workflow — a branch is only deleted if it
+has at least one **merged** PR, no open PR, and is not ahead of `main`. A branch
+with no PR history is never touched, which is what protects work that was pushed
+but not yet proposed.
 
 It also skips `main`, `release-please--*`, and `desk/*` (the manager worktree
 branches the plugin creates at run time).

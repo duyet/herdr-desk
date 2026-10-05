@@ -1,7 +1,8 @@
 name: prune-branches
 
 # Merged branches accumulate because this repo squash-merges, so nothing tells
-# you a branch is spent. This deletes the ones whose work has landed, weekly.
+# you a branch is spent. Weekly, this only reports them; deleting needs a
+# workflow_dispatch run with `apply` ticked, so the pile is not going anywhere.
 #
 # The safety lives in the script, not here: a branch is only a candidate if it
 # has at least one MERGED pull request, has no open PR, and is not ahead of main.
