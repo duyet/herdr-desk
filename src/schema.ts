@@ -178,6 +178,102 @@ function validateNotify(raw: unknown, path: string, errors: string[]): void {
   }
 }
 
+/** Seconds between polls. Below 15 the daemon is a busy loop, not a watcher. */
+export const WATCH_RANGES = {
+  intervalSec: { min: 15, max: 3600 },
+  timeoutSec: { min: 5, max: 300 },
+  maxPending: { min: 1, max: 64 },
+} as const
+
+/**
+ * Validate a `watch` block.
+ *
+ * `command` is argv, so there is nothing to quote and nothing to inject a repo
+ * into — which is why a shell string is not accepted rather than being split.
+ * argv[0] that *looks* like a path is resolved against the repo and must land
+ * inside it, using the same {@link insideRepo} the state dir uses: a committed
+ * config is not allowed to reach out of the checkout and run something there.
+ *
+ * `env` is rejected outright, like `notify.token`. A block that could carry a
+ * credential would put it in git history with nothing left to notice, and the
+ * command inherits the daemon's environment anyway.
+ */
+export function validateWatch(
+  raw: unknown,
+  path: string,
+  repo?: string,
+): string[] {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return [`${path}: must be an object`]
+  }
+  const o = raw as Record<string, unknown>
+  const allowed = new Set([
+    'command',
+    'intervalSec',
+    'timeoutSec',
+    'maxPending',
+  ])
+  const errors: string[] = []
+  for (const k of Object.keys(o)) {
+    if (k === 'env') {
+      errors.push(
+        `${path}.env: not allowed — a repo config is committed. The command inherits the daemon env plus HERDR_DESK_REPO, HERDR_DESK_TASK, HERDR_DESK_STATE_DIR and HERDR_DESK_POLL_AT`,
+      )
+      continue
+    }
+    if (!allowed.has(k)) errors.push(`${path}: unknown field '${k}'`)
+  }
+  const cmd = o.command
+  if (!Array.isArray(cmd) || cmd.length === 0) {
+    errors.push(
+      `${path}.command: non-empty argv array, e.g. ["bun", "scripts/watch-prs.ts"]`,
+    )
+  } else {
+    cmd.forEach((part, i) => {
+      if (typeof part !== 'string' || !part.trim()) {
+        errors.push(`${path}.command[${i}]: must be a non-empty string`)
+      }
+    })
+    const head = cmd[0]
+    if (
+      typeof head === 'string' &&
+      head.trim() &&
+      repo &&
+      looksLikePathArg(head) &&
+      !insideRepo(repo, head)
+    ) {
+      errors.push(`${path}.command[0]: must stay inside the repo`)
+    }
+  }
+  for (const key of ['intervalSec', 'timeoutSec', 'maxPending'] as const) {
+    if (o[key] === undefined) continue
+    const { min, max } = WATCH_RANGES[key]
+    const n = o[key]
+    if (typeof n !== 'number' || !Number.isInteger(n) || n < min || n > max) {
+      errors.push(`${path}.${key}: integer ${min}–${max}`)
+    }
+  }
+  return errors
+}
+
+/**
+ * Does this argv[0] name a file rather than a binary?
+ *
+ * Deliberately narrow. `./x`, `../x`, `a/b` and `/x` are paths; `bun` is not,
+ * and treating `bun` as a repo-relative path would run the repo's own `bun`
+ * instead of the one on PATH.
+ */
+export function looksLikePathArg(value: string): boolean {
+  return (
+    value.startsWith('./') ||
+    value.startsWith('../') ||
+    value === '.' ||
+    value === '..' ||
+    value.startsWith('/') ||
+    value.includes('/')
+  )
+}
+
 export function insideRepo(repo: string, rel: string): boolean {
   const root = resolve(repo)
   const abs = resolve(root, rel)
@@ -272,7 +368,11 @@ function validateCron(raw: unknown, path: string): string[] {
 function validateSchedule(raw: unknown, path: string): string[] {
   if (typeof raw === 'string') return validateCron(raw, path)
   if (Array.isArray(raw)) {
-    if (raw.length < 1) return [`${path}: array must not be empty`]
+    // An empty array is the *event-only* form: `["schedule": []]` means never on
+    // cron. It used to be an error, which left a task with `watch` and no cron
+    // unable to say what it wanted — and omitting `schedule` instead inherits
+    // the root cron, so the reconciliation sweep fired a task that asked to be
+    // event-only. See `docs/watch.md`.
     return raw.flatMap((item, i) => validateCron(item, `${path}[${i}]`))
   }
   return [`${path}: cron string or array of cron strings`]
@@ -297,6 +397,7 @@ function validateTask(raw: unknown, path: string, repo?: string): string[] {
     'extra',
     'describe',
     'schedule',
+    'watch',
   ])
   for (const k of Object.keys(o)) {
     if (!allowed.has(k)) errors.push(`${path}: unknown field '${k}'`)
@@ -336,6 +437,8 @@ function validateTask(raw: unknown, path: string, repo?: string): string[] {
   }
   if (o.schedule !== undefined)
     errors.push(...validateSchedule(o.schedule, `${path}.schedule`))
+  if (o.watch !== undefined)
+    errors.push(...validateWatch(o.watch, `${path}.watch`, repo))
   if (o.agent !== undefined) validateAgent(o.agent, `${path}.agent`, errors)
   if (o.notify !== undefined) validateNotify(o.notify, `${path}.notify`, errors)
   validateKindField(o, path, errors)

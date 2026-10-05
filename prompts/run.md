@@ -123,3 +123,19 @@ recoverable, a broken send is not.
 
 When the run is done, write `changes.md`. Leave the project Space, your own
 manager worktree, and any child that still has work open.
+
+<!-- events -->
+## Woken by an event
+
+This run was woken by a repo event, not by a slot. `{{eventCount}}` event(s)
+waited, and they are in the `# Event` section below with their fields in
+`{{eventPath}}`.
+
+Work those events and stop. Do not go looking for the rest of the backlog — the
+slot that sweeps it is a separate run, and a run that does both spends the
+whole budget on work nobody woke you for.
+
+If the events say there is nothing to do — already fixed, already merged, not
+yours — write `status.md` with `level: skip` and stop. That is a real answer,
+and it is worth more than a run that goes looking for something to do.
+<!-- /events -->

@@ -229,6 +229,7 @@ Also accepted: `herdr-desk.json`. Copy from `examples/<kind>/.herdr-desk.json`:
 | `examples/custom-agent/` | An `agent` ladder, including a wrapper command |
 | `examples/legacy-kind/` | Deprecated `kind`, still valid |
 | `examples/inline-prompt/` | Custom playbook inline; id `local:…` |
+| `examples/watch-events/` | Event-only task: a repo script prints events, `schedule` is `[]` |
 
 Optional extra roots (repos you never open in Herdr):
 
@@ -236,6 +237,53 @@ Optional extra roots (repos you never open in Herdr):
 // $(herdr plugin config-dir herdr-desk)/config.json
 { "repos": ["~/src/other-repo"] }
 ```
+
+## Waking a job on an event
+
+A cron slot is good at "once a day, look at the backlog" and wrong at
+"someone opened a PR". The interesting minute is a guess between two slots,
+and every slot in between is a full manager run that finds nothing.
+
+The plugin does not learn what a PR is. It learns one thing: **a repo can
+hand the desk a command that prints events, and the desk turns events into
+runs.** "New PR" is an API call plus a filter; "a human commented" is a
+search query; "the deploy finished" is a URL. A cron cannot express any of
+them, so every repo hand-rolls a `while true; do …; done` loop beside the
+desk and the two drift.
+
+```json
+{
+  "id": "local:pr-watch",
+  "playbook": "prompts/tasks/pr-review.md",
+  "agentName": "hd-pr-watch",
+  "schedule": [],
+  "watch": { "command": ["bun", "scripts/watch-prs.ts"], "intervalSec": 60 }
+}
+```
+
+The script prints NDJSON on stdout, one object per line, each with a stable
+`id` — that id is the dedupe key, so a PR number works. The script owns its
+cursor; the desk owns when to run and not running twice. Events are deduped
+for 7 days, queued up to `maxPending`, and dispatched as **one** manager run
+carrying the whole queue, so a storm is one manager with ten items rather
+than ten managers.
+
+Two things to know before you rely on it:
+
+- **`"schedule": []` is what makes a task event-only.** Omit `schedule` and
+  the task inherits the root cron, which is a useful reconciliation sweep —
+  and also a full manager run every slot.
+- **A broken watcher is never silent.** `desk watch status` prints
+  `fails N from <date>`, and five consecutive failures notify.
+
+```sh
+bun src/cli.ts watch --repo DIR   # one pass: what it saw, fires nothing
+bun src/cli.ts watch status       # pending, overflow, fails, last/next poll
+bun src/cli.ts watch test --repo DIR   # argv, cwd, exit, stderr, events — no log reading
+```
+
+**→ [docs/watch.md](docs/watch.md) is the contract, with a copy-pasteable
+watcher.**
 
 ## See the cron and history
 

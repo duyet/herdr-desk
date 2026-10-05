@@ -20,11 +20,12 @@ import {
   pickPane,
   projectWorkspaceForRepo,
 } from './herdr'
-import { recordRun } from './history'
+import { type RunTrigger, recordRun } from './history'
 import { markRunning, markSettled } from './hub'
 import { briefReason, noticeBody, notify, resolveNotify } from './notify'
 import { assembleManagerPrompt, taskVars } from './prompt'
 import { HERDR_AGENT_KINDS } from './schema'
+import { claimEvents, restoreEvents } from './watch'
 
 type RunResult = {
   skipped?: string
@@ -112,8 +113,8 @@ export function launchKind(ladder: string[]): string {
 export async function runTask(opts: {
   repo: string
   taskId?: string
-  /** Recorded so a manual fire is told apart from a cron slot. */
-  trigger?: 'manual'
+  /** Recorded so a fire is told apart from a cron slot. */
+  trigger?: RunTrigger
 }): Promise<RunResult> {
   const config = loadDeskConfig(opts.repo)
   const repo = config.repo ?? opts.repo
@@ -274,7 +275,7 @@ async function execute(
   config: LoadedDesk,
   repo: string,
   task: TaskConfig,
-  trigger?: 'manual',
+  trigger?: RunTrigger,
 ): Promise<RunResult> {
   const day = dayKey()
   const runDir = runDirFor(repo, task, day)
@@ -336,74 +337,116 @@ async function execute(
   // nothing is registered to prompt. The manager's branch is also stable across
   // days, so a daily tick re-prompts the same session instead of stacking a new
   // workspace + pane per run.
-  const allAgents = namedAgents(await herdrCall(['agent', 'list']))
-  const vars = taskVars({
-    config,
-    task,
-    repo,
-    day,
-    runDir,
-    workspaceId: project.workspaceId,
-  })
+  //
+  // The event queue drains here, and it drains on *every* fire — cron, manual,
+  // or event. Putting it in the daemon instead would strand an event that
+  // arrived while the cron path was also working: the cron run would carry an
+  // empty prompt past a real event, and only the watch step would know to come
+  // back for it. Placed after the precondition checks, deliberately: a run that
+  // skipped because Herdr was down has done no work, and eating the queue on a
+  // skip is how ten events vanish with nothing anywhere saying they were never
+  // run.
+  const events = claimEvents(repo, task.id)
+  if (events.length) {
+    writeFileSync(
+      join(runDir, 'events.json'),
+      `${JSON.stringify(events, null, 2)}\n`,
+    )
+  }
 
-  // Marked before the prompt is sent, not after: the work starts when the
-  // manager is prompted, and a run that dies in the prompt call has to look
-  // started-and-failed rather than never having happened.
-  if (canPromptManager(allAgents, listed, task)) {
+  try {
+    const allAgents = namedAgents(await herdrCall(['agent', 'list']))
+    const vars = taskVars({
+      config,
+      task,
+      repo,
+      day,
+      runDir,
+      workspaceId: project.workspaceId,
+      trigger,
+      events,
+    })
+
+    // Marked before the prompt is sent, not after: the work starts when the
+    // manager is prompted, and a run that dies in the prompt call has to look
+    // started-and-failed rather than never having happened.
+    if (canPromptManager(allAgents, listed, task)) {
+      markRunning({ repo, task: task.id, desk: config.name })
+      await herdrCall([
+        'agent',
+        'prompt',
+        task.agentName,
+        assembleManagerPrompt(vars),
+      ])
+      return done({ prompted: true })
+    }
+
+    const kind = launchKind(task.agent.ladder)
+    const label = `${config.name} ${task.id}`
+    const child = await spawnDeskWorktree(
+      project.workspaceId,
+      task,
+      label,
+      repo,
+    )
+    const paneId = child.paneId
+    const childWorkspaceId = child.workspaceId
+    const workspaceId = project.workspaceId
+    await Bun.sleep(2000)
     markRunning({ repo, task: task.id, desk: config.name })
+    await herdrCall([
+      'agent',
+      'start',
+      task.agentName,
+      '--kind',
+      kind,
+      '--pane',
+      paneId,
+      '--timeout',
+      String(task.agent.timeoutMs ?? 180000),
+    ])
     await herdrCall([
       'agent',
       'prompt',
       task.agentName,
-      assembleManagerPrompt(vars),
+      assembleManagerPrompt(
+        taskVars({
+          config,
+          task,
+          repo,
+          day,
+          runDir,
+          workspaceId,
+          paneId,
+          trigger,
+          events,
+        }),
+      ),
     ])
-    return done({ prompted: true })
+    writeFileSync(
+      join(runDir, 'spawn.json'),
+      `${JSON.stringify(
+        {
+          day,
+          task: task.id,
+          agent: task.agentName,
+          workspaceId,
+          childWorkspaceId,
+          paneId,
+          startedAt: new Date().toISOString(),
+        },
+        null,
+        2,
+      )}\n`,
+    )
+    return done({ spawned: true })
+  } catch (err) {
+    // A run that threw did not happen, so the events go back where they were.
+    // The ledger records a fire either way, and a queue that swallowed its work
+    // on a failure is a lost job with no record of being lost.
+    restoreEvents(repo, task.id, events)
+    throw err
   }
-
-  const kind = launchKind(task.agent.ladder)
-  const label = `${config.name} ${task.id}`
-  const child = await spawnDeskWorktree(project.workspaceId, task, label, repo)
-  const paneId = child.paneId
-  const childWorkspaceId = child.workspaceId
-  const workspaceId = project.workspaceId
-  await Bun.sleep(2000)
-  markRunning({ repo, task: task.id, desk: config.name })
-  await herdrCall([
-    'agent',
-    'start',
-    task.agentName,
-    '--kind',
-    kind,
-    '--pane',
-    paneId,
-    '--timeout',
-    String(task.agent.timeoutMs ?? 180000),
-  ])
-  await herdrCall([
-    'agent',
-    'prompt',
-    task.agentName,
-    assembleManagerPrompt(
-      taskVars({ config, task, repo, day, runDir, workspaceId, paneId }),
-    ),
-  ])
-  writeFileSync(
-    join(runDir, 'spawn.json'),
-    `${JSON.stringify(
-      {
-        day,
-        task: task.id,
-        agent: task.agentName,
-        workspaceId,
-        childWorkspaceId,
-        paneId,
-        startedAt: new Date().toISOString(),
-      },
-      null,
-      2,
-    )}\n`,
-  )
-  return done({ spawned: true })
 }
 
 /**

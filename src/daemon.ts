@@ -10,17 +10,27 @@ import {
 import { join } from 'node:path'
 import { cronSlotsOnDay, cronSlotsToday } from './cron'
 import { dayKey } from './day'
-import { discoverDesks } from './discover'
+import { type Discovered, discoverDesks } from './discover'
+import { clearFailures, recordAnnounced, shouldAnnounce } from './failures'
 import { check, type HostHealth, readHealth, type Verdict } from './health'
 import { defaultHerdrBin } from './herdr'
+import type { RunTrigger } from './history'
 import { publish } from './hub'
-import { loadNotifyConfig, notify } from './notify'
+import { loadNotifyConfig, noticeBody, notify } from './notify'
 import { pluginStateDir } from './paths'
 import { isPaused, loadPaused, type PauseState } from './pause'
 import { clear, hold, requeue, view } from './queue'
 import { formatDuration } from './report'
 import { runTask } from './run'
 import { maybeAutoUpdate, updateLockHeld } from './update'
+import {
+  isDue,
+  loadWatchState,
+  saveWatchState,
+  WATCH_NOTIFY_AFTER,
+  watchPass,
+  taskState as watchTaskState,
+} from './watch'
 
 const TICK_MS = 20_000
 /** Keep fire keys whose day is within this many days of today (cronNext horizon). */
@@ -454,9 +464,193 @@ export async function tickOnce(
   // A held job is retried *after* the scheduled ones, so the queue can never
   // starve a job that was actually due.
   if (await retryHeld(at, gate)) n++
+  // And the watch step is after both, so a repo's poll script — which is the
+  // one piece of this daemon that runs code a repo wrote — can never delay a
+  // cron slot that was genuinely due.
+  const watched = await watchStep(desks, at, gate, paused)
+  n += watched.fired
+  if (watched.problem) needsHub = true
   saveFires(fires)
   if (n > 0 || needsHub) await publishHub()
   return n
+}
+
+/**
+ * What the watch step starts a job with.
+ *
+ * Injected for the same reason `gate` is: a test needs to drive the tick on a
+ * machine with no Herdr at all, and faking a Herdr binary to make `runTask`
+ * resolve would be testing the fake rather than the step. Production always
+ * passes the real {@link runTask}.
+ */
+export type WatchRunner = (opts: {
+  repo: string
+  taskId?: string
+  trigger?: RunTrigger
+}) => Promise<unknown>
+
+/**
+ * The watch step: poll every due watched task, then dispatch what it queued.
+ *
+ * Last in the tick, and separately guarded, for two reasons that both come from
+ * the same fact: the command comes from a repo config. A script that hangs is
+ * killed by its own timeout; a script that throws must not take the tick with
+ * it. So the whole step is one `try`/`catch` that logs and carries on — the
+ * catch is not defensive decoration, it is the only thing standing between a
+ * broken watcher in one repo and a desk that stops firing every other repo.
+ *
+ * One pass per task per tick, and only when `nextPollAt` has come. The interval
+ * is the repo's, and a task that is not due is not polled at all — so a desk with
+ * ten watched tasks at a 15s interval is not running sixty commands a minute
+ * because the tick is 20s.
+ *
+ * The health gate is consulted *after* the events are queued, never before:
+ * the queue is the backpressure. A saturated box holds a burst and absorbs it on
+ * a later tick rather than being handed ten managers, and nothing is written to
+ * `fires` — an event is not a slot, and claiming it fired would be a lie.
+ */
+export async function watchStep(
+  desks: Discovered[],
+  at: Date,
+  gate: (h: HostHealth) => Verdict = check,
+  paused: PauseState = loadPaused(),
+  run: WatchRunner = runTask,
+): Promise<{ fired: number; problem: boolean }> {
+  try {
+    // `let`, not `const`: a dispatch makes this snapshot stale. `runTask` claims
+    // the queue on its way into the run and rewrites the file itself, so the
+    // next task's save would otherwise write back the events the run just took —
+    // and a desk with two watched tasks would re-fire the first task's event on
+    // every later poll, forever. The reload is the fix; the comment is so the
+    // next reader does not "tidy" it back to a `const`.
+    let state = loadWatchState()
+    let fired = 0
+    let problem = false
+    for (const d of desks) {
+      for (const task of d.config.tasks) {
+        if (!task.watch) continue
+        if (!isDue(watchTaskState(state, d.repo, task.id, at), at)) continue
+        const pass = await watchPass({
+          repo: d.repo,
+          taskId: task.id,
+          watch: task.watch,
+          state,
+          at,
+          paused: isPaused(paused, d.repo, task.id, at),
+        })
+        // Written before anything is dispatched, so a run that fails or a tick
+        // that dies cannot replay the same events as new ones.
+        saveWatchState(state, at)
+
+        if (!pass.ok) {
+          log(
+            `watch fail ${d.config.name}/${task.id}: ${pass.error} (fails ${pass.task.fails})`,
+          )
+          await announceWatchFailure(
+            d.repo,
+            task.id,
+            pass.task.fails,
+            pass.error ?? 'poll failed',
+          )
+          continue
+        }
+        // A recovered watcher clears its own notice, so the next outage is said
+        // rather than held back as a repeat of one that is already over.
+        clearFailures(d.repo, task.id)
+        if (pass.paused && pass.events.length) {
+          log(
+            `watch paused ${d.config.name}/${task.id}: ${pass.events.length} event(s) dropped`,
+          )
+        }
+        if (pass.warnings) {
+          log(`watch ${d.config.name}/${task.id}: ${pass.warnings} bad line(s)`)
+        }
+        if (pass.queued || pass.duplicates || pass.overflow) {
+          log(
+            `watch ${d.config.name}/${task.id}: ${pass.queued} new, ${pass.duplicates} duplicate, ${pass.overflow} overflow, ${pass.task.pending.length} pending`,
+          )
+        }
+        if (pass.task.pending.length === 0) continue
+        // Checked here, immediately before the fire, for the same reason the
+        // cron path checks there: a tick can run for minutes.
+        const verdict = gate(readHealth())
+        if (!verdict.ok) {
+          log(
+            `watch hold ${d.config.name}/${task.id}: ${pass.task.pending.length} pending, ${verdict.breaches.join(', ')}`,
+          )
+          continue
+        }
+        log(
+          `watch fire ${d.config.name}/${task.id}: ${pass.task.pending.length} event(s)`,
+        )
+        try {
+          await run({ repo: d.repo, taskId: task.id, trigger: 'event' })
+          fired++
+        } catch (err) {
+          // A run that threw did not happen. The events stay queued — `run.ts`
+          // drains on success only — so the next pass retries them rather than
+          // the queue losing work nobody was told about.
+          log(
+            `watch fail ${d.config.name}/${task.id}: run: ${err instanceof Error ? err.message : String(err)}`,
+          )
+          problem = true
+        }
+        // Re-read after every dispatch, and after every failure: `runTask` owns
+        // the queue while it runs, and both the claim and the restore-on-throw
+        // write the file behind this loop's back.
+        state = loadWatchState()
+      }
+    }
+    return { fired, problem }
+  } catch (err) {
+    log(`watch ${err instanceof Error ? err.message : String(err)}`)
+    return { fired: 0, problem: false }
+  }
+}
+
+/**
+ * Say a dead watcher once.
+ *
+ * A watcher whose script broke on day one looks exactly like a watcher with
+ * nothing to report, and the ledger records both as "no events" — so silence
+ * here is indistinguishable from a quiet night. Five consecutive failures is the
+ * line: enough that a flaky network does not page anyone, few enough that a
+ * script which died on deployment is caught the same evening.
+ *
+ * Dedupe comes from `failures.ts` rather than a counter here, so one dead script
+ * is one message rather than one per poll, and so the fault clears on recovery
+ * through the same door every other announced fault uses.
+ */
+async function announceWatchFailure(
+  repo: string,
+  taskId: string,
+  fails: number,
+  error: string,
+): Promise<void> {
+  if (fails < WATCH_NOTIFY_AFTER) return
+  const said = `watch poll failed ${fails}x: ${error}`
+  try {
+    const config = loadNotifyConfig()
+    if (!config.enabled) return
+    if (!shouldAnnounce(repo, taskId, said)) return
+    const sent = await notify(
+      {
+        message: noticeBody({
+          level: 'fail',
+          headline: said,
+          tags: ['desk', 'watch'],
+        }) as string,
+        repo,
+        label: taskId,
+      },
+      config,
+    )
+    // Recorded only once the notice is out. A send that failed leaves the fault
+    // armed, because a repeat nobody read is not a repeat.
+    if (sent.sent) recordAnnounced(repo, taskId, said)
+  } catch {
+    // Reporting must never be able to stop the next poll, exactly as in `run.ts`.
+  }
 }
 
 /**

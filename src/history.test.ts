@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import {
   appendRun,
   failureStreak,
+  formatHistory,
   historyPath,
   loadRuns,
   MAX_DETAIL,
@@ -226,5 +227,25 @@ describe('truncateDetail', () => {
       else process.env.HERDR_PLUGIN_STATE_DIR = prev
       rmSync(dir, { recursive: true, force: true })
     }
+  })
+})
+
+describe('formatHistory: what woke the run', () => {
+  test('names the trigger, and leaves a cron slot unmarked', () => {
+    // `cron` is the absence of the field, so a record written before this
+    // existed still parses and still renders without a marker. That is the only
+    // reason `cron` is not spelled out.
+    const runs: RunRecord[] = [
+      rec({ at: '2026-10-05T00:00:00.000Z', ok: true, task: 'local:pr-watch' }),
+      rec({ at: '2026-10-05T01:00:00.000Z', ok: true, trigger: 'manual' }),
+      rec({ at: '2026-10-05T02:14:07.000Z', ok: true, trigger: 'event' }),
+    ]
+    const text = formatHistory(runs)
+    // One column of "who woke this", so a reader scanning a busy desk can tell
+    // an event-driven run from a person asking for one.
+    expect(text).toContain('run (event)')
+    expect(text).toContain('run (manual)')
+    expect(text.split('\n')[0]).toContain('local:pr-watch  run')
+    expect(text.split('\n')[0]).not.toContain('(')
   })
 })
