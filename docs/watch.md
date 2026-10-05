@@ -224,7 +224,7 @@ its work on a failure is a lost job with no record of being lost.
 A watcher whose script broke on day one looks exactly like a watcher with
 nothing to report, and the ledger records both as "no events". So:
 
-- `desk watch status` prints **`fails: N from <date>`** — the number and the
+- `desk watch status` prints **`fails N from <date>`** — the number and the
   day, not a status word.
 - **Five consecutive failures notify**, reusing the same `failures.ts` dedupe
   every other fault uses, so one dead script is one message rather than one

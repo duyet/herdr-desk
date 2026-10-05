@@ -274,7 +274,7 @@ Two things to know before you rely on it:
   the task inherits the root cron, which is a useful reconciliation sweep —
   and also a full manager run every slot.
 - **A broken watcher is never silent.** `desk watch status` prints
-  `fails: N from <date>`, and five consecutive failures notify.
+  `fails N from <date>`, and five consecutive failures notify.
 
 ```sh
 bun src/cli.ts watch --repo DIR   # one pass: what it saw, fires nothing

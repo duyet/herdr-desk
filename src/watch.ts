@@ -387,7 +387,7 @@ export function queueEvents(
  * saying "the desk is holding things it should not be", and the answer to that
  * is an empty queue — not a clean sheet on how the script has been failing.
  * Zeroing `fails` here would let the one command whose whole job is proving a
- * watcher is broken (`watch status`, `fails: N from <date>`) be the command that
+ * watcher is broken (`watch status`, `fails N from <date>`) be the command that
  * makes it look fine again.
  *
  * `nextPollAt` moves to now so the reset actually causes a poll, rather than
@@ -832,7 +832,7 @@ export function restoreEvents(
 /**
  * One line per watched task for `desk watch status`.
  *
- * `fails: N from <date>` rather than a status word, deliberately. A watcher
+ * `fails N from <date>` rather than a status word, deliberately. A watcher
  * whose script broke on day one looks exactly like a watcher with nothing to
  * report, and the ledger records both as "no events" — so the number and the day
  * it started are what has to be on the line. `ok` would be a claim, and the desk
