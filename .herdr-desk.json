@@ -10,6 +10,21 @@
       "maxChildren": 5,
       "schedule": "0 * * * *",
       "extra": "Required CI: the single `ci` job in `.github/workflows/ci.yml`, the only check this repo's workflows define. It runs `bun run lint`, `bun run typecheck`, `bun test`, `bun run validate:examples`, and `bun run build`. CodeRabbit, GitGuardian and Socket also report on PRs; they are not required, but read them before merging. `main` has no branch protection and the repo sets `allow_auto_merge: false`, so `gh pr merge --auto` is not a gate here: it would leave the PR unmerged, not wait for anything. Read the `ci` conclusion, then `gh pr merge --squash`, per `prompts/child.md`. Never auto-merge release-please PRs. Children must use the OpenCode v2 runtime (`opencode2`, equivalent to the local `opencode` v2 binary) with model `opencode/space-bunny-free`; confirm the model before editing. Do not run heavy local Node/build/test tasks: rely on CI for lint, typecheck, tests, and builds. Children may open PRs. Manager does not implement on `main`. Reuse before spawning: one long-lived manager session, one worktree per issue, and re-prompt a child already working the issue instead of duplicating it. Clean up a child worktree only after its PR merged. State is local; do not commit `.herdr-desk/runs/`."
+    },
+    {
+      "id": "local:pr-watch",
+      "playbook": "prompts/tasks/pr-review.md",
+      "agentName": "hd-pr-watch",
+      "kind": "opencode",
+      "schedule": [],
+      "maxChildren": 2,
+      "watch": {
+        "command": ["bun", "scripts/watch-prs.ts"],
+        "intervalSec": 60,
+        "timeoutSec": 45,
+        "maxPending": 8
+      },
+      "extra": "Required CI: the single `ci` job in `.github/workflows/ci.yml`, the only check this repo's workflows define. It runs `bun run lint`, `bun run typecheck`, `bun test`, `bun run validate:examples`, and `bun run build`. CodeRabbit, GitGuardian and Socket also report on PRs; they are not required, but read them before merging. This job is event-only, `schedule: []`, and the watcher is the only thing that starts it: a cron sibling would be a second manager waking on the same PRs. It reviews, and it may push a commit to the PR's head branch; that is the end of its authority. It never merges, not with `--squash`, not with `--auto`, not when `ci` is green, and it never tells a child to merge. `desk:github-issues` owns merging on this repo. `main` has no branch protection and the repo sets `allow_auto_merge: false`, so a red `ci` stops nothing by itself: read the conclusion, put it in the report, and leave the PR for `desk:github-issues`. Never auto-merge release-please PRs. A PR from a fork cannot be pushed to; the event carries `headFork`, and the answer is a review comment, not a maintainer token or a workaround. Children push to the PR's head branch and do not open a PR of their own: `prompts/child.md` tells them to open one, so say so in the child's prompt, in those words. Children must use the OpenCode v2 runtime (`opencode2`, equivalent to the local `opencode` v2 binary) with model `opencode/space-bunny-free`; confirm the model before editing. Do not run heavy local Node/build/test tasks: rely on the PR's `ci` check, because a local `bun test` on a review worktree with the wrong deps says nothing about the gate. Work only the events in this run's event section, at most `maxChildren` of them, one PR per worktree, and do not go looking for a backlog: a second commit on a head branch does not fire a new event, so review the PR's current head rather than the event's `at`, and reviewing the same PR twice is normal. The watcher ignores `desk/*` branches, release-please, dependabot and renovate branches, and every bot author, so this job never sees the desk's own children and must not try to review them; that filter is what stops the desk from reviewing its own review commits. Reuse before spawning: re-prompt a child already reviewing a PR instead of duplicating it, and close a child worktree only after that PR is merged. Manager does not implement on `main`. State is local; do not commit `.herdr-desk/runs/` or `.herdr-desk/watch/`."
     }
   ]
 }
