@@ -28,7 +28,6 @@ import {
   loadWatchState,
   saveWatchState,
   WATCH_NOTIFY_AFTER,
-  watchKey,
   watchPass,
   taskState as watchTaskState,
 } from './watch'
@@ -518,13 +517,18 @@ export async function watchStep(
   run: WatchRunner = runTask,
 ): Promise<{ fired: number; problem: boolean }> {
   try {
-    const state = loadWatchState()
+    // `let`, not `const`: a dispatch makes this snapshot stale. `runTask` claims
+    // the queue on its way into the run and rewrites the file itself, so the
+    // next task's save would otherwise write back the events the run just took —
+    // and a desk with two watched tasks would re-fire the first task's event on
+    // every later poll, forever. The reload is the fix; the comment is so the
+    // next reader does not "tidy" it back to a `const`.
+    let state = loadWatchState()
     let fired = 0
     let problem = false
     for (const d of desks) {
       for (const task of d.config.tasks) {
         if (!task.watch) continue
-        const key = watchKey(d.repo, task.id)
         if (!isDue(watchTaskState(state, d.repo, task.id, at), at)) continue
         const pass = await watchPass({
           repo: d.repo,
@@ -591,6 +595,10 @@ export async function watchStep(
           )
           problem = true
         }
+        // Re-read after every dispatch, and after every failure: `runTask` owns
+        // the queue while it runs, and both the claim and the restore-on-throw
+        // write the file behind this loop's back.
+        state = loadWatchState()
       }
     }
     return { fired, problem }

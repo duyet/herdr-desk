@@ -795,7 +795,7 @@ export function drainPending(
   taskId: string,
 ): WatchEvent[] {
   const t = state.tasks[watchKey(repo, taskId)]
-  if (!t || !t.pending.length) return []
+  if (!t?.pending.length) return []
   const events = t.pending
   t.pending = []
   return events

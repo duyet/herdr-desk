@@ -11,9 +11,7 @@ import { join } from 'node:path'
 import type { LoadedDesk, TaskConfig, WatchConfig } from './config'
 import { loadDeskConfig } from './config'
 import { watchStep } from './daemon'
-import { dayKey } from './day'
 import type { Discovered } from './discover'
-import { loadRuns } from './history'
 import { emptyPause, pauseKey, withPause } from './pause'
 import { assembleManagerPrompt, taskVars } from './prompt'
 import { cronsOf, scheduleLabel } from './schedule'
@@ -848,6 +846,29 @@ describe('the watch step in the tick', () => {
     return repo
   }
 
+  /** The other watched task, for the two-task cases. */
+  const SECOND = 'local:second-watch'
+
+  function withSecondTask(repo: string): void {
+    const file = join(repo, '.herdr-desk.json')
+    const raw = JSON.parse(readFileSync(file, 'utf8')) as {
+      tasks: Array<Record<string, unknown>>
+    }
+    raw.tasks.push({
+      id: SECOND,
+      playbook: 'prompts/tasks/pr-review.md',
+      agentName: 'hd-second-watch',
+      schedule: [],
+      watch: { command: ['bun', 'watch.ts'], intervalSec: 60 },
+    })
+    writeFileSync(file, `${JSON.stringify(raw)}\n`)
+  }
+
+  /** One desk holding two watched tasks, loaded the way the daemon loads them. */
+  function twoTaskDesk(repo: string): Discovered[] {
+    return [{ repo, config: loadDeskConfig(repo) } as Discovered]
+  }
+
   test('an event fires one run, and the queue is empty afterwards', async () => {
     const repo = watchedDesk([
       JSON.stringify({
@@ -927,6 +948,50 @@ describe('the watch step in the tick', () => {
     )
     expect(later.fired).toBe(1)
     expect(calls).toHaveLength(1)
+  })
+
+  test("a second watched task cannot resurrect the first one's queue", async () => {
+    // The lost update this guards against: `watchStep` holds one snapshot of
+    // the state file for the whole tick, and a dispatch makes it stale — the run
+    // claims its events and rewrites the file itself. Saving the stale snapshot
+    // for the *next* task would put those events back, so task A would re-fire
+    // the same event on every poll task B makes, forever.
+    const repo = watchedDesk([
+      JSON.stringify({ id: 'pr-a', type: 'pull_request.opened' }),
+    ])
+    withSecondTask(repo)
+    const calls: string[] = []
+    const fakeRun = async (o: { repo: string; taskId?: string }) => {
+      calls.push(o.taskId ?? '')
+      // Honour the part of `runTask` the queue depends on.
+      claimEvents(o.repo, o.taskId ?? '')
+      return {}
+    }
+
+    const first = await watchStep(
+      twoTaskDesk(repo),
+      AT,
+      roomy,
+      undefined,
+      fakeRun,
+    )
+    expect(calls).toEqual([TASK, SECOND])
+
+    const state = loadWatchState()
+    expect(state.tasks[watchKey(repo, TASK)]?.pending).toEqual([])
+    expect(state.tasks[watchKey(repo, SECOND)]?.pending).toEqual([])
+
+    // And it stays empty: a later tick must not find the first task's event
+    // waiting again, which is what an un-reloaded snapshot produces.
+    const later = await watchStep(
+      twoTaskDesk(repo),
+      new Date(AT.getTime() + 120_000),
+      roomy,
+      undefined,
+      noRun,
+    )
+    expect(later.fired).toBe(0)
+    expect(first.fired).toBe(2)
   })
 
   test('a task that is not due is not polled', async () => {
