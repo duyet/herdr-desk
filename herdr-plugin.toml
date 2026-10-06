@@ -105,7 +105,7 @@ command = ["bin/desk", "history"]
 
 [[actions]]
 id = "watch"
-title = "Poll a repo's watchers once, print what they saw (fires nothing)"
+title = "Poll this repo's watchers once (the cwd), print what they saw (fires nothing)"
 command = ["bin/desk", "watch"]
 
 [[actions]]
@@ -115,7 +115,7 @@ command = ["bin/desk", "watch", "status"]
 
 [[actions]]
 id = "watch-test"
-title = "Run a watcher directly: argv, cwd, exit, stderr, events parsed"
+title = "Run this repo's watcher directly (the cwd): argv, cwd, exit, stderr, events parsed"
 command = ["bin/desk", "watch", "test"]
 
 [[actions]]

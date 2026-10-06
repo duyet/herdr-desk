@@ -270,17 +270,30 @@ than ten managers.
 
 Two things to know before you rely on it:
 
-- **`"schedule": []` is what makes a task event-only.** Omit `schedule` and
-  the task inherits the root cron, which is a useful reconciliation sweep —
-  and also a full manager run every slot.
+- **`"schedule": []` is what makes a task event-only**, and it only means
+  something together with a `watch` block. A task with no cron and no `watch`
+  can never run, and `validate` refuses it rather than letting a `-` in
+  `desk status` read as "unset". Omit `schedule` and the task inherits the
+  root cron, which is a useful reconciliation sweep — and also a full manager
+  run every slot.
 - **A broken watcher is never silent.** `desk watch status` prints
-  `fails N from <date>`, and five consecutive failures notify.
+  `fails N from <date>`, and five consecutive failures notify — once per 12-hour
+  quiet period, not once ever.
 
 ```sh
 bun src/cli.ts watch --repo DIR   # one pass: what it saw, fires nothing
-bun src/cli.ts watch status       # pending, overflow, fails, last/next poll
+bun src/cli.ts watch status       # every watcher: pending, overflow, fails, last/next poll
 bun src/cli.ts watch test --repo DIR   # argv, cwd, exit, stderr, events — no log reading
+bun src/cli.ts watch reset --repo DIR  # forget pending + dedupe
 ```
+
+`watch` and `watch test` act on one repo and default to the **current
+directory** — the `watch` action above polls whichever repo you invoke it from,
+so it needs `cwd` set to one. `status` and `reset` are machine-wide without
+`--repo`.
+
+`watch` and `watch test` write no *desk* state, but they do run your script —
+and your script keeps its own cursor, so a `watch test` can move it.
 
 **→ [docs/watch.md](docs/watch.md) is the contract, with a copy-pasteable
 watcher.**
@@ -717,6 +730,9 @@ herdr plugin action invoke herdr-desk.validate
 herdr plugin action invoke herdr-desk.notify
 herdr plugin action invoke herdr-desk.prompts   # registries and what is approved
 herdr plugin action invoke herdr-desk.summary   # summary prompt preview (dry run)
+herdr plugin action invoke herdr-desk.watch     # poll the cwd's watcher once, print what it saw
+herdr plugin action invoke herdr-desk.watch-status  # every watcher: pending, overflow, fails, last/next poll
+herdr plugin action invoke herdr-desk.watch-test    # run the cwd's watcher: argv, cwd, exit, events
 ```
 
 On-demand (plugin actions take no arguments):

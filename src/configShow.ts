@@ -2,6 +2,7 @@ import { relative, resolve } from 'node:path'
 import { type DeskConfig, loadDeskConfig } from './config'
 import { applyDefaults } from './defaults'
 import { resolveConfig } from './layers'
+import { scheduleLabel } from './schedule'
 import { textTable } from './table'
 
 /**
@@ -80,7 +81,11 @@ export function explainTasks(repo: string): string {
     t.id,
     t.agent.ladder.join(' > '),
     t.agent.permission,
-    t.crons.join(' | '),
+    // `-`, not a blank cell. An event-only task has no cron, and `textTable` has
+    // no placeholder, so the cell rendered as whitespace indistinguishable from a
+    // rendering bug — in the one command a person runs to check a config.
+    // `scheduleLabel` is the placeholder `discover.ts` and `status` already use.
+    t.crons.length ? t.crons.join(' | ') : scheduleLabel(t.crons),
     String(t.maxChildren ?? 5),
   ])
   return textTable(['JOB', 'LADDER', 'PERM', 'CRON', 'MAX'], rows)

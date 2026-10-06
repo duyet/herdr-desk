@@ -378,6 +378,15 @@ function validateSchedule(raw: unknown, path: string): string[] {
   return [`${path}: cron string or array of cron strings`]
 }
 
+/** `[]` and `[""]` and friends: a schedule that names no cron at all. */
+function isEmptySchedule(raw: unknown): boolean {
+  if (!Array.isArray(raw)) return false
+  return raw.every((s) => typeof s !== 'string' || !s.trim())
+}
+
+const NEVER_RUNS =
+  'no cron and no "watch" block, so this task can never run. add a "watch" block, or give it a cron'
+
 function validateTask(raw: unknown, path: string, repo?: string): string[] {
   const errors: string[] = []
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
@@ -439,6 +448,13 @@ function validateTask(raw: unknown, path: string, repo?: string): string[] {
     errors.push(...validateSchedule(o.schedule, `${path}.schedule`))
   if (o.watch !== undefined)
     errors.push(...validateWatch(o.watch, `${path}.watch`, repo))
+  // The event-only form is only meaningful with something to be woken by. A
+  // `schedule: []` with no `watch` is a job that validates, renders its cron as
+  // `-` in `status`, and is never owed anything — a typo reading as "unset"
+  // rather than "never fires". `schedule: []` is new in #94, so no existing
+  // config can break on this.
+  if (isEmptySchedule(o.schedule) && o.watch === undefined)
+    errors.push(`${path}.schedule: ${NEVER_RUNS}`)
   if (o.agent !== undefined) validateAgent(o.agent, `${path}.agent`, errors)
   if (o.notify !== undefined) validateNotify(o.notify, `${path}.notify`, errors)
   validateKindField(o, path, errors)

@@ -10,7 +10,12 @@ import {
 import { join } from 'node:path'
 import { cronSlotsOnDay, cronSlotsToday } from './cron'
 import { dayKey } from './day'
-import { type Discovered, discoverDesks } from './discover'
+import {
+  type Discovered,
+  discoverAll,
+  firstLine,
+  type LoadFailure,
+} from './discover'
 import { clearFailures, recordAnnounced, shouldAnnounce } from './failures'
 import { check, type HostHealth, readHealth, type Verdict } from './health'
 import { defaultHerdrBin } from './herdr'
@@ -207,6 +212,88 @@ function log(line: string): void {
   console.log(line)
 }
 
+/**
+ * Configs the daemon could not read, as of the last tick.
+ *
+ * The ledger is a `repo -> error` map, not a counter, because the thing worth
+ * logging is a *change*: a repo whose config breaks is one line, and a repo
+ * whose config stays broken is silence after the first. A config does not edit
+ * itself, so per tick would be a line every 20 seconds forever; per process
+ * would be a line every restart. Distinct-error is the shape that carries news.
+ */
+type LoadErrorLedger = Record<string, string>
+
+function loadErrorPath(): string {
+  return join(pluginStateDir(), 'load-errors.json')
+}
+
+function loadLoadErrors(): LoadErrorLedger {
+  if (!existsSync(loadErrorPath())) return {}
+  try {
+    const raw = JSON.parse(readFileSync(loadErrorPath(), 'utf8')) as unknown
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
+    const out: LoadErrorLedger = {}
+    for (const [k, v] of Object.entries(raw)) {
+      if (typeof v === 'string') out[k] = v
+    }
+    return out
+  } catch {
+    // Unreadable is "nothing has been said", so every failure logs once again
+    // rather than being silently held back.
+    return {}
+  }
+}
+
+function saveLoadErrors(ledger: LoadErrorLedger): void {
+  try {
+    mkdirSync(pluginStateDir(), { recursive: true })
+    writeFileSync(loadErrorPath(), `${JSON.stringify(ledger, null, 2)}\n`)
+  } catch {
+    /* next tick logs the same fault again, which is the safe direction */
+  }
+}
+
+/**
+ * Log a config that cannot be read, once per repo per distinct error.
+ *
+ * A repo that failed to load is not in the fire loop, so nothing else in the
+ * daemon says it stopped existing — before #97 that was the whole story: a
+ * healthy-looking machine, no failed runs, and a job that had silently stopped
+ * being owed anything. This is the line that says otherwise, and it is in
+ * `daemon.log` rather than in a notice because it is a machine fact, not
+ * something to wake someone for at 03:00; `status` carries the count.
+ *
+ * Never throws. It runs inside the tick, and a state file that cannot be
+ * written must not take the cron path down with it.
+ */
+export function logLoadFailures(failed: LoadFailure[]): void {
+  try {
+    const seen = loadLoadErrors()
+    const next: LoadErrorLedger = {}
+    let changed = false
+    for (const f of failed) {
+      const first = firstLine(f.error)
+      next[f.repo] = first
+      // Keyed on the message, so the same repo with a *different* error is new
+      // information and says so, while an unchanged one stays quiet.
+      if (seen[f.repo] !== first) {
+        changed = true
+        log(`load error ${f.repo}: ${first}`)
+      }
+    }
+    // A repo that loads again is dropped from the ledger, so a later breakage
+    // says so again instead of being held back as a repeat of one that is over.
+    if (Object.keys(next).length !== Object.keys(seen).length) changed = true
+    if (changed) saveLoadErrors(next)
+  } catch (err) {
+    log(
+      `load error: could not report unreadable configs (${
+        err instanceof Error ? err.message : String(err)
+      })`,
+    )
+  }
+}
+
 function fireKey(
   repo: string,
   taskId: string,
@@ -340,7 +427,11 @@ export async function tickOnce(
   // desk killed part way through a long tick reopens the hole by one tick —
   // 20s against a window that is measured in hours.
   writeLastAlive(at)
-  const desks = await discoverDesks()
+  const { desks, failed } = await discoverAll()
+  // Before the fire loop, and not inside it: a repo that could not be read has
+  // no jobs, so there is nothing to hold back, and reporting it must not be able
+  // to stop a desk that is fine from firing.
+  logLoadFailures(failed)
   const fires = loadFires()
   // Read once per tick; a corrupt file throws and fires nothing (fail closed).
   const paused: PauseState = loadPaused()
@@ -609,6 +700,26 @@ export async function watchStep(
 }
 
 /**
+ * The text announced for a dead watcher.
+ *
+ * Deliberately carries no failure count. `shouldAnnounce` keys on a hash of this
+ * line, so `watch poll failed ${fails}x: ${error}` made every consecutive failure
+ * of one watcher a *different* fault: fails 5, 6, 7 and 8 were four first
+ * sightings and four notices, where the intent was one. On a script dead since
+ * day one that is one message per poll — and because the poll interval backs off
+ * to `intervalSec * 8`, roughly one every eight minutes at the 60s default, not
+ * one a minute. The count belongs in the log line `watchStep` writes on every
+ * failure, which already has it.
+ *
+ * The error *is* in the text, and has to be: two different reasons are two
+ * different faults, and a watcher that breaks a second way must say so rather
+ * than be held back as a repeat of the first.
+ */
+export function watchFailureMessage(error: string): string {
+  return `watch poll failed: ${error}`
+}
+
+/**
  * Say a dead watcher once.
  *
  * A watcher whose script broke on day one looks exactly like a watcher with
@@ -619,35 +730,60 @@ export async function watchStep(
  *
  * Dedupe comes from `failures.ts` rather than a counter here, so one dead script
  * is one message rather than one per poll, and so the fault clears on recovery
- * through the same door every other announced fault uses.
+ * through the same door every other announced fault uses. "One" means one per
+ * `REANNOUNCE_MS` quiet period, not one ever.
  */
-async function announceWatchFailure(
+
+export type WatchAnnounceDeps = {
+  /**
+   * Send the notice, and report whether it went out.
+   *
+   * Injected for the same reason `maybeAutoUpdate` injects its notifier: the
+   * thing worth testing here is *which line* is announced and *when* it is held
+   * back, and `shouldAnnounce` keys on a hash of that line. With the real
+   * `notify` behind it, a test cannot get a notice out of a machine with no
+   * Telegram token, so the previous version of these tests re-implemented the
+   * dedupe in the test body and proved the test's own string was stable. An
+   * injected notifier makes the function itself the thing under test.
+   */
+  notify?: (repo: string, taskId: string, said: string) => Promise<boolean>
+  now?: () => Date
+}
+
+export async function announceWatchFailure(
   repo: string,
   taskId: string,
   fails: number,
   error: string,
+  deps: WatchAnnounceDeps = {},
 ): Promise<void> {
   if (fails < WATCH_NOTIFY_AFTER) return
-  const said = `watch poll failed ${fails}x: ${error}`
+  const said = watchFailureMessage(error)
+  const now = deps.now ?? (() => new Date())
   try {
     const config = loadNotifyConfig()
     if (!config.enabled) return
-    if (!shouldAnnounce(repo, taskId, said)) return
-    const sent = await notify(
-      {
-        message: noticeBody({
-          level: 'fail',
-          headline: said,
-          tags: ['desk', 'watch'],
-        }) as string,
-        repo,
-        label: taskId,
-      },
-      config,
-    )
+    const at = now()
+    if (!shouldAnnounce(repo, taskId, said, at)) return
+    const sent = deps.notify
+      ? await deps.notify(repo, taskId, said)
+      : (
+          await notify(
+            {
+              message: noticeBody({
+                level: 'fail',
+                headline: said,
+                tags: ['desk', 'watch'],
+              }) as string,
+              repo,
+              label: taskId,
+            },
+            config,
+          )
+        ).sent
     // Recorded only once the notice is out. A send that failed leaves the fault
     // armed, because a repeat nobody read is not a repeat.
-    if (sent.sent) recordAnnounced(repo, taskId, said)
+    if (sent) recordAnnounced(repo, taskId, said, at)
   } catch {
     // Reporting must never be able to stop the next poll, exactly as in `run.ts`.
   }

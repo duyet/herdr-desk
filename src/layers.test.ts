@@ -3,7 +3,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import type { DeskConfig } from './config'
-import { applyDefaults } from './defaults'
+import { loadDeskConfig } from './config'
+import { applyDefaults, DEFAULT_WATCH } from './defaults'
 import {
   expandPath,
   findGroupLayers,
@@ -144,6 +145,95 @@ describe('findGroupLayers', () => {
     mkdirSync(repo, { recursive: true })
     writeFileSync(join(home, 'p', '.herdr-desk.json'), '{ not json')
     expect(findGroupLayers(repo, home)).toEqual([])
+  })
+})
+
+describe('a group config cannot widen a watch range', () => {
+  /**
+   * A group layer carrying an out-of-range `watch`, folded into a repo.
+   *
+   * Tested through `loadDeskConfig`, never through `applyWatch`, because the
+   * defect is that the fold does not validate: `resolveConfig` reads a group
+   * layer without calling `validateDeskJson` — deliberately, so one bad shared
+   * layer cannot break every repo on the host — which means a group config is
+   * the one path by which `intervalSec: 1` reaches the daemon. A test of
+   * `applyWatch` alone would pass while the fold stayed unvalidated.
+   */
+  function folded(watch: Record<string, unknown>) {
+    const home = tmp('home')
+    const repo = join(home, 'project', 'myrepo')
+    mkdirSync(repo, { recursive: true })
+    write(join(home, 'project', '.herdr-desk.json'), {
+      name: 'group',
+      group: true,
+      tasks: [{ id: 'local:from-group', watch }],
+    })
+    // The repo declares no `tasks` at all. `mergeConfigs` replaces `tasks`
+    // wholesale, so a repo that restated the task would drop the layer's `watch`
+    // and the clamp would never be reached — which is the point: the numbers
+    // arrive from a shared layer precisely when the repo stays quiet.
+    write(join(repo, '.herdr-desk.json'), { name: 'repo' })
+    return loadDeskConfig(repo).tasks[0].watch
+  }
+
+  test('intervalSec and maxPending from a layer are clamped to the documented range', () => {
+    // The docs and the schema both say 15–3600 and 1–64. Before the clamp in
+    // `applyWatch` these were used as written, so a group config could put the
+    // daemon in a 1-second busy loop and a 9999-deep queue — and a doc that
+    // describes an unenforced range is lying in the same way `status` was.
+    expect(folded({ command: ['bun', 'w.ts'], intervalSec: 1 })).toMatchObject({
+      intervalSec: 15,
+    })
+    expect(
+      folded({ command: ['bun', 'w.ts'], intervalSec: 999_999 }),
+    ).toMatchObject({ intervalSec: 3600 })
+    expect(
+      folded({ command: ['bun', 'w.ts'], maxPending: 9999 }),
+    ).toMatchObject({
+      maxPending: 64,
+    })
+    expect(folded({ command: ['bun', 'w.ts'], maxPending: 0 })).toMatchObject({
+      maxPending: 1,
+    })
+    expect(folded({ command: ['bun', 'w.ts'], timeoutSec: 1 })).toMatchObject({
+      timeoutSec: 5,
+    })
+    expect(
+      folded({ command: ['bun', 'w.ts'], timeoutSec: 9999 }),
+    ).toMatchObject({
+      timeoutSec: 300,
+    })
+  })
+
+  test('a value inside the range is left alone', () => {
+    expect(
+      folded({ command: ['bun', 'w.ts'], intervalSec: 120, maxPending: 16 }),
+    ).toMatchObject({ intervalSec: 120, maxPending: 16 })
+  })
+
+  test('a non-integer or non-numeric value from a layer falls back to the default', () => {
+    // `Math.min(3600, NaN)` is `NaN`, and a `NaN` interval makes `isDue` true on
+    // every tick forever. An unvalidated layer is exactly where that comes from.
+    expect(
+      folded({ command: ['bun', 'w.ts'], intervalSec: 'soon' }),
+    ).toMatchObject({
+      intervalSec: DEFAULT_WATCH.intervalSec,
+    })
+    expect(folded({ command: ['bun', 'w.ts'], maxPending: 4.5 })).toMatchObject(
+      {
+        maxPending: DEFAULT_WATCH.maxPending,
+      },
+    )
+  })
+
+  test('an absent value still takes the default, not the floor', () => {
+    // The clamp must not turn "unset" into "minimum": a task that never set
+    // `intervalSec` is a 60s poll, not a 15s one.
+    expect(folded({ command: ['bun', 'w.ts'] })).toMatchObject({
+      intervalSec: DEFAULT_WATCH.intervalSec,
+      timeoutSec: DEFAULT_WATCH.timeoutSec,
+      maxPending: DEFAULT_WATCH.maxPending,
+    })
   })
 })
 

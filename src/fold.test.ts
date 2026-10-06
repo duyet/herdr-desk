@@ -244,3 +244,55 @@ describe('validation stays repo-scoped', () => {
     expect(() => loadDeskConfig(repo)).toThrow(/maxChildren/)
   })
 })
+
+describe('config explain', () => {
+  /** The rendered row for `taskId`. Cells are not split, since a CRON cell can contain `|`. */
+  function explainedRow(repo: string, taskId: string): string {
+    const row = explainTasks(repo)
+      .split('\n')
+      .find((l) => l.trim().startsWith('|') && l.includes(taskId))
+    if (!row) throw new Error(`no row for ${taskId} in:\n${explainTasks(repo)}`)
+    return row
+  }
+
+  test('an event-only task shows a placeholder, not a blank cell', () => {
+    // `textTable` has no placeholder, so `t.crons.join(' | ')` on an empty list
+    // rendered an empty cell — indistinguishable from a rendering bug, in the
+    // one command a person runs to check a config. `discover.ts` and
+    // `scheduleLabel` both say `-`, and now this does too.
+    const repo = tmp('repo')
+    write(join(repo, '.herdr-desk.json'), {
+      name: 'acme',
+      tasks: [
+        {
+          id: 'local:event-only',
+          schedule: [],
+          watch: { command: ['bun', 'w.ts'] },
+        },
+      ],
+    })
+    // The cell holds the character, not whitespace: a blank cell is exactly what
+    // made this read as a bug rather than as a task with no cron.
+    expect(explainedRow(repo, 'local:event-only')).toMatch(/\|\s+-\s+\|/)
+  })
+
+  test('a cron task still shows its cron', () => {
+    const repo = tmp('repo')
+    write(join(repo, '.herdr-desk.json'), {
+      name: 'acme',
+      tasks: [{ id: 'local:nightly', schedule: '0 3 * * *' }],
+    })
+    expect(explainedRow(repo, 'local:nightly')).toContain('0 3 * * *')
+  })
+
+  test('several crons keep the pipe separator', () => {
+    const repo = tmp('repo')
+    write(join(repo, '.herdr-desk.json'), {
+      name: 'acme',
+      tasks: [{ id: 'local:twice', schedule: ['0 3 * * *', '30 20 * * *'] }],
+    })
+    expect(explainedRow(repo, 'local:twice')).toContain(
+      '0 3 * * * | 30 20 * * *',
+    )
+  })
+})

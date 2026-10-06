@@ -54,6 +54,13 @@ task with `watch` and `"schedule": []` is event-only.
 | `timeoutSec` | 30 | 5–300 |
 | `maxPending` | 8 | 1–64 |
 
+The ranges are enforced twice, on purpose. A repo's own file is checked by
+`validate`, which rejects a number outside them. A **group config is not
+validated** — one bad shared layer must not break every repo on the host at
+once — so a group layer's `watch` numbers are clamped into the same range as
+they are applied. A range the code honours only sometimes is a range the docs
+are lying about.
+
 ### A task with `watch` and no `schedule` is NOT event-only
 
 This is the trap, so it is here rather than in a changelog:
@@ -71,7 +78,15 @@ If you want events only, say so explicitly:
 ```
 
 An empty array is the event-only form. `cronsOf([])` is `[]`,
-`scheduleLabel([])` is `-`, and `validate` accepts it.
+`scheduleLabel([])` is `-`, and `validate` accepts it — **but only with a
+`watch` block on the same task.** `schedule: []` with no `watch` is a job that
+can never run, and it is a validation error saying so: a `-` in `desk status`
+reads as "unset", and the next thing you learn about that job is that it has
+been silently never owed anything.
+
+```jsonc
+"schedule": []   // no "watch" on this task -> validate: no cron and no "watch" block
+```
 
 ## The script contract
 
@@ -215,9 +230,14 @@ path was also working is then not stranded behind a queue only the watch
 step knows how to empty. A cron run with an empty queue gets a
 **byte-identical prompt** to what it got before this feature existed.
 
-If the run fails before the manager sees the prompt, the events go back on
-the queue. The ledger records a fire either way, and a queue that swallowed
-its work on a failure is a lost job with no record of being lost.
+If the run fails before the manager sees the prompt, **a failed run is
+recorded** — `runs.jsonl` gets `ok: false` with the reason, and the hub settles
+the cell as `fail` — but **no successful run is**, and the events go back on the
+**front** of the queue, because they arrived first. So the queue keeps the work
+it was handed rather than swallowing it, and nothing claims a run happened that
+did not. What is deliberately *not* written is `fires.json`: an event fire never
+appears there, because an event is not a slot and a record claiming a slot fired
+would be a lie.
 
 ## Not allowed to be silent
 
@@ -227,8 +247,22 @@ nothing to report, and the ledger records both as "no events". So:
 - `desk watch status` prints **`fails N from <date>`** — the number and the
   day, not a status word.
 - **Five consecutive failures notify**, reusing the same `failures.ts` dedupe
-  every other fault uses, so one dead script is one message rather than one
-  per minute. The notice clears when the watcher recovers.
+  every other fault uses, so one dead script is one message rather than one per
+  poll. The notice clears when the watcher recovers.
+
+The announced line is `watch poll failed: <error>` and deliberately carries **no
+failure count**. `shouldAnnounce` keys on a hash of that line, so a count in it
+made every consecutive failure a different fault: fails 5, 6, 7 and 8 were four
+first sightings and four notices, where the intent was one. On a script dead
+since day one that is one message per poll — and because the poll interval backs
+off to `intervalSec * 8` after a few failures, roughly one every eight minutes at
+the 60s default, not one a minute. The streak is in the `watch fail … (fails N)`
+line in `daemon.log` and in `watch status`, which is where a number belongs. A
+*different* error is still a different fault, and does announce.
+
+"Once" means once per `REANNOUNCE_MS` — 12 hours — not once ever. The same fault
+is announced again after a quiet period, so a watcher that nobody fixed is still
+mentioned the next morning.
 
 State lives in one file, `watch.json` in the plugin state dir, written the
 way `fires.json` is (tmp + rename, pruned on the way out). A corrupt file is
@@ -238,22 +272,95 @@ moved to `watch.json.bak` and the desk starts fresh — the same recovery
 ## Commands
 
 ```sh
-desk watch --repo DIR [--task ID]      # one pass; print what it saw; fire nothing; write no state
-desk watch status                      # per task: pending, overflow, fails, last/next poll
-desk watch test --repo DIR [--task ID] # run the command directly: argv, cwd, exit, stderr, events
-desk watch reset --repo DIR [--task ID]# forget pending + dedupe
+desk watch --repo DIR [--task ID]        # one pass; print what it saw; fire nothing
+desk watch status [--repo DIR] [--task ID]      # per task: pending, overflow, fails, last/next poll
+desk watch test --repo DIR [--task ID]   # run the command directly: argv, cwd, exit, stderr, events
+desk watch reset [--repo DIR] [--task ID]       # forget pending + dedupe
 ```
 
+All four take `--repo` and `--task`, but **they do not mean the same thing
+without `--repo`**:
+
+| Command | No `--repo` |
+|---|---|
+| `desk watch` | the **current directory** — one repo, or an error |
+| `desk watch test` | the **current directory** — one repo, or an error |
+| `desk watch status` | **every repo on the machine** |
+| `desk watch reset` | **every repo on the machine** |
+
+`watch` and `watch test` act on exactly one task, so they need one repo and fall
+back to `process.cwd()`. Run them from a non-desk directory and they say
+`no herdr-desk config in /some/path` and exit 1 — they do not go looking for
+watchers elsewhere. `status` and `reset` are machine-wide reads and writes, so
+they enumerate every desk the daemon knows about.
+
+`--task` narrows to one watched task wherever it is accepted, and a desk with
+several watchers is the case where it matters.
+
+A flag with **no value is an error**, not "no filter" — a flag written to
+narrow scope must never widen it. `desk watch reset --repo DIR --task` resets
+nothing and exits 2, as does `--task --repo DIR`, where the "value" is another
+flag. An unrecognised word is an error too: `desk watch bogus` prints the usage
+line and exits 2 rather than quietly running a poll pass and ignoring the word.
+
 `watch` and `watch test` **exit non-zero when the poll failed**, so either
-can be a check. Both write no state: a dry run that recorded a dedupe key
-would make the next real poll skip an event just because someone looked at
-it.
+can be a check.
+
+### `watch` and `watch test` write no *desk* state
+
+They write nothing the desk keeps: no `watch.json` entry, no dedupe key, no
+queue. A dry run that recorded a key would make the next real poll skip an event
+just because someone looked at it.
+
+They do run your script, though, and the script keeps its own cursor. **A
+`watch test` can move that cursor** — which is the point of a test, and is also
+how you lose the events it was meant to show you. If that matters, read what
+your script does before pointing `watch test` at the live one, or run it against
+a copy. `examples/watch-events` sidesteps the question entirely: its script
+prints one fixed event and keeps no cursor.
 
 `watch test` is the `notify-test` of this feature. Debugging a watcher at
 03:00 from a phone must not mean reading `daemon.log`.
 
 Actions: `herdr-desk.watch`, `herdr-desk.watch-status`,
-`herdr-desk.watch-test`.
+`herdr-desk.watch-test`. Plugin actions take no arguments, so the flags above
+belong to the `bun src/cli.ts watch …` form only — and that matters, because
+without `--repo` the three actions do three different things:
+
+- `herdr-desk.watch` runs `desk watch` with **no `--repo`**, so it polls **the
+  current directory**: one repo, or an error if that directory is not a desk.
+  It cannot sweep every watcher.
+- `herdr-desk.watch-status` runs `desk watch status`, which **is** machine-wide:
+  every watched task on this machine.
+- `herdr-desk.watch-test` runs `desk watch test`, so like `watch` it is
+  cwd-scoped.
+
+To poll one watcher from the command line, name it:
+`bun src/cli.ts watch --repo /path/to/repo`.
+
+## Limits, so a failed poll can say why
+
+Three bounds. The first two say so when they bite; the third is silent, which is
+worth knowing before you rely on the other two.
+
+| Limit | Value | What happens past it |
+|---|---|---|
+| `MAX_STDOUT_BYTES` | 4 MB | **The poll fails**, with `stdout over 4194304 bytes` |
+| `MAX_LINE_BYTES` | 64 KB | That line alone is skipped, counted as a warning |
+| `SEEN_MAX` | 10 000 keys | The **oldest** dedupe keys are evicted |
+
+The stdout cap fails the poll rather than parsing a prefix of it: a truncated
+event list is silently wrong, which is worse than no list. Print less, or print
+summaries — events travel to a manager as prompt text, so an unbounded list is
+an unbounded prompt.
+
+`SEEN_MAX` is the one with a sharp edge, and it is the reason to read this
+section. The 7-day TTL is what stops a rewound cursor replaying a week of
+history; the cap is what stops the file growing forever. A watcher louder than
+10 000 events inside the TTL evicts its own oldest keys, and an evicted event
+can then be **re-fired inside the 7-day window**. `watch status` does not count
+evictions, so past that volume the dedupe ledger is no longer protecting you and
+`maxPending` is the only thing between a burst and a manager.
 
 ## In the manager prompt
 
@@ -263,7 +370,25 @@ and the path to `<runDir>/events.json`. Template vars `{{eventCount}}`,
 `{{eventSummary}}`, `{{eventJson}}`, `{{eventPath}}` and `{{triggerKind}}`
 are all empty or zero when there are none.
 
+The block in `prompts/run.md` renders on **any** fire carrying events, not only
+an event fire — `run.ts` claims the queue on every fire — so it comes in **two
+versions**, and `triggerKind` picks which one renders:
+
+- an **event** fire gets *Repo events on this run*: the events woke the run, so
+  work them and stop, and `level: skip` is a real answer if they need nothing.
+- a **`cron` or `manual`** fire that merely found a queue gets *A repo event
+  queue on this run*: the events were waiting, not the reason it started, so do
+  the slot's (or the person's) normal work **and** handle them. A queue of no-op
+  events is explicitly **not** a reason to skip the run.
+
+The second one exists because the first was the only one, and "work them and
+stop" told a reconciliation sweep to abandon the slot's own work over a queue of
+already-handled events, and told a hand-triggered run to `level: skip`.
+
 `history` records `trigger: 'event'` and prints `(event)` next to
 `(manual)`.
 
-See `examples/watch-events/.herdr-desk.json` for a complete config.
+See `examples/watch-events/` for a config you can copy as it stands: its playbook
+is inline markdown and its watcher is the one script beside it, so nothing else
+has to exist. That watcher prints one fixed event and keeps no cursor — a
+fixture for the config, not a poller.

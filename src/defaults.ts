@@ -10,6 +10,7 @@ import {
   type WatchSpec,
 } from './config'
 import { cronsOf } from './schedule'
+import { WATCH_RANGES } from './schema'
 import { deskSlug } from './text'
 
 const BUNDLED_PREFIX = 'desk:'
@@ -31,19 +32,47 @@ export const DEFAULT_WATCH: Omit<WatchConfig, 'command'> = {
 }
 
 /**
- * Fill in a task's watch defaults.
+ * Fill in a task's watch defaults, and hold the numbers to the documented range.
  *
  * Task-level only. There is no root-level `watch` to inherit: the command is
  * repo-specific, and a group config that could name one would silently point
  * every repo in a tree at a script that only exists in one of them.
+ *
+ * The clamp is not belt-and-braces. `resolveConfig` folds an ancestor group
+ * config **without** calling `validateDeskJson` — deliberately, so one bad
+ * shared layer cannot break every repo on the host at once — and a group config
+ * *can* carry task-level `watch`. So `intervalSec: 1` and `maxPending: 9999`
+ * from a shared layer reached this function unvalidated and were used as
+ * written, while the docs and the schema both promise 15–3600 and 1–64. A
+ * documented range the code does not honour is not a documentation bug; it is
+ * the same defect as a state key nobody writes, wearing a different hat. So the
+ * range is enforced here too, where the numbers are actually used.
  */
 export function applyWatch(spec: WatchSpec): WatchConfig {
   return {
     command: spec.command,
-    intervalSec: spec.intervalSec ?? DEFAULT_WATCH.intervalSec,
-    timeoutSec: spec.timeoutSec ?? DEFAULT_WATCH.timeoutSec,
-    maxPending: spec.maxPending ?? DEFAULT_WATCH.maxPending,
+    intervalSec: clampWatch('intervalSec', spec.intervalSec),
+    timeoutSec: clampWatch('timeoutSec', spec.timeoutSec),
+    maxPending: clampWatch('maxPending', spec.maxPending),
   }
+}
+
+/**
+ * One watch number, defaulted then clamped into {@link WATCH_RANGES}.
+ *
+ * A non-integer or non-numeric value from an unvalidated layer falls back to the
+ * default rather than propagating: `Math.min(3600, NaN)` is `NaN`, and a `NaN`
+ * interval is a task that is due on every tick forever.
+ */
+function clampWatch(
+  key: keyof typeof WATCH_RANGES,
+  raw: number | undefined,
+): number {
+  const fallback = DEFAULT_WATCH[key]
+  const n = raw ?? fallback
+  if (!Number.isInteger(n)) return fallback
+  const { min, max } = WATCH_RANGES[key]
+  return Math.min(max, Math.max(min, n))
 }
 
 /**
