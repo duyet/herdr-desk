@@ -25,6 +25,8 @@ import { cpus, freemem, loadavg, totalmem } from 'node:os'
  *   a starved `node` run looks like a half-finished test, not an OOM.
  * - **live agents** — from Herdr, so it counts the *desk's own* children. A
  *   desk that is already fanning out five worktrees is the load it is causing.
+ *   Herdr holds a finished manager registered so the next slot can re-prompt it,
+ *   so this counts sessions that are still open, not registrations.
  *
  * Every reading is defensive. This runs before every fire on every tick, so a
  * throw here would stop the desk entirely — the exact opposite of what a
@@ -43,7 +45,7 @@ export type HostHealth = {
   /** Bytes of memory the kernel says are genuinely available. */
   memAvailable: Reading
   memTotal: number
-  /** Herdr sessions alive right now. */
+  /** Herdr sessions still open: `working` plus `idle`, never `done`. */
   agents: number
   /** Of those, ones that are actually working. */
   busy: number
@@ -122,6 +124,14 @@ export function loadPerCore(): Reading {
 /**
  * Live and busy session counts from `herdr agent list`.
  *
+ * Live is `working` plus `idle`, never `done`. A finished manager stays
+ * registered on purpose — `canPromptManager` re-prompts it — so counting
+ * registrations made this number only ever rise: a long-lived desk crossed
+ * `maxAgents` once and then nothing on the machine fired again. Idle is counted
+ * because a parked pane is a live PTY holding a slot. A state we do not
+ * recognise counts as live, so a new Herdr status holds a fire rather than
+ * quietly removing a ceiling.
+ *
  * Returns zeros rather than throwing when Herdr is unreachable: a health check
  * that throws stops the desk, and "cannot count" is not "everything is fine"
  * but it is also not an emergency worth blocking on.
@@ -134,12 +144,15 @@ export function agentCounts(listJson: unknown): {
     (listJson as { result?: { agents?: Array<Record<string, unknown>> } })
       ?.result?.agents ?? []
   if (!Array.isArray(agents)) return { agents: 0, busy: 0 }
+  let live = 0
   let busy = 0
   for (const a of agents) {
     const status = String(a.agent_status ?? a.status ?? '')
+    if (status === 'done') continue
+    live++
     if (status === 'working') busy++
   }
-  return { agents: agents.length, busy }
+  return { agents: live, busy }
 }
 
 /** Read the host. `running` comes from the hub, which is the desk's own count. */
@@ -224,7 +237,9 @@ export function check(
     )
   }
   if (h.agents > budget.maxAgents) {
-    breaches.push(`${h.agents} agents over ${budget.maxAgents}`)
+    breaches.push(
+      `${h.agents} sessions (${h.busy} working) over ${budget.maxAgents}`,
+    )
   }
 
   return {

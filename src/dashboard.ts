@@ -97,13 +97,16 @@ export function render(d: Dashboard): string {
     )}  ${c.dim('free')}`,
   )
   out.push(
+    // "Open", not "registered": the bar is scaled against `maxAgents`, the same
+    // number the gate reads, so a reader comparing this to `herdr agent list`
+    // is told which of the two counts held the machine.
     `        ${label(String(d.host.agents), 9)}  ${gauge(
       d.host.agents,
       d.budget.maxAgents,
       18,
       d.plain,
       (v) => String(Math.round(v)),
-    )}  ${c.dim(`sessions · ${d.host.busy} working`)}`,
+    )}  ${c.dim(`sessions open · ${d.host.busy} working`)}`,
   )
 
   out.push('')
@@ -287,7 +290,7 @@ a{color:inherit}
 <h2>host</h2>
 <p>${escapeHtml(fmtLoad(d.host))} · ${d.host.cores} cores</p>
 <p>${escapeHtml(mem)}</p>
-<p>${d.host.agents} sessions · ${d.host.busy} working</p>
+<p>${d.host.agents} sessions open · ${d.host.busy} working</p>
 </section>
 <section>
 <h2>desk</h2>
