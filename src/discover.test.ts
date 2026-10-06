@@ -463,9 +463,13 @@ describe('the daemon reports a load failure', () => {
     writeConfig(bad, armAheadConfig('ahead'))
     remember(state, ...good, bad)
     const roomy = () => ({ ok: true, breaches: [], pressure: 0 })
-    // A schedule in the past so the tick has a slot due, and a Herdr that is not
-    // running, so each job resolves as a precondition skip rather than hanging.
-    const past = new Date(Date.now() - 7 * 86_400_000)
+    // A fixed instant, with a cron whose slot has already passed *on that day*:
+    // `cronSlotsToday` yields the slots up to `at`, so `Date.now() - 7 days` only
+    // worked when the wall clock was already past 07:00 and failed for the seven
+    // hours a day when it was not. That is what made this red in CI at 05:30 UTC
+    // and green at 16:40. A Herdr that is not running keeps each job a
+    // precondition skip rather than a hang.
+    const past = new Date(2026, 8, 30, 9, 15)
 
     await tickOnce(past, roomy)
     const log = readFileSync(join(state, 'daemon.log'), 'utf8')
