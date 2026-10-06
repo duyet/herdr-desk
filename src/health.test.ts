@@ -27,6 +27,20 @@ function host(over: Partial<HostHealth> = {}): HostHealth {
   }
 }
 
+/** A `herdr agent list` listing holding that many sessions in each state. */
+function listing(states: Record<string, number>): unknown {
+  return {
+    result: {
+      agents: Object.entries(states).flatMap(([agent_status, n]) =>
+        Array.from({ length: n }, (_, i) => ({
+          name: `${agent_status}-${i}`,
+          agent_status,
+        })),
+      ),
+    },
+  }
+}
+
 const budget: Budget = {
   maxLoadPerCore: 1.5,
   minMemAvailable: 3 * 1024 ** 3,
@@ -56,11 +70,30 @@ describe('check', () => {
     expect(v.breaches[0]).toContain('2.0GB free')
   })
 
-  test('too many live agents holds a fire', () => {
+  test('too many open sessions holds a fire', () => {
     // The desk's own children are the load it is causing.
-    const v = check(host({ agents: 30 }), budget)
+    const v = check(host({ agents: 30, busy: 12 }), budget)
     expect(v.ok).toBe(false)
-    expect(v.breaches[0]).toContain('30 agents')
+    expect(v.breaches[0]).toBe('30 sessions (12 working) over 24')
+  })
+
+  test('a desk full of finished managers does not stop the machine', () => {
+    // 2026-10-05: 32 registered sessions, 2 of them working, 150 give-ups in a
+    // day. Counting every registration made the number monotonic, so a
+    // long-lived desk crossed 24 for good and nothing on it ever fired again.
+    const { agents, busy } = agentCounts(
+      listing({ working: 2, idle: 2, done: 28 }),
+    )
+    expect(check(host({ agents, busy }), budget).ok).toBe(true)
+  })
+
+  test('but sessions that are still open do hold a fire', () => {
+    // The same gate, and the reason it exists: idle panes hold a PTY, so a
+    // count that ignored them would re-enter the outage under another name.
+    const { agents, busy } = agentCounts(listing({ working: 30 }))
+    const v = check(host({ agents, busy }), budget)
+    expect(v.ok).toBe(false)
+    expect(v.breaches[0]).toBe('30 sessions (30 working) over 24')
   })
 
   test('the reason names every breach, not just the first', () => {
@@ -102,7 +135,9 @@ describe('defaultBudget', () => {
 })
 
 describe('agentCounts', () => {
-  test('counts live and busy sessions', () => {
+  test('counts open sessions and the working ones among them', () => {
+    // `idle` counts — a parked pane still holds a PTY — and `done` does not,
+    // because a finished manager stays registered for the next prompt.
     const got = agentCounts({
       result: {
         agents: [
@@ -113,7 +148,12 @@ describe('agentCounts', () => {
         ],
       },
     })
-    expect(got).toEqual({ agents: 4, busy: 2 })
+    expect(got).toEqual({ agents: 3, busy: 2 })
+  })
+
+  test('a status we do not know counts as open', () => {
+    // A new Herdr state must not silently delete the ceiling the gate enforces.
+    expect(agentCounts(listing({ parked: 5 }))).toEqual({ agents: 5, busy: 0 })
   })
 
   test('an unreadable listing is zero, never a throw', () => {
