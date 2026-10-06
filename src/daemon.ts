@@ -19,7 +19,7 @@ import { publish } from './hub'
 import { loadNotifyConfig, noticeBody, notify } from './notify'
 import { pluginStateDir } from './paths'
 import { isPaused, loadPaused, type PauseState } from './pause'
-import { clear, hold, requeue, view } from './queue'
+import { clear, type HeldJob, hold, requeue, view } from './queue'
 import { formatDuration } from './report'
 import { runTask } from './run'
 import { maybeAutoUpdate, updateLockHeld } from './update'
@@ -654,6 +654,21 @@ async function announceWatchFailure(
 }
 
 /**
+ * The line a give-up leaves, naming the repo the way every other one does.
+ *
+ * A desk is machine-wide, so a task name does not identify a job: chmonitor and
+ * llm-over-dns both run a `local:improve` and both run a `local:babysit`, and
+ * every repo runs the bundled `desk:github-issues` in the same tick. A give-up
+ * has no other record anywhere — no run, no fire, no ledger key — so matching a
+ * bare task name back to its hold line by timestamp was the only way left, and
+ * it attributed 74 of 94 give-ups to the wrong task while 11 stayed
+ * unattributed altogether. The repo is what the line is missing.
+ */
+export function giveUpLine(job: HeldJob): string {
+  return `give up ${job.repo}/${job.task}: held since ${job.since} without running`
+}
+
+/**
  * Retry one held job, if the host now has room.
  *
  * One per tick, and only the oldest. Draining the whole queue the moment the
@@ -674,7 +689,12 @@ async function retryHeld(
 ): Promise<boolean> {
   const { jobs, expired } = view(at)
   for (const gone of expired) {
-    log(`give up ${gone.task}: held since ${gone.since} without running`)
+    log(giveUpLine(gone))
+    // The tick is what retires a give-up. `view()` only reports one, so the
+    // entry stays owed until somebody acts on that — and nothing else writes
+    // this file, so left here it is reported again by every tick for as long as
+    // the desk runs, and the queue only ever grows.
+    clear(gone.repo, gone.task)
   }
   const next_ = jobs[0]
   if (!next_) return false

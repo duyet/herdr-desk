@@ -164,12 +164,19 @@ export type QueueView = {
 }
 
 /**
- * The queue with anything past its age dropped, for display and for the tick.
+ * The queue with anything past its age separated out, for display and the tick.
  *
  * Expired jobs are returned rather than silently deleted so the caller can
  * report them. A job that waited six hours and never ran is a fact about the
  * desk, and dropping it quietly would make a machine that is too busy look
  * exactly like a machine where everything is fine.
+ *
+ * Nothing is written here. A read that deletes hides its side effect from every
+ * caller, so the next one to arrive inherits a race nobody chose: the dashboard
+ * — the only surface that renders a repo next to a give-up — was erasing the
+ * entries it was rendering, and a give-up survived only until whichever
+ * consumer ran first. Retiring one is `clear()`'s job, where the deletion is
+ * visible.
  */
 export function view(now = new Date()): QueueView {
   const jobs = load()
@@ -179,7 +186,6 @@ export function view(now = new Date()): QueueView {
     if (now.getTime() - Date.parse(j.since) > MAX_HELD_MS) expired.push(j)
     else held.push(j)
   }
-  if (expired.length) save(held)
   held.sort(
     (a, b) => a.since.localeCompare(b.since) || a.task.localeCompare(b.task),
   )

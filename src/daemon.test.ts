@@ -10,6 +10,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   catchUpPlan,
+  giveUpLine,
   loadFires,
   pruneFires,
   saveFires,
@@ -19,7 +20,7 @@ import {
   tickOnce,
 } from './daemon'
 import { loadRuns } from './history'
-import { hold, queued } from './queue'
+import { hold, MAX_HELD_MS, queued } from './queue'
 
 // Everything the tick reads off the host, so a run cannot pick up the machine's
 // real Herdr, real desk configs, or a real Telegram token.
@@ -113,6 +114,16 @@ function missedLines(): string[] {
   )
     .split('\n')
     .filter((l) => l.includes('missed slots'))
+}
+
+/** Every `give up` line this tick or the last one wrote. */
+function giveUpLines(): string[] {
+  return readFileSync(
+    join(process.env.HERDR_PLUGIN_STATE_DIR as string, 'daemon.log'),
+    'utf8',
+  )
+    .split('\n')
+    .filter((l) => l.includes('give up'))
 }
 
 /** The stamp a daemon's last tick would have left. */
@@ -390,6 +401,44 @@ describe('a held job whose slot comes due', () => {
 
     expect(queued()).toHaveLength(1)
     expect(queued()[0]?.since).toBe(HELD_AT.toISOString())
+  })
+})
+
+describe('a job the queue gives up on', () => {
+  const AT = new Date(2026, 8, 30, 9, 15)
+  // Another repo's job, so the desk below runs its own and the scheduled path
+  // does not discharge this one first.
+  const gone = {
+    repo: '/p/llm-over-dns',
+    task: 'local:improve',
+    slot: '02:17',
+    since: '2026-10-04T19:17:00.000Z',
+    tries: 22,
+    reason: '30 agents over 24',
+  }
+
+  test('the line names the repo', () => {
+    // Two repos on this desk run a task called `local:improve`, so the task
+    // alone cannot say which job gave up — and nothing else records a give-up.
+    // Matching it back to its hold line by timestamp attributed 74 of 94 to the
+    // wrong task, and left 11 attributable to nothing at all.
+    expect(giveUpLine(gone)).toBe(
+      'give up /p/llm-over-dns/local:improve: held since 2026-10-04T19:17:00.000Z without running',
+    )
+  })
+
+  test('the tick reports it and drops it', async () => {
+    // `view()` no longer deletes, so the tick has to. Left queued, the same
+    // entry is given up on again by every tick for as long as the desk runs.
+    desk(true)
+    hold(gone, new Date(AT.getTime() - MAX_HELD_MS - 60_000))
+
+    await tickOnce(AT, roomy)
+
+    expect(giveUpLines()).toEqual([
+      expect.stringContaining('give up /p/llm-over-dns/local:improve'),
+    ])
+    expect(queued()).toHaveLength(0)
   })
 })
 

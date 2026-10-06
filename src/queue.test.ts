@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { clear, hold, MAX_HELD_MS, next, queued, requeue, view } from './queue'
@@ -77,6 +77,21 @@ describe('queue', () => {
   test('reports how long the oldest job has waited', () => {
     hold(job(TASK), new Date(Date.now() - 5 * 60_000))
     expect(view().oldestMs).toBeGreaterThanOrEqual(5 * 60_000)
+  })
+
+  test('reading the queue leaves the file exactly as it was', () => {
+    // `view()` is a view. Dropping the aged-out entries inside it made the
+    // dashboard — the only surface that names the repo next to a give-up —
+    // destroy the record it was rendering, and left the next caller to inherit
+    // a race it cannot see. Retiring a give-up is `clear()`'s job now.
+    hold(job(TASK), new Date(Date.now() - MAX_HELD_MS - 1000))
+    const path = join(stateDir, 'queue.json')
+    const before = readFileSync(path, 'utf8')
+
+    expect(view().expired).toHaveLength(1)
+
+    expect(readFileSync(path, 'utf8')).toBe(before)
+    expect(queued()).toHaveLength(1)
   })
 
   test('a job that ran is no longer owed', () => {
