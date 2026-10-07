@@ -21,6 +21,12 @@ import {
 } from './daemon'
 import { collect, dashboardJson, render } from './dashboard'
 import { dayKey } from './day'
+import {
+  DEFAULT_DASHBOARD_PORT,
+  deskCard,
+  parseInvocation,
+  waitForKey,
+} from './deskCard'
 import { discoverAll, discoverDesks, formatScan } from './discover'
 import { defaultHerdrBin } from './herdr'
 import { formatHistory, loadRuns, loadRunsSince } from './history'
@@ -120,6 +126,7 @@ function usage(): never {
 
   herdr-desk scan
   herdr-desk validate
+  herdr-desk here [--repo DIR] [--wait]
   herdr-desk config show   [--repo DIR]
   herdr-desk config explain [--repo DIR] [--tasks]
   herdr-desk status
@@ -579,6 +586,21 @@ async function main() {
     // missing from it with no error is the #97 shape all over again.
     const { desks, failed } = await discoverAll()
     console.log(formatScan(desks, failed))
+    return
+  }
+
+  if (cmd === 'here') {
+    // The workspace Herdr invoked this for, from the env it injected. `--repo`
+    // overrides it so the card can be run by hand from any directory.
+    console.log(
+      await deskCard(parseInvocation(process.env), {
+        override: arg('--repo', argv),
+      }),
+    )
+    // `--wait` is the popup entrypoint: Herdr closes a popup the moment its
+    // command exits, so the card would flash past unread. A no-op without a
+    // TTY, which is every action log and every test.
+    if (argv.includes('--wait')) await waitForKey()
     return
   }
 
@@ -1087,7 +1109,9 @@ async function main() {
 
   if (cmd === 'serve') {
     const portText = arg('--port', argv)
-    const port = argv.includes('--port') ? Number(portText) : 8787
+    const port = argv.includes('--port')
+      ? Number(portText)
+      : DEFAULT_DASHBOARD_PORT
     if (!Number.isInteger(port) || port < 1 || port > 65535) usage()
     const explicit = arg('--host', argv)
     // `--host` pins one address. Otherwise listen on localhost, and on this

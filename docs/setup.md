@@ -39,6 +39,11 @@ herdr plugin link /path/to/herdr-desk
 
 A linked plugin never auto-upgrades. That is deliberate — you own that tree.
 
+The manifest requires Herdr 0.8.0 or newer. The `card` popup uses
+`placement = "popup"`, which 0.7.x does not have, and declaring the newer floor
+means a 0.7.x host refuses to link the plugin with a reason instead of failing
+later on a manifest field it cannot parse.
+
 ## 3. Pick the agent, once per machine
 
 `herdr plugin config-dir herdr-desk` prints the config directory. Create
@@ -117,6 +122,7 @@ herdr workspace create --cwd ~/project/myrepo
 
 ```sh
 herdr plugin action invoke herdr-desk.list      # repos and jobs found
+bun src/cli.ts here                             # this workspace's desk card
 bun src/cli.ts config explain --repo ~/project/myrepo   # what won, and why
 bun src/cli.ts status                            # next and last fire per job
 ```
@@ -152,6 +158,91 @@ Then read the run folder for what actually happened:
 ```sh
 bun src/cli.ts last          # today's changes.md from every repo
 ```
+
+## The workspace desk card
+
+`desk here` prints one repo's scheduled work on a single screen: which
+`.herdr-desk.json` it resolved, every job with its agent, cron and next fire,
+whether the daemon is up, and the dashboard URL.
+
+```sh
+bun src/cli.ts here                    # the workspace in focus
+bun src/cli.ts here --repo ~/work/x    # any directory
+```
+
+The same card is available as a Herdr action and as a popup:
+
+```sh
+herdr plugin action invoke herdr-desk.here
+herdr plugin pane open --plugin herdr-desk --entrypoint card
+```
+
+### It is not a right-click menu
+
+Herdr cannot put plugin items in the sidebar context menu, and this is not a
+manifest gap waiting to be filled:
+
+- `src/client/shell/context_menu.rs` in Herdr 0.9.3 builds the menu as a `match`
+  over the target kind (workspace / tab / pane) returning hardcoded
+  `ClientContextMenuAction` variants. There is no plugin branch.
+- `PluginActionContext` — the enum behind `contexts = ["workspace"]` — is
+  deserialized by the manifest loader, stored in `PluginActionInfo`, and has no
+  consumer anywhere in Herdr's `src/`. Declaring it is honest intent that Herdr
+  parses and never acts on.
+- The plugin manifest accepts only `build`, `startup`, `actions`, `events`,
+  `panes` and `link_handlers`. There is no menu or grouping key to add, and
+  plugins.mdx states outright that native non-terminal plugin UI is not part of
+  plugin v1.
+
+So the manifest still declares `contexts = ["workspace"]` on the `here` action,
+because it is the correct declaration and costs nothing. Do not expect it in a
+right-click menu.
+
+### Which workspace it uses
+
+Herdr tells an action which workspace it was invoked for. That arrives in
+`HERDR_PLUGIN_CONTEXT_JSON`, with `HERDR_WORKSPACE_ID` as the fallback when the
+JSON is missing or unparseable.
+
+There is no *clicked* workspace to read — no plugin hook receives one. What
+arrives is the workspace Herdr invoked the command for, which for a keybinding is
+the one in focus. The card prints `repo from` so you can see which directory it
+chose and why:
+
+| `repo from` | Meaning |
+|---|---|
+| `checkout` | the workspace's own checkout, which a linked worktree has |
+| `repo-root` | the main checkout, when the worktree checkout is gone |
+| `cwd` | `workspace_cwd` from the context |
+| `cwd-fallback` | the command's cwd — no usable workspace context |
+
+A linked worktree resolves to its own checkout first, so the config shown is the
+one in the worktree you are looking at, not the main repo's.
+
+### What the dashboard line does and does not claim
+
+There is no per-repo dashboard route. `src/http.ts` serves `/`,
+`/api/dashboard` and `/api/analytics`, and nothing else — a link with the repo
+name in it would be a 404.
+
+The card prints the canonical URL and probes the port with a TCP connect. It
+says `listening` when something accepted a connection, `nothing listening` plus
+the command to start it when nothing did, and `not checked` when the probe was
+skipped. A TCP connect proves a listener and nothing more, so the card never
+claims more than that. There is no per-repo URL to give even when it is up.
+
+### Reading it safely
+
+The card only reads. It starts nothing, fires no job, and writes no state, so it
+is safe to bind to a key.
+
+It reads a fixed list of fields out of Herdr's context JSON by name, and
+deliberately drops two that are present there: `selected_text` and `clicked_url`.
+`selected_text` is whatever you had selected in the pane, and printing it would
+put terminal content into a plugin log, a screenshot, or a bug report. Any field
+a future Herdr adds is dropped rather than carried through by accident. There is
+no shell involvement: the manifest's `command` is an argv array, which Herdr does
+not run through a shell.
 
 ## What the defaults are
 

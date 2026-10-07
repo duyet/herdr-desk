@@ -2,7 +2,11 @@ id = "herdr-desk"
 name = "Herdr Desk"
 version = "0.1.8" # x-release-please-version
 description = "Scheduled repo managers: pick up .herdr-desk.json from open workspaces and fire start/wrap Grok managers"
-min_herdr_version = "0.7.0"
+# 0.8.0, not 0.7.0: the `card` popup below uses `placement = "popup"`, which
+# 0.7.0's PluginPanePlacement does not have. Herdr refuses to link a plugin whose
+# minimum is newer than the binary, so declaring the older floor here would let a
+# 0.7.x host fail manifest parsing instead of being told why.
+min_herdr_version = "0.8.0"
 platforms = ["linux", "macos"]
 
 [[startup]]
@@ -162,6 +166,28 @@ command = ["bin/desk", "update", "--check"]
 id = "update"
 title = "Upgrade herdr-desk to the latest release and restart the daemon"
 command = ["bin/desk", "update"]
+
+# Resolves the workspace Herdr invokes this for out of HERDR_PLUGIN_CONTEXT_JSON /
+# HERDR_WORKSPACE_ID and prints that repo's jobs, config path, dashboard URL and
+# next fire. `contexts` is declared because it is the correct declaration, not
+# because Herdr acts on it: PluginActionContext has no consumer in Herdr 0.9.3, so
+# this does NOT appear in the sidebar right-click menu. See docs/setup.md.
+[[actions]]
+id = "here"
+title = "Show the desk for the workspace in focus (jobs, config, dashboard)"
+contexts = ["workspace"]
+command = ["bin/desk", "here"]
+
+# The same card, modal. Herdr closes a popup when its command exits, hence
+# `--wait`. Herdr passes the same plugin context to pane commands.
+[[panes]]
+id = "card"
+title = "Herdr Desk"
+description = "This workspace's desk: jobs, config path, dashboard, next fire"
+placement = "popup"
+width = "90%"
+height = 24
+command = ["bin/desk", "here", "--wait"]
 
 [[events]]
 on = "workspace.focused"
