@@ -106,6 +106,10 @@ export type ListedWorkspace = {
   repoRoot?: string
   checkoutPath?: string
   parentWorkspaceId?: string
+  /** Display tokens from `workspace list` (`tokens.desk` is this plugin's badge). */
+  tokens?: Record<string, string>
+  /** True when this Space is a linked worktree child, never a project root. */
+  isLinkedWorktree?: boolean
 }
 
 /** Parse `herdr workspace list` JSON. */
@@ -120,6 +124,18 @@ export function listedWorkspaces(listJson: unknown): ListedWorkspace[] {
     const wt = asRecord(ws.worktree)
     const workspaceId = str(ws.workspace_id) ?? str(ws.id) ?? ''
     if (!workspaceId) continue
+    const tokensRaw = asRecord(ws.tokens)
+    let tokens: Record<string, string> | undefined
+    for (const [k, v] of Object.entries(tokensRaw)) {
+      const s = str(v)
+      if (s === undefined) continue
+      if (!/^[A-Za-z0-9_-]{1,32}$/.test(k)) continue
+      tokens ??= {}
+      tokens[k] = s
+    }
+    const linkedRaw = wt.is_linked_worktree ?? wt.isLinkedWorktree
+    const isLinkedWorktree =
+      linkedRaw === true || linkedRaw === 'true' ? true : undefined
     out.push({
       workspaceId,
       label: str(ws.label) ?? str(ws.name) ?? str(ws.title),
@@ -132,6 +148,10 @@ export function listedWorkspaces(listJson: unknown): ListedWorkspace[] {
         str(ws.parent_workspace_id) ??
         str(ws.parent_id) ??
         str(wt.primary_workspace_id),
+      tokens,
+      // Only set when true: `undefined` keeps old fixtures and `projectRootOf`
+      // behaviour unchanged, while linked children are still excludable.
+      ...(isLinkedWorktree ? { isLinkedWorktree } : {}),
     })
   }
   return out

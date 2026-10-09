@@ -18,7 +18,7 @@ import {
 } from './discover'
 import { clearFailures, recordAnnounced, shouldAnnounce } from './failures'
 import { check, type HostHealth, readHealth, type Verdict } from './health'
-import { defaultHerdrBin } from './herdr'
+import { defaultHerdrBin, herdrReady } from './herdr'
 import type { RunTrigger } from './history'
 import { publish } from './hub'
 import { loadNotifyConfig, noticeBody, notify } from './notify'
@@ -36,6 +36,7 @@ import {
   watchPass,
   taskState as watchTaskState,
 } from './watch'
+import { syncWorkspaceBadges } from './workspaceBadge'
 
 const TICK_MS = 20_000
 /** Keep fire keys whose day is within this many days of today (cronNext horizon). */
@@ -197,6 +198,17 @@ export function loadFires(): Record<string, string> {
   }
 }
 
+/**
+ * Persist the fire ledger, pruned.
+ *
+ * `at` is the clock the retention window is measured against, and every caller
+ * inside a tick passes the tick's own `at` rather than letting this default to
+ * the wall clock. The tick already resolves its day, its slots and its fire
+ * keys against `at`; a ledger pruned against a different instant than the one
+ * that wrote it is a ledger that can discard keys the same tick still needs.
+ * In production the two coincide, and a tick driven with a stamped `at` — the
+ * daemon loop after a resume, or a test — behaves the same way it reads.
+ */
 export function saveFires(map: Record<string, string>, at = new Date()): void {
   mkdirSync(pluginStateDir(), { recursive: true })
   writeFileSync(
@@ -455,7 +467,7 @@ export async function tickOnce(
             at,
           )
           if (skipped) {
-            saveFires(fires)
+            saveFires(fires, at)
             log(
               `skip ${d.config.name}/${task.id} ${expr}: paused, ${skipped} slot(s)`,
             )
@@ -489,7 +501,7 @@ export async function tickOnce(
           fires[fireKey(d.repo, task.id, expr, day, slot)] =
             `skip ${new Date().toISOString()}`
         }
-        if (plan.stale.length) saveFires(fires)
+        if (plan.stale.length) saveFires(fires, at)
         if (missed) {
           const oldest = dark.oldest ?? { day, slot: plan.stale[0] }
           // With the day when it is not today. A bare `00:10` says nothing
@@ -533,7 +545,7 @@ export async function tickOnce(
         try {
           const result = await runTask({ repo: d.repo, taskId: task.id })
           fires[key] = new Date().toISOString()
-          saveFires(fires)
+          saveFires(fires, at)
           // This tick just ran the job, so the queue must stop owing it. The
           // held slot is deliberately absent from `fires`, so the ledger cannot
           // answer "is this still due?" — and `retryHeld` runs later in this
@@ -545,7 +557,7 @@ export async function tickOnce(
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err)
           fires[key] = `fail ${new Date().toISOString()}`
-          saveFires(fires)
+          saveFires(fires, at)
           log(`fail ${d.config.name}/${task.id} ${expr} slot ${slot}: ${msg}`)
           needsHub = true
         }
@@ -561,7 +573,20 @@ export async function tickOnce(
   const watched = await watchStep(desks, at, gate, paused)
   n += watched.fired
   if (watched.problem) needsHub = true
-  saveFires(fires)
+  // Sidebar badges last, and fail-open: a metadata failure is a log line, not
+  // a missed fire. Cron and watch already ran above, so a Herdr that is down
+  // cannot hold them up — and a throw here must not escape the tick either.
+  // When Herdr is unavailable (no bin/socket) skip silently: sync would just
+  // fail its list call and log the same socket error every 20s tick.
+  try {
+    if (herdrReady().ok) {
+      const badges = await syncWorkspaceBadges(desks, failed)
+      for (const err of badges.errors) log(`badge ${err}`)
+    }
+  } catch (err) {
+    log(`badge ${err instanceof Error ? err.message : String(err)}`)
+  }
+  saveFires(fires, at)
   if (n > 0 || needsHub) await publishHub()
   return n
 }

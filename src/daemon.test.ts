@@ -170,6 +170,20 @@ describe('saveFires', () => {
     expect(written['r::t::0 7 * * *::2026-08-15']).toBeUndefined()
     expect(written['r::t::0 7 * * *::2026-08-24']).toBe('today')
   })
+
+  test('prunes against the caller clock, so a stamped tick keeps its own day', () => {
+    // The retention window is measured against the `at` the caller passes, not
+    // the wall clock. A tick stamped in the past writes keys the wall clock
+    // would call stale and drop on the next read — which is how the second tick
+    // of 'the gap is counted once' re-counted a day the first had consumed.
+    const dir = stateDir()
+    const at = new Date(2026, 8, 30, 9, 15)
+    saveFires({ 'r::t::*/30 * * * *::2026-09-30::09:00': 'ok' }, at)
+    const written = JSON.parse(
+      readFileSync(join(dir, 'fires.json'), 'utf8'),
+    ) as Record<string, string>
+    expect(written['r::t::*/30 * * * *::2026-09-30::09:00']).toBe('ok')
+  })
 })
 
 describe('loadFires', () => {
@@ -544,5 +558,25 @@ describe('a tick that finds the desk was gone', () => {
     expect(missedLines()).toEqual([
       expect.stringContaining('18 missed slots, oldest 00:00'),
     ])
+  })
+})
+
+describe('badge sync when Herdr is unavailable', () => {
+  test('skips silently every tick, still fires (fail-open, no log spam)', async () => {
+    // Herdr down means no bin and no socket here, so herdrReady() is false and
+    // the tick skips badge sync without logging. Before the gate, every 20s
+    // tick logged the same socket error.
+    desk(false)
+    const AT = new Date(2026, 8, 30, 9, 15)
+
+    await tickOnce(AT, roomy)
+    await tickOnce(new Date(2026, 8, 30, 9, 15, 20), roomy)
+
+    const logPath = join(
+      process.env.HERDR_PLUGIN_STATE_DIR as string,
+      'daemon.log',
+    )
+    const log = existsSync(logPath) ? readFileSync(logPath, 'utf8') : ''
+    expect(log.split('\n').filter((l) => l.includes('badge'))).toEqual([])
   })
 })
