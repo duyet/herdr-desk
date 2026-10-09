@@ -3,6 +3,22 @@
 Versions stay on **0.1.x**. `feat` and `fix` bump the patch. Do not merge a
 1.0 or 0.2 release PR.
 
+## [0.1.9](https://github.com/duyet/herdr-desk/compare/v0.1.8...v0.1.9) (2026-10-09)
+
+
+### Features
+
+* **desk:** arm the PR watcher now that 0.1.8 carries it ([#99](https://github.com/duyet/herdr-desk/issues/99)) ([935233f](https://github.com/duyet/herdr-desk/commit/935233f6e2412a5b9cc2c54e6c564bd87003adb5))
+* **desk:** sidebar badge for open project workspaces ([c729920](https://github.com/duyet/herdr-desk/commit/c7299205c42f45730cb516200fcec1e374304d82))
+* **here:** a workspace desk card, and an honest note on why not a menu ([#105](https://github.com/duyet/herdr-desk/issues/105)) ([3e15224](https://github.com/duyet/herdr-desk/commit/3e1522415a92bc7e92337151e9e3a6731f99c98a))
+
+
+### Bug Fixes
+
+* **desk:** name the repo in the give-up line, and stop view() deleting ([#103](https://github.com/duyet/herdr-desk/issues/103)) ([fe30b3e](https://github.com/duyet/herdr-desk/commit/fe30b3edfd25d6d9382a1857b179683892928f04))
+* **health:** gate on sessions that are still open ([#104](https://github.com/duyet/herdr-desk/issues/104)) ([7ce0c3c](https://github.com/duyet/herdr-desk/commit/7ce0c3c76e8f6e94d936b4448acd16cd89e646f4))
+* **watch:** make the watch surface honest, and report a repo that cannot be read ([#98](https://github.com/duyet/herdr-desk/issues/98)) ([ff47894](https://github.com/duyet/herdr-desk/commit/ff478946c64a141ccd2b52381135d1dfb0e09c9c))
+
 ## [0.1.8](https://github.com/duyet/herdr-desk/compare/v0.1.7...v0.1.8) (2026-10-05)
 
 
