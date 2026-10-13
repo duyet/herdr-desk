@@ -71,7 +71,7 @@ import {
   writeCache,
 } from './registry'
 import { collectReports, REPORT_FILE, sendReports } from './report'
-import { runTask } from './run'
+import { childBranch, openWorktree, runTask } from './run'
 import { scheduleLabel } from './schedule'
 import { SCHEMA_PATH, SCHEMA_URL } from './schema'
 import { writeContext } from './sessions/context'
@@ -146,6 +146,7 @@ function usage(): never {
   herdr-desk watch test --repo DIR [--task ID]
   herdr-desk watch reset [--repo DIR] [--task ID]
   herdr-desk cleanup [--dry-run]
+  herdr-desk child JOB ITEM --workspace ID [--repo DIR] [--base REF]
   herdr-desk last
   herdr-desk sessions index
   herdr-desk sessions [--repo DIR] [--agent NAME] [--since 7d]
@@ -725,6 +726,34 @@ async function main() {
     console.log(
       JSON.stringify(await runTask({ repo, taskId: job, trigger: 'manual' })),
     )
+    return
+  }
+
+  if (cmd === 'child') {
+    const repo = resolve(arg('--repo', argv) ?? process.cwd())
+    const workspace = arg('--workspace', argv)
+    const base = arg('--base', argv)
+    const skip = new Set([arg('--repo', argv), workspace, base])
+    const [job, item] = argv
+      .slice(1)
+      .filter((a) => !a.startsWith('--') && !skip.has(a))
+    if (!job || !item || !workspace) {
+      console.log(
+        'usage: herdr-desk child JOB ITEM --workspace ID [--repo DIR] [--base REF]',
+      )
+      process.exit(2)
+    }
+    const config = loadDeskConfig(repo)
+    const task = resolveTask(config, job)
+    const branch = childBranch(task, item)
+    const opened = await openWorktree(
+      workspace,
+      branch,
+      `${config.name} ${task.id} ${item}`,
+      repo,
+      base,
+    )
+    console.log(JSON.stringify({ branch, ...opened }))
     return
   }
 

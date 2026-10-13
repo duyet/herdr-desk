@@ -61,15 +61,15 @@ Do not put secrets in these files.
 
    ```
    git fetch origin
-   herdr worktree create --workspace "{{workspaceId}}" --branch review-pr-<n> --base origin/<head-ref> --no-focus
+   {{deskBin}} child {{taskId}} pr-<n> --workspace "{{workspaceId}}" --repo "{{repo}}" --base origin/<head-ref>
    herdr agent start hd-pr-<n> --kind {{kind}} --pane <pane>
    herdr agent prompt hd-pr-<n> <child prompt>
    ```
 
    `--base origin/<head-ref>` puts the child on the PR's code, which is what
    a review needs. Check `herdr worktree list` and `herdr agent list` first: a
-   child already reviewing this PR gets re-prompted, not duplicated. Use
-   `worktree open` if the branch already exists.
+   child already reviewing this PR gets re-prompted, not duplicated. The same
+   `child` command re-attaches the branch if it already exists.
 
    Children use `opencode2` with model `opencode/space-bunny-free`, same as
    every other child on this repo. Confirm the model before editing.

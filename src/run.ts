@@ -490,6 +490,23 @@ export function deskWorktreeBranch(task: TaskConfig): string {
 }
 
 /**
+ * Branch for one child worktree a manager opens: `desk/<task>--<item>`.
+ *
+ * The desk names it, not the manager, so cleanup can tell a child from a
+ * branch someone made by hand: anything under `desk/` is the desk's, anything
+ * else is never judged. `desk/<task>/<item>` would be refused by git, because
+ * `desk/<task>` is already a ref and a ref cannot also be a directory.
+ */
+export function childBranch(task: TaskConfig, item: string): string {
+  const slug = item
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, '-')
+    .replace(/^[-.]+|[-.]+$/g, '')
+  if (!slug) throw new Error(`child item '${item}' has no usable characters`)
+  return `${deskWorktreeBranch(task)}--${slug}`
+}
+
+/**
  * Throw when another task of the desk would share `task`'s manager branch.
  *
  * `local:babysit` and `local-babysit` slug to the same `desk/local-babysit`, so
@@ -631,8 +648,18 @@ export async function spawnDeskWorktree(
   label: string,
   repo: string,
 ): Promise<{ paneId: string; workspaceId: string }> {
-  const branch = deskWorktreeBranch(task)
-  const base = await resolveBaseRef(repo)
+  return openWorktree(parentWorkspaceId, deskWorktreeBranch(task), label, repo)
+}
+
+/** Re-open `branch` under the project Space, or create it from the base ref. */
+export async function openWorktree(
+  parentWorkspaceId: string,
+  branch: string,
+  label: string,
+  repo: string,
+  baseRef?: string,
+): Promise<{ paneId: string; workspaceId: string }> {
+  const base = baseRef ?? (await resolveBaseRef(repo))
   let created: unknown
   try {
     created = await herdrCall([
