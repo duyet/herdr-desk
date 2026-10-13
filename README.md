@@ -153,7 +153,7 @@ Usually this is the whole file:
 }
 ```
 
-Defaults: playbook `github-issues`, job id `desk:github-issues`, agent `<name>-desk`, 5 worktrees, `schedule` `0 7 * * *`, state `.herdr-desk/runs/github-issues/`. `desk:` is a bundled playbook; `local:` is a repo-owned `.md`.
+Defaults: playbook `github-issues`, job id `desk:github-issues`, agent `<name>-desk-<job>` per job, 5 worktrees, `schedule` `0 7 * * *`, state `.herdr-desk/runs/github-issues/`. `desk:` is a bundled playbook; `local:` is a repo-owned `.md`.
 
 ### Which agent runs it
 

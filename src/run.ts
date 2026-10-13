@@ -401,13 +401,14 @@ async function promptOrSpawn(
     // Marked before the prompt is sent, not after: the work starts when the
     // manager is prompted, and a run that dies in the prompt call has to look
     // started-and-failed rather than never having happened.
-    if (canPromptManager(allAgents, listed, task)) {
+    const registered = managerToPrompt(allAgents, listed, task)
+    if (registered) {
       markRunning({ repo, task: task.id, desk: config.name })
       await herdrCall([
         'agent',
         'prompt',
-        task.agentName,
-        assembleManagerPrompt(vars),
+        registered,
+        assembleManagerPrompt({ ...vars, agentName: registered }),
       ])
       return done({ prompted: true })
     }
@@ -489,6 +490,23 @@ export function deskWorktreeBranch(task: TaskConfig): string {
 }
 
 /**
+ * Branch for one child worktree a manager opens: `desk/<task>--<item>`.
+ *
+ * The desk names it, not the manager, so cleanup can tell a child from a
+ * branch someone made by hand: anything under `desk/` is the desk's, anything
+ * else is never judged. `desk/<task>/<item>` would be refused by git, because
+ * `desk/<task>` is already a ref and a ref cannot also be a directory.
+ */
+export function childBranch(task: TaskConfig, item: string): string {
+  const slug = item
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, '-')
+    .replace(/^[-.]+|[-.]+$/g, '')
+  if (!slug) throw new Error(`child item '${item}' has no usable characters`)
+  return `${deskWorktreeBranch(task)}--${slug}`
+}
+
+/**
  * Throw when another task of the desk would share `task`'s manager branch.
  *
  * `local:babysit` and `local-babysit` slug to the same `desk/local-babysit`, so
@@ -528,7 +546,7 @@ export function isManagerCheckout(path: string, task: TaskConfig): boolean {
 }
 
 /**
- * Must this run prompt its manager rather than start a new session?
+ * The registered session this run must prompt, or `null` to start a new one.
  *
  * A name Herdr already holds cannot be started twice: `agent start` is refused
  * with `agent_name_taken`, and the refusal names the very pane and checkout
@@ -536,26 +554,37 @@ export function isManagerCheckout(path: string, task: TaskConfig): boolean {
  * seconds, during a live origin outage — the manager was registered the whole
  * time. So a session is promptable whenever it is still there, running or
  * finished, and `agent start` is reachable only for a name nobody holds.
+ *
+ * A session under the task's legacy name (the default every task of a desk
+ * once shared) is only this task's when it sits in this task's manager
+ * checkout, live or not: that shared name says nothing about which job owns it.
  */
-export function canPromptManager(
+export function managerToPrompt(
   agents: ListedAgent[],
   workspaces: ListedWorkspace[],
   task: TaskConfig,
-): boolean {
+): string | null {
+  const checkoutOf = (agent: ListedAgent): string => {
+    const ws = workspaces.find((w) => w.workspaceId === agent.workspaceId)
+    return ws ? (ws.checkoutPath ?? '') : (agent.cwd ?? '')
+  }
   for (const agent of agents) {
     if (agent.name !== task.agentName) continue
     // A running session is promptable by name; it needs no checkout match,
     // because a prompt does not need the worktree to be open.
-    if (isAgentLive(agent)) return true
+    if (isAgentLive(agent)) return agent.name
     if (!agent.paneId || !agent.workspaceId) continue
-    const ws = workspaces.find((w) => w.workspaceId === agent.workspaceId)
     // A finished one only counts while its checkout is still on disk and still
     // this task's manager worktree. A deleted worktree means the pane is gone
     // too, and there is nothing left to prompt.
-    const checkout = ws ? (ws.checkoutPath ?? '') : (agent.cwd ?? '')
-    if (isManagerCheckout(checkout, task)) return true
+    if (isManagerCheckout(checkoutOf(agent), task)) return agent.name
   }
-  return false
+  if (!task.legacyAgentName) return null
+  for (const agent of agents) {
+    if (agent.name !== task.legacyAgentName) continue
+    if (isManagerCheckout(checkoutOf(agent), task)) return agent.name
+  }
+  return null
 }
 
 /**
@@ -619,8 +648,18 @@ export async function spawnDeskWorktree(
   label: string,
   repo: string,
 ): Promise<{ paneId: string; workspaceId: string }> {
-  const branch = deskWorktreeBranch(task)
-  const base = await resolveBaseRef(repo)
+  return openWorktree(parentWorkspaceId, deskWorktreeBranch(task), label, repo)
+}
+
+/** Re-open `branch` under the project Space, or create it from the base ref. */
+export async function openWorktree(
+  parentWorkspaceId: string,
+  branch: string,
+  label: string,
+  repo: string,
+  baseRef?: string,
+): Promise<{ paneId: string; workspaceId: string }> {
+  const base = baseRef ?? (await resolveBaseRef(repo))
   let created: unknown
   try {
     created = await herdrCall([

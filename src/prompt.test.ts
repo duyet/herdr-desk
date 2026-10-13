@@ -31,7 +31,8 @@ describe('assembleManagerPrompt', () => {
     expect(text).toContain('Against slop')
     expect(text).toContain(join(DESK_ROOT, 'prompts', 'child.md'))
     expect(text).not.toContain('{{agentName}}')
-    expect(text).toContain('worktree create --workspace')
-    expect(text).not.toContain('worktree create --cwd')
+    // Children go through the desk, which names their branch for cleanup.
+    expect(text).toContain(`${join(DESK_ROOT, 'bin', 'desk')} child`)
+    expect(text).not.toContain('worktree create --workspace')
   })
 })

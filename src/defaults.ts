@@ -11,7 +11,7 @@ import {
 } from './config'
 import { cronsOf } from './schedule'
 import { WATCH_RANGES } from './schema'
-import { deskSlug } from './text'
+import { deskSlug, taskAgentName } from './text'
 
 const BUNDLED_PREFIX = 'desk:'
 const LOCAL_PREFIX = 'local:'
@@ -145,7 +145,11 @@ export function applyDefaults(raw: DeskConfig, repo: string): LoadedDesk {
       label: t.label ?? 'GitHub issues and PRs',
       agent: mergeAgent(rootAgent, t.agent ?? t.kind),
       maxChildren: t.maxChildren ?? raw.maxChildren ?? 5,
-      agentName: t.agentName ?? raw.agentName ?? deskSlug(name),
+      agentName: t.agentName ?? raw.agentName ?? taskAgentName(name, id),
+      // The name every task shared before it was derived from the id. A session
+      // still registered under it is found and re-prompted, never doubled.
+      legacyAgentName:
+        (t.agentName ?? raw.agentName) ? undefined : deskSlug(name),
       describe: t.describe,
       // A task's own `notify` block. It is not an override of the repo's — the
       // layers fold that separately — so it is carried verbatim and merged at
