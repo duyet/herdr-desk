@@ -1,8 +1,9 @@
 import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
+import { isStaleClaim } from './claim'
 import type { TaskConfig } from './config'
 import { herdrCall, isAgentLive, type ListedAgent, namedAgents } from './herdr'
-import { runDirFor } from './run'
+import { claimMaxAgeMs, runDirFor, spawnClaimPath } from './run'
 
 /** A finished run dir or manager pane is kept this long before it is stale. */
 export const RETAIN_DAYS = 14
@@ -20,7 +21,16 @@ export type CleanupItem =
       branch: string
       why: string
     }
+  | {
+      kind: 'branch'
+      repo: string
+      branch: string
+      /** Tip at plan time; the delete is refused if the branch moved since. */
+      oid: string
+      why: string
+    }
   | { kind: 'rundir'; path: string; why: string }
+  | { kind: 'lock'; path: string; maxAgeMs: number; why: string }
   | { kind: 'pane'; paneId: string; agent: string; why: string }
 
 type Kept = { what: string; why: string }
@@ -36,6 +46,8 @@ export type CleanupPlan = {
 export type WorktreeEntry = {
   path: string
   branch?: string
+  /** Checked-out commit, from the porcelain `HEAD` line. */
+  head?: string
   locked: boolean
   /** The repo's own checkout, always the first `git worktree list` entry. */
   main: boolean
@@ -49,10 +61,12 @@ export type Probe = {
   /** `null` when the branch has no PR, or GitHub cannot be asked. */
   pr(repo: string, branch: string): Promise<PrInfo | null>
   isDirty(path: string): Promise<boolean>
-  /** HEAD is reachable from some remote-tracking ref. */
-  headOnRemote(path: string): Promise<boolean>
-  /** HEAD is an ancestor of `oid` (the head the PR was merged with). */
-  headWithin(path: string, oid: string): Promise<boolean>
+  /** Local `desk/*` branches and their tips. */
+  branches(repo: string): Promise<Array<{ name: string; oid: string }>>
+  /** `rev` (HEAD by default) is reachable from some remote-tracking ref. */
+  headOnRemote(path: string, rev?: string): Promise<boolean>
+  /** `rev` (HEAD by default) is an ancestor of `oid`, the merged PR head. */
+  headWithin(path: string, oid: string, rev?: string): Promise<boolean>
   /** `null` when Herdr cannot be asked. */
   agents(): Promise<ListedAgent[] | null>
 }
@@ -78,14 +92,16 @@ export function parseWorktrees(porcelain: string): WorktreeEntry[] {
   for (const block of porcelain.split(/\n\s*\n/)) {
     let path = ''
     let branch: string | undefined
+    let head: string | undefined
     let locked = false
     for (const line of block.split('\n')) {
       if (line.startsWith('worktree ')) path = line.slice(9)
+      else if (line.startsWith('HEAD ')) head = line.slice(5)
       else if (line.startsWith('branch refs/heads/'))
         branch = line.slice('branch refs/heads/'.length)
       else if (line === 'locked' || line.startsWith('locked ')) locked = true
     }
-    if (path) out.push({ path, branch, locked, main: out.length === 0 })
+    if (path) out.push({ path, branch, head, locked, main: out.length === 0 })
   }
   return out
 }
@@ -108,20 +124,33 @@ export const realProbe: Probe = {
       return null
     }
   },
+  async branches(repo) {
+    const r = await run(
+      [
+        'git',
+        'for-each-ref',
+        '--format=%(refname:short) %(objectname)',
+        `refs/heads/${DESK_BRANCH}`,
+      ],
+      repo,
+    )
+    if (!r.ok || !r.out) return []
+    return r.out.split('\n').map((line) => {
+      const [name, oid] = line.split(' ')
+      return { name, oid }
+    })
+  },
   async isDirty(path) {
     const r = await run(['git', 'status', '--porcelain'], path)
     // If git cannot answer, assume there is work in there.
     return !r.ok || r.out !== ''
   },
-  async headOnRemote(path) {
-    const r = await run(['git', 'branch', '-r', '--contains', 'HEAD'], path)
+  async headOnRemote(path, rev = 'HEAD') {
+    const r = await run(['git', 'branch', '-r', '--contains', rev], path)
     return r.ok && r.out !== ''
   },
-  async headWithin(path, oid) {
-    const r = await run(
-      ['git', 'merge-base', '--is-ancestor', 'HEAD', oid],
-      path,
-    )
+  async headWithin(path, oid, rev = 'HEAD') {
+    const r = await run(['git', 'merge-base', '--is-ancestor', rev, oid], path)
     return r.ok
   },
   async agents() {
@@ -170,6 +199,30 @@ async function judgeWorktree(
   if (!safe) return { remove: false, why: 'commits not pushed or merged' }
 
   return { remove: true, why: `PR ${state.toLowerCase()}` }
+}
+
+/**
+ * May a `desk/*` branch with no worktree be deleted? Only when its PR merged and
+ * its tip is safe elsewhere. A closed-unmerged PR keeps its branch: that work
+ * never landed, and a local branch is the cheapest place to find it again.
+ */
+async function judgeBranch(
+  repo: string,
+  name: string,
+  oid: string,
+  probe: Probe,
+): Promise<{ remove: boolean; why: string }> {
+  const pr = await probe.pr(repo, name)
+  if (!pr) return { remove: false, why: 'no PR, or PR state unknown' }
+  const state = pr.state.toUpperCase()
+  if (state !== 'MERGED')
+    return { remove: false, why: `PR ${state.toLowerCase()}` }
+  const safe =
+    (await probe.headOnRemote(repo, oid)) ||
+    (pr.headOid !== undefined &&
+      (await probe.headWithin(repo, pr.headOid, oid)))
+  if (!safe) return { remove: false, why: 'commits not pushed or merged' }
+  return { remove: true, why: 'PR merged' }
 }
 
 function latestDay(stateDir: string, taskId: string): string | undefined {
@@ -273,7 +326,10 @@ export async function planCleanup(
 
   const expired: string[] = []
   for (const desk of desks) {
-    for (const wt of await probe.worktrees(desk.repo)) {
+    const worktrees = await probe.worktrees(desk.repo)
+    const checkedOut = new Set(worktrees.map((w) => w.branch))
+    const removable = new Set<string>()
+    for (const wt of worktrees) {
       // Only worktrees the desk made; anything else is not ours to judge.
       const branch = wt.branch
       if (!branch?.startsWith(DESK_BRANCH)) continue
@@ -286,9 +342,45 @@ export async function planCleanup(
           branch,
           why: verdict.why,
         })
+        removable.add(branch)
       } else {
         plan.kept.push({ what: wt.path, why: verdict.why })
       }
+    }
+    for (const { name, oid } of await probe.branches(desk.repo)) {
+      // A branch whose worktree is kept stays with it.
+      if (checkedOut.has(name) && !removable.has(name)) continue
+      const verdict = await judgeBranch(desk.repo, name, oid, probe)
+      if (verdict.remove) {
+        plan.items.push({
+          kind: 'branch',
+          repo: desk.repo,
+          branch: name,
+          oid,
+          why: verdict.why,
+        })
+      } else if (!checkedOut.has(name)) {
+        plan.kept.push({ what: `branch ${name}`, why: verdict.why })
+      }
+    }
+    const locks = new Set<string>()
+    for (const task of desk.tasks) {
+      let path: string
+      try {
+        path = spawnClaimPath(desk.repo, task)
+      } catch {
+        continue
+      }
+      const maxAgeMs = claimMaxAgeMs(task)
+      if (locks.has(path) || !isStaleClaim(path, maxAgeMs, now.getTime()))
+        continue
+      locks.add(path)
+      plan.items.push({
+        kind: 'lock',
+        path,
+        maxAgeMs,
+        why: 'holder gone or past its timeout',
+      })
     }
     const dirs = new Set<string>()
     for (const task of desk.tasks) {
@@ -314,21 +406,66 @@ export type CleanupResult = {
   failed: Array<{ item: CleanupItem; error: string }>
 }
 
+/** Panes close before their worktree goes, and a branch only once it is free. */
+const APPLY_ORDER: Record<CleanupItem['kind'], number> = {
+  pane: 0,
+  worktree: 1,
+  branch: 2,
+  lock: 3,
+  rundir: 4,
+}
+
+async function removeItem(item: CleanupItem): Promise<void> {
+  switch (item.kind) {
+    case 'pane':
+      await herdrCall(['pane', 'close', item.paneId])
+      return
+    case 'rundir':
+      rmSync(item.path, { recursive: true })
+      return
+    case 'lock':
+      // A fire may have taken the lock since the plan; only a still-stale one goes.
+      if (isStaleClaim(item.path, item.maxAgeMs))
+        rmSync(item.path, { force: true })
+      return
+    case 'worktree': {
+      // No --force: git itself refuses a dirty or locked worktree, a last
+      // line of defence behind the plan's own checks.
+      const r = await run(['git', 'worktree', 'remove', item.path], item.repo)
+      if (!r.ok) throw new Error('git worktree remove refused')
+      return
+    }
+    case 'branch': {
+      // `update-ref` does not know about worktrees, so check none has it out.
+      const held = (await realProbe.worktrees(item.repo)).some(
+        (w) => w.branch === item.branch,
+      )
+      if (held) throw new Error('branch is still checked out')
+      // The old-value argument makes this a compare-and-delete: a commit that
+      // landed after the plan was made keeps the branch.
+      const r = await run(
+        ['git', 'update-ref', '-d', `refs/heads/${item.branch}`, item.oid],
+        item.repo,
+      )
+      if (!r.ok) throw new Error('branch moved since the plan; kept')
+      return
+    }
+    default: {
+      const never: never = item
+      throw new Error(`unknown item ${JSON.stringify(never)}`)
+    }
+  }
+}
+
 /** Remove exactly the items in `plan`, nothing it did not list. */
 export async function applyCleanup(plan: CleanupPlan): Promise<CleanupResult> {
   const result: CleanupResult = { removed: [], failed: [] }
-  for (const item of plan.items) {
+  const ordered = [...plan.items].sort(
+    (a, b) => APPLY_ORDER[a.kind] - APPLY_ORDER[b.kind],
+  )
+  for (const item of ordered) {
     try {
-      if (item.kind === 'pane') {
-        await herdrCall(['pane', 'close', item.paneId])
-      } else if (item.kind === 'rundir') {
-        rmSync(item.path, { recursive: true })
-      } else {
-        // No --force: git itself refuses a dirty or locked worktree, a last
-        // line of defence behind the plan's own checks. The branch stays.
-        const r = await run(['git', 'worktree', 'remove', item.path], item.repo)
-        if (!r.ok) throw new Error('git worktree remove refused')
-      }
+      await removeItem(item)
       result.removed.push(item)
     } catch (err) {
       result.failed.push({
@@ -341,10 +478,22 @@ export async function applyCleanup(plan: CleanupPlan): Promise<CleanupResult> {
 }
 
 function describeItem(item: CleanupItem): string {
-  if (item.kind === 'worktree')
-    return `worktree  ${item.path}  (${item.branch}, ${item.why})`
-  if (item.kind === 'rundir') return `run dir   ${item.path}  (${item.why})`
-  return `pane      ${item.paneId}  (${item.agent}, ${item.why})`
+  switch (item.kind) {
+    case 'worktree':
+      return `worktree  ${item.path}  (${item.branch}, ${item.why})`
+    case 'branch':
+      return `branch    ${item.branch}  (${item.oid.slice(0, 8)}, ${item.why})`
+    case 'rundir':
+      return `run dir   ${item.path}  (${item.why})`
+    case 'lock':
+      return `lock      ${item.path}  (${item.why})`
+    case 'pane':
+      return `pane      ${item.paneId}  (${item.agent}, ${item.why})`
+    default: {
+      const never: never = item
+      return String(never)
+    }
+  }
 }
 
 export function formatCleanup(plan: CleanupPlan, dryRun: boolean): string {
