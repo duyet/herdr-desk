@@ -19,9 +19,10 @@ import {
   assertOwnWorktree,
   baseRefArgv,
   baseRefFrom,
-  managerToPrompt,
+  childBranch,
   deskWorktreeBranch,
   isManagerCheckout,
+  managerToPrompt,
   preconditionSkip,
   runDirFor,
   runTask,
@@ -231,6 +232,41 @@ describe('deskWorktreeBranch', () => {
     // every tick. The manager is long-lived, so its branch must not move.
     expect(deskWorktreeBranch(base)).toBe(deskWorktreeBranch(base))
     expect(deskWorktreeBranch(base)).not.toContain('2026')
+  })
+})
+
+describe('childBranch', () => {
+  test('lives under desk/ beside the manager branch, never inside it', () => {
+    expect(childBranch(base, 'Issue #42')).toBe(
+      'desk/desk-github-issues--issue-42',
+    )
+  })
+
+  test('git accepts a child ref while the manager ref exists', () => {
+    // `desk/<task>/<item>` is refused once `desk/<task>` is a ref.
+    const repo = mkdtempSync(join(tmpdir(), 'desk-child-'))
+    try {
+      const git = (...args: string[]) =>
+        Bun.spawnSync(
+          ['git', '-c', 'user.name=t', '-c', 'user.email=t@t', ...args],
+          { cwd: repo },
+        ).exitCode
+      git('init', '-q')
+      git('commit', '-q', '--allow-empty', '-m', 'root')
+      expect(git('branch', deskWorktreeBranch(base))).toBe(0)
+      expect(git('branch', childBranch(base, 'pr-17'))).toBe(0)
+    } finally {
+      rmSync(repo, { recursive: true, force: true })
+    }
+  })
+
+  test('the child checkout is never mistaken for the manager', () => {
+    const dir = `/w/${childBranch(base, 'pr-17').replace('/', '-')}`
+    expect(isManagerCheckout(dir, base)).toBe(false)
+  })
+
+  test('refuses an item with nothing to name a branch after', () => {
+    expect(() => childBranch(base, '///')).toThrow()
   })
 })
 

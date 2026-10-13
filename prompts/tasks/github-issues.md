@@ -38,13 +38,13 @@ Do not put secrets in these files.
    worktree child, never a sibling Space:
 
 ```
-herdr worktree open  --workspace "{{workspaceId}}" --branch "fix/<short>" --label "<short>" --no-focus
+{{deskBin}} child {{taskId}} <short> --workspace "{{workspaceId}}" --repo "{{repo}}"
 herdr agent start <name> --kind {{kind}} --pane <pane>
 herdr agent prompt <name> <child prompt>
 ```
 
-   Use `worktree open` for a branch that already exists (it re-attaches);
-   `worktree create --base origin/main` only for a genuinely new one.
+   The same `child` command re-attaches a branch that already exists and
+   creates it from the default branch otherwise.
    Check `herdr worktree list` and `herdr agent list` first: a child
    already working the same issue gets re-prompted, not duplicated.
 
