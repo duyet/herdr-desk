@@ -358,6 +358,17 @@ hour buckets) and drop color when piped or when `NO_COLOR` is set. `analytics`
 and `board` also count sessions per agent when `sessions.jsonl` exists in the
 state dir.
 
+`analytics` shows success rate per job and per repo (skips are not attempts,
+so they do not lower it), the median fire time per job, and the median session
+length per agent.
+
+Usage counters. The desk appends one line to `usage.jsonl` in the state dir
+for each command you run (not the daemon's per-minute `tick`), each run
+started and finished, each child worktree spawned, and each upgrade. Lines
+hold ids, counts and timings only: no prompts, titles or error text.
+`analytics` prints the totals. Nothing leaves the machine today; there is no
+network sender, and a test fails if `src/usage.ts` gains one.
+
 Host-level plugin command log (start / focus hooks, not the schedule itself):
 
 ```sh
