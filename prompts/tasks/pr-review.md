@@ -5,31 +5,27 @@ PRs in the `# Event` section below. That is the whole queue for this run.
 
 If the backlog has an issue or a PR nobody sent you, leave it. This task wakes
 on events, not on a calendar — going looking is how one event turns into ten
-manager runs. `desk:github-issues` owns the backlog and this repo.
+manager runs. The repo's backlog job owns the backlog.
 
 ## Never merge
 
 **Never merge a PR, and never tell a child to merge one.** Not with
 `--squash`, not with `--auto`, not when CI is green, not when the review found
-nothing. `desk:github-issues` merges on this repo, and two managers racing to
-squash the same PR is worse than a slow one. Never auto-merge release-please
+nothing. Merging belongs to the repo's backlog job, and two managers racing
+to squash the same PR is worse than a slow one. Never auto-merge release-please
 PRs either, which is a separate rule that outlives this one.
 
-This overrides the merge paragraph in `prompts/child.md` for every child you
-spawn here. Say so in the child's prompt, in those words — a child that read
-only `child.md` will merge, because `child.md` tells it to.
+This overrides the merge paragraph in `{{childPromptPath}}` for every child
+you spawn here. Say so in the child's prompt, in those words — a child that
+read only the child prompt will merge, because it tells it to.
 
 Your job ends at a commit on the PR's branch.
 
 ## The events
 
-Everything you need is in this run dir:
-
-- `{{eventJson}}` — the events, pretty-printed
-- `{{eventPath}}` — the same list as a file, easier to read for several PRs
-
-Each event carries `number`, `title`, `author`, `base`, `head`, `url`, and
-`at`. `{{eventCount}}` events fired this run, woken by `{{triggerKind}}`.
+The events are in the `# Event` section below, and the same list is in
+`{{eventPath}}`. Each event carries `number`, `title`, `author`, `base`,
+`head`, `headFork`, `url`, and `at`. `{{eventCount}}` events fired this run, woken by `{{triggerKind}}`.
 
 Reviewing a PR you were not sent is out of scope even if it looks urgent.
 Reviewing the *same* PR twice is normal: a second commit on the head branch
@@ -71,21 +67,18 @@ Do not put secrets in these files.
    child already reviewing this PR gets re-prompted, not duplicated. Use
    `worktree open` if the branch already exists.
 
-   Children use `opencode2` with model `opencode/space-bunny-free`, same as
-   every other child on this repo. Confirm the model before editing.
-
 5. Give each child `{{childPromptPath}}`, plus a prompt that says, in these
    words, that this is a review of PR #<n>: read the diff against
    `origin/<base-ref>`, push a commit **to the PR's head branch** when the
    review finds something real, never merge, and report what it changed or
    that it found nothing. Two overrides, both in the child's words and not
    buried: **do not open a PR** (the PR is already open — push to its head),
-   and **do not merge**. `child.md` says to do both, so the override has to be
+   and **do not merge**. The child prompt says to do both, so the override has to be
    explicit or the child will do what it was told first.
 6. Stay up. Watch children. Read each PR's `ci` conclusion when it lands. A
-   child reports in the `child.md` shape:
+   child reports in the child prompt's shape:
    `herdr agent prompt {{agentName}} "STATUS hd-pr-<n>: <state> PR #<n> <url> — <one line>"`.
-   `child.md`'s states are `opened|ci-red|merged|blocked` and a review child
+   The child prompt's states are `opened|ci-red|merged|blocked` and a review child
    reaches neither `opened` (it opened nothing) nor `merged` (it must not
    merge). Use `blocked` for anything it could not finish; for the normal case
    spell out what happened — `reviewed PR #<n>, pushed a fix for <finding>` or
@@ -93,7 +86,7 @@ Do not put secrets in these files.
 
 ## What a review is
 
-The bar is this repo's, from `{{repo}}/AGENTS.md` and `prompts/identity.md`:
+The bar is this repo's, from `{{repo}}/AGENTS.md` and the identity section:
 
 - Match the surrounding code. No drive-by refactors, no renaming things the PR
   did not touch, no comment novels, no README the PR did not ask for.
@@ -117,21 +110,15 @@ The bar is this repo's, from `{{repo}}/AGENTS.md` and `prompts/identity.md`:
 
 ## CI
 
-`ci` in `.github/workflows/ci.yml` is the one required check. It runs
-`bun run lint`, `bun run typecheck`, `bun test`, `bun run validate:examples`,
-`bun run build`.
-
-**Children must not run those locally.** Rely on the PR's `ci` check and read
-its conclusion — a local `bun test` on a worktree with the wrong deps tells you
-nothing about the gate. `main` has no branch protection, so a red `ci` does not
-stop anything on its own; say so in the report and let `desk:github-issues`
-deal with it. CodeRabbit, GitGuardian and Socket also report and are not
-required.
+Read the repo's required checks from `{{repo}}/AGENTS.md` or the repo
+addendum. Children rely on the PR's checks and read their conclusions; a local
+test run on a review worktree with the wrong deps says nothing about the gate.
+A red check is a finding for the report, not a reason to merge.
 
 ## When the run is done
 
-Close what is finished, then write the report. Both are in `prompts/run.md`;
-this is the shape:
+Close what is finished, then write the report. Both are in the manager
+prompt above; this is the shape:
 
 - `herdr worktree remove --workspace <id>` reclaims the checkout **and** the
   Space. Plain `git worktree remove <path>` leaves a Space behind. Then
@@ -152,7 +139,7 @@ Write `{{runDir}}/changes.md` — the human-facing delta:
 - Skipped: <event> not dispatched this run (<maxChildren> cap)
 ```
 
-Then write `{{runDir}}/status.md` in the format `prompts/run.md` specifies: a
+Then write `{{runDir}}/status.md` in the format the manager prompt specifies: a
 `level`, one sentence, at most one link. No counts, no bullets, no file lists.
 `level` is the truth — `skip` when every PR was left alone, `ok` when you
 pushed something real, `blocked` when a human has to decide, `fail` when the

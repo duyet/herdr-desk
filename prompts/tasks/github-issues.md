@@ -10,13 +10,12 @@ All under `{{runDir}}`:
 
 | File | Purpose |
 |------|---------|
-| `queue.md` / `issues.md` | Classification of open issues + PRs |
+| `queue.md` | Classification of open issues + PRs |
 | `workers.md` | Child worktrees, agent names, PR links |
-| `summary.md` / `SUMMARY.md` | Start-of-run plan + running log |
+| `summary.md` | Start-of-run plan + running log |
 | `changes.md` | **After the run:** what actually changed (PRs, merges, skips) |
 | `status.md` | **After the run:** the one-line insight that gets notified |
 | `research-<n>.md` | Write-up when the right output is a note, not a PR |
-| `run.json` | Machine-readable snapshot if you want one |
 
 Do not put secrets in these files.
 
@@ -35,7 +34,7 @@ Do not put secrets in these files.
    One issue (or one tightly related PR) per worktree. Skip anything
    already in-flight this week.
 5. Spawn with Herdr (you stay here). Parent is the **open project
-   Space** (`{{workspaceId}}` — anyrouter, chmonitor, …). Nested
+   Space** (`{{workspaceId}}`). Nested
    worktree child, never a sibling Space:
 
 ```
