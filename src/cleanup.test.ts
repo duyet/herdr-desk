@@ -22,6 +22,7 @@ import {
 } from './cleanup'
 import type { TaskConfig } from './config'
 import type { ListedAgent, ListedWorkspace } from './herdr'
+import { childBranch } from './run'
 
 const NOW = new Date('2026-09-30T12:00:00')
 const dirs: string[] = []
@@ -250,16 +251,25 @@ describe('worktrees', () => {
         'worktree /r/d',
         'HEAD ccc',
         'detached',
+        'prunable gitdir file points to non-existent location',
         '',
       ].join('\n'),
     )
     expect(out).toEqual([
-      { path: '/r', branch: 'main', head: 'aaa', locked: false, main: true },
+      {
+        path: '/r',
+        branch: 'main',
+        head: 'aaa',
+        locked: false,
+        prunable: false,
+        main: true,
+      },
       {
         path: '/r/w',
         branch: 'desk/x',
         head: 'bbb',
         locked: true,
+        prunable: false,
         main: false,
       },
       {
@@ -267,6 +277,7 @@ describe('worktrees', () => {
         branch: undefined,
         head: 'ccc',
         locked: false,
+        prunable: true,
         main: false,
       },
     ])
@@ -281,7 +292,7 @@ describe('worktrees on disk', () => {
     return r.stdout.toString().trim()
   }
 
-  function setup(): { repo: string; wt: string } {
+  function setup(branch = 'desk/x'): { repo: string; wt: string } {
     const root = tmp()
     const origin = join(root, 'origin.git')
     const repo = join(root, 'repo')
@@ -294,7 +305,7 @@ describe('worktrees on disk', () => {
     git(repo, 'commit', '-m', 'init')
     git(repo, 'push', 'origin', 'main')
     const wt = join(root, 'desk-x')
-    git(repo, 'worktree', 'add', '-b', 'desk/x', wt)
+    git(repo, 'worktree', 'add', '-b', branch, wt)
     git(wt, 'config', 'user.email', 't@t')
     git(wt, 'config', 'user.name', 't')
     return { repo, wt }
@@ -408,6 +419,175 @@ describe('worktrees on disk', () => {
     const plan = await planCleanup([{ repo, tasks: [] }], merged, NOW)
     expect(plan.items).toEqual([])
     expect(git(repo, 'branch', '--list', 'desk/x')).toContain('desk/x')
+  })
+})
+
+describe('child worktrees on disk', () => {
+  const git = (cwd: string, ...args: string[]) => {
+    const r = Bun.spawnSync(['git', ...args], { cwd, stderr: 'pipe' })
+    if (r.exitCode !== 0) throw new Error(r.stderr.toString())
+    return r.stdout.toString().trim()
+  }
+  const child = childBranch(task(), 'issue-42')
+
+  function setup(branch = child): { repo: string; wt: string } {
+    const root = tmp()
+    const origin = join(root, 'origin.git')
+    const repo = join(root, 'repo')
+    git(root, 'init', '--bare', '-b', 'main', origin)
+    git(root, 'clone', origin, repo)
+    git(repo, 'config', 'user.email', 't@t')
+    git(repo, 'config', 'user.name', 't')
+    writeFileSync(join(repo, 'a'), '1')
+    git(repo, 'add', '.')
+    git(repo, 'commit', '-m', 'init')
+    git(repo, 'push', 'origin', 'main')
+    // The manager's own branch exists beside its children, as on a real desk.
+    git(repo, 'branch', 'desk/local-babysit')
+    const wt = join(root, 'child')
+    git(repo, 'worktree', 'add', '-b', branch, wt)
+    return { repo, wt }
+  }
+
+  const prs =
+    (states: Record<string, string>): Probe['pr'] =>
+    async (_repo, branch) =>
+      states[branch] ? { state: states[branch], headOid: 'deadbeef' } : null
+  const probe = (states: Record<string, string>): Probe => ({
+    ...realProbe,
+    pr: prs(states),
+    agents: async () => [],
+  })
+  const desks = (repo: string) => [{ repo, tasks: [task()] }]
+  const has = (repo: string, b: string) =>
+    git(repo, 'branch', '--list', b) !== ''
+
+  test('a merged child goes, worktree and branch, and a second run finds nothing', async () => {
+    const { repo, wt } = setup()
+    const p = probe({ [child]: 'MERGED' })
+    const plan = await planCleanup(desks(repo), p, NOW)
+    expect(plan.items.map((i) => i.kind)).toEqual(['worktree', 'branch'])
+    expect((await applyCleanup(plan, [repo])).failed).toEqual([])
+    expect(existsSync(wt)).toBe(false)
+    expect(has(repo, child)).toBe(false)
+    expect(has(repo, 'desk/local-babysit')).toBe(true)
+    expect((await planCleanup(desks(repo), p, NOW)).items).toEqual([])
+  })
+
+  test('a child with unmerged commits keeps its worktree and branch', async () => {
+    const { repo, wt } = setup()
+    writeFileSync(join(wt, 'b'), '2')
+    git(wt, '-c', 'user.email=t@t', '-c', 'user.name=t', 'add', '.')
+    git(wt, '-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-m', 'wip')
+    const plan = await planCleanup(
+      desks(repo),
+      probe({ [child]: 'MERGED' }),
+      NOW,
+    )
+    expect(plan.items).toEqual([])
+    await applyCleanup(plan, [repo])
+    expect(existsSync(wt)).toBe(true)
+    expect(has(repo, child)).toBe(true)
+  })
+
+  test('an unmerged child branch with no worktree is kept', async () => {
+    const { repo, wt } = setup()
+    git(repo, 'worktree', 'remove', wt)
+    const plan = await planCleanup(desks(repo), probe({ [child]: 'OPEN' }), NOW)
+    expect(plan.items).toEqual([])
+    expect(plan.kept.map((k) => k.what)).toContain(`branch ${child}`)
+  })
+
+  test('a child branch that moved after the plan is kept', async () => {
+    const { repo, wt } = setup()
+    git(repo, 'worktree', 'remove', wt)
+    const plan = await planCleanup(
+      desks(repo),
+      probe({ [child]: 'MERGED' }),
+      NOW,
+    )
+    expect(plan.items.map((i) => i.kind)).toEqual(['branch'])
+    const tip = git(
+      repo,
+      'commit-tree',
+      '-p',
+      child,
+      '-m',
+      'late',
+      `${child}^{tree}`,
+    )
+    git(repo, 'update-ref', `refs/heads/${child}`, tip)
+    expect((await applyCleanup(plan, [repo])).failed).toHaveLength(1)
+    expect(git(repo, 'rev-parse', child)).toBe(tip)
+  })
+
+  test('a child branch checked out where work remains is never deleted', async () => {
+    const { repo, wt } = setup()
+    writeFileSync(join(wt, 'b'), 'wip')
+    const plan = await planCleanup(
+      desks(repo),
+      probe({ [child]: 'MERGED' }),
+      NOW,
+    )
+    expect(plan.items).toEqual([])
+    expect(has(repo, child)).toBe(true)
+  })
+
+  test('a merged branch the desk did not name is never touched', async () => {
+    const { repo, wt } = setup('fix/by-hand')
+    const plan = await planCleanup(
+      desks(repo),
+      probe({ 'fix/by-hand': 'MERGED' }),
+      NOW,
+    )
+    expect(plan.items).toEqual([])
+    expect(existsSync(wt)).toBe(true)
+  })
+
+  test('a live agent working in a subdirectory keeps the child', async () => {
+    const { repo, wt } = setup()
+    mkdirSync(join(wt, 'src'))
+    const p: Probe = {
+      ...probe({ [child]: 'MERGED' }),
+      agents: async () => [
+        { name: 'kid', status: 'working', paneId: 'p1', cwd: join(wt, 'src') },
+      ],
+    }
+    const plan = await planCleanup(desks(repo), p, NOW)
+    expect(plan.items).toEqual([])
+  })
+
+  test('a done pane in a removed child closes before the worktree goes', async () => {
+    const { repo, wt } = setup()
+    const p: Probe = {
+      ...probe({ [child]: 'MERGED' }),
+      agents: async () => [
+        { name: 'kid', status: 'done', paneId: 'p1', cwd: wt },
+        { name: 'other', status: 'done', paneId: 'p2', cwd: `${wt}-sibling` },
+      ],
+    }
+    const plan = await planCleanup(desks(repo), p, NOW)
+    const panes = plan.items.filter((i) => i.kind === 'pane')
+    expect(panes).toEqual([
+      expect.objectContaining({ kind: 'pane', paneId: 'p1', agent: 'kid' }),
+    ])
+  })
+
+  test('a deleted child directory is pruned, then its merged branch goes', async () => {
+    const { repo, wt } = setup()
+    rmSync(wt, { recursive: true, force: true })
+    const p = probe({ [child]: 'MERGED' })
+    const plan = await planCleanup(desks(repo), p, NOW)
+    expect(plan.items.map((i) => i.kind)).toEqual(['branch'])
+    expect((await applyCleanup(plan, [repo])).failed).toEqual([])
+    expect(git(repo, 'worktree', 'list')).not.toContain(wt)
+    expect(has(repo, child)).toBe(false)
+    // Prune again with nothing left to prune.
+    expect(
+      (await applyCleanup({ items: [], kept: [], unavailable: [] }, [repo]))
+        .failed,
+    ).toEqual([])
+    expect(git(repo, 'worktree', 'list').split('\n')).toHaveLength(1)
   })
 })
 
