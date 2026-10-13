@@ -429,7 +429,7 @@ async function promptOrSpawn(
         'agent',
         'prompt',
         registered,
-        assembleManagerPrompt(vars),
+        assembleManagerPrompt({ ...vars, agentName: registered }),
       ])
       return done({ prompted: true })
     }
