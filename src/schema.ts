@@ -1,6 +1,6 @@
-import { agentKindNames } from './agents'
 import { dirname, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { agentKindNames } from './agents'
 import { cronExprOk } from './cron'
 
 export const SCHEMA_URL =

@@ -9,10 +9,10 @@ import {
 } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
+import { transcriptReaders } from '../agents'
 import { formatLocal } from '../day'
 import { pluginStateDir } from '../paths'
 import { textTable } from '../table'
-import { transcriptReaders } from '../agents'
 import { deskReader } from './desk'
 import type { AgentName, SessionReader, SessionRow } from './types'
 

@@ -16,6 +16,7 @@ import type { ListedAgent } from './herdr'
 import {
   announceable,
   announceBody,
+  assertOwnWorktree,
   baseRefArgv,
   baseRefFrom,
   canPromptManager,
@@ -418,5 +419,45 @@ esac
 
     expect((await runTask({ repo })).skipped).toContain('socket')
     expect(shouldAnnounce(repo, TASK_ID, FAULT)).toBe(false)
+  })
+
+  const lockOf = (repo: string) =>
+    join(repo, '.herdr-desk', 'runs', 'local-babysit', 'spawn.lock')
+
+  test('a second fire while one holds the claim does not prompt again', async () => {
+    const repo = desk()
+    mkdirSync(join(repo, '.herdr-desk', 'runs', 'local-babysit'), {
+      recursive: true,
+    })
+    writeFileSync(
+      lockOf(repo),
+      JSON.stringify({ pid: process.pid, at: Date.now() }),
+    )
+    const result = await runTask({ repo })
+    expect(result.prompted).toBeUndefined()
+    expect(result.skipped).toContain('already prompting or spawning')
+    // The holder's lock is not ours to remove.
+    expect(readFileSync(lockOf(repo), 'utf8')).toContain(`${process.pid}`)
+  })
+
+  test('a finished fire releases its claim so the next one can run', async () => {
+    const repo = desk()
+    expect((await runTask({ repo })).prompted).toBe(true)
+    expect(() => statSync(lockOf(repo))).toThrow()
+    expect((await runTask({ repo })).prompted).toBe(true)
+  })
+})
+
+describe('assertOwnWorktree', () => {
+  const t = (id: string) => ({ id }) as TaskConfig
+  test('two tasks whose ids slug alike cannot share a manager checkout', () => {
+    const a = t('local:babysit')
+    expect(() => assertOwnWorktree([a, t('local-babysit')], a)).toThrow(
+      /local-babysit/,
+    )
+  })
+  test('distinct slugs pass', () => {
+    const a = t('local:babysit')
+    expect(() => assertOwnWorktree([a, t('local:prod')], a)).not.toThrow()
   })
 })
