@@ -55,6 +55,7 @@ function runDir(repo: string, day: string, spawn?: object): string {
 
 const noProbe: Probe = {
   worktrees: async () => [],
+  branches: async () => [],
   pr: async () => null,
   isDirty: async () => false,
   headOnRemote: async () => true,
@@ -250,9 +251,21 @@ describe('worktrees', () => {
       ].join('\n'),
     )
     expect(out).toEqual([
-      { path: '/r', branch: 'main', locked: false, main: true },
-      { path: '/r/w', branch: 'desk/x', locked: true, main: false },
-      { path: '/r/d', branch: undefined, locked: false, main: false },
+      { path: '/r', branch: 'main', head: 'aaa', locked: false, main: true },
+      {
+        path: '/r/w',
+        branch: 'desk/x',
+        head: 'bbb',
+        locked: true,
+        main: false,
+      },
+      {
+        path: '/r/d',
+        branch: undefined,
+        head: 'ccc',
+        locked: false,
+        main: false,
+      },
     ])
   })
 })
@@ -313,14 +326,111 @@ describe('worktrees on disk', () => {
   test('a clean worktree at a pushed commit is listed, then removed', async () => {
     const { repo, wt } = setup()
     const plan = await planCleanup([{ repo, tasks: [] }], merged, NOW)
-    expect(plan.items.map((i) => i.kind)).toEqual(['worktree'])
-    expect(formatCleanup(plan, true)).toContain('would remove 1')
+    expect(plan.items.map((i) => i.kind)).toEqual(['worktree', 'branch'])
+    expect(formatCleanup(plan, true)).toContain('would remove 2')
     expect(existsSync(wt)).toBe(true)
     const result = await applyCleanup(plan)
     expect(result.failed).toEqual([])
     expect(existsSync(wt)).toBe(false)
-    // The branch itself is never deleted.
+  })
+
+  test('a merged PR removes the worktree and then its branch, and a second run finds nothing', async () => {
+    const { repo, wt } = setup()
+    const plan = await planCleanup([{ repo, tasks: [] }], merged, NOW)
+    expect(plan.items.map((i) => i.kind)).toEqual(['worktree', 'branch'])
+    expect((await applyCleanup(plan)).failed).toEqual([])
+    expect(existsSync(wt)).toBe(false)
+    expect(git(repo, 'branch', '--list', 'desk/x')).toBe('')
+    const again = await planCleanup([{ repo, tasks: [] }], merged, NOW)
+    expect(again.items).toEqual([])
+    expect((await applyCleanup(again)).failed).toEqual([])
+  })
+
+  test('a closed, unmerged PR removes the pushed worktree but keeps the branch', async () => {
+    const { repo, wt } = setup()
+    const closed = { ...merged, pr: async () => ({ state: 'CLOSED' }) }
+    const plan = await planCleanup([{ repo, tasks: [] }], closed, NOW)
+    expect(plan.items.map((i) => i.kind)).toEqual(['worktree'])
+    await applyCleanup(plan)
+    expect(existsSync(wt)).toBe(false)
     expect(git(repo, 'branch', '--list', 'desk/x')).toContain('desk/x')
+  })
+
+  test('an orphan branch with unmerged commits is kept', async () => {
+    const { repo, wt } = setup()
+    writeFileSync(join(wt, 'b'), '2')
+    git(wt, 'add', '.')
+    git(wt, 'commit', '-m', 'unpushed work')
+    git(repo, 'worktree', 'remove', wt)
+    const plan = await planCleanup([{ repo, tasks: [] }], merged, NOW)
+    expect(plan.items).toEqual([])
+    expect(plan.kept.map((k) => k.what)).toContain('branch desk/x')
+    await applyCleanup(plan)
+    expect(git(repo, 'branch', '--list', 'desk/x')).toContain('desk/x')
+  })
+
+  test('an orphan branch with no PR is kept', async () => {
+    const { repo, wt } = setup()
+    git(repo, 'worktree', 'remove', wt)
+    const none = { ...merged, pr: async () => null }
+    const plan = await planCleanup([{ repo, tasks: [] }], none, NOW)
+    expect(plan.items).toEqual([])
+    expect(git(repo, 'branch', '--list', 'desk/x')).toContain('desk/x')
+  })
+
+  test('a branch that moved after the plan is kept', async () => {
+    const { repo, wt } = setup()
+    git(repo, 'worktree', 'remove', wt)
+    const plan = await planCleanup([{ repo, tasks: [] }], merged, NOW)
+    expect(plan.items.map((i) => i.kind)).toEqual(['branch'])
+    // New work lands on the branch between dry run and apply.
+    const tip = git(
+      repo,
+      'commit-tree',
+      '-p',
+      'desk/x',
+      '-m',
+      'late',
+      'desk/x^{tree}',
+    )
+    git(repo, 'update-ref', 'refs/heads/desk/x', tip)
+    const result = await applyCleanup(plan)
+    expect(result.failed).toHaveLength(1)
+    expect(git(repo, 'rev-parse', 'desk/x')).toBe(tip)
+  })
+
+  test('a branch checked out in a worktree that is kept is never deleted', async () => {
+    const { repo, wt } = setup()
+    writeFileSync(join(wt, 'b'), 'wip')
+    const plan = await planCleanup([{ repo, tasks: [] }], merged, NOW)
+    expect(plan.items).toEqual([])
+    expect(git(repo, 'branch', '--list', 'desk/x')).toContain('desk/x')
+  })
+})
+
+describe('claim locks', () => {
+  const lockPath = (repo: string) =>
+    join(repo, '.herdr-desk/runs/local-babysit/spawn.lock')
+
+  test('a lock whose holder is gone is listed and removed', async () => {
+    const repo = tmp()
+    mkdirSync(join(repo, '.herdr-desk/runs/local-babysit'), { recursive: true })
+    writeFileSync(lockPath(repo), JSON.stringify({ pid: 2 ** 22 + 7, at: 0 }))
+    const plan = await planCleanup(desk(repo), noProbe, NOW)
+    expect(plan.items.map((i) => i.kind)).toEqual(['lock'])
+    await applyCleanup(plan)
+    expect(existsSync(lockPath(repo))).toBe(false)
+  })
+
+  test('a lock held by a live, recent fire is kept', async () => {
+    const repo = tmp()
+    mkdirSync(join(repo, '.herdr-desk/runs/local-babysit'), { recursive: true })
+    writeFileSync(
+      lockPath(repo),
+      JSON.stringify({ pid: process.pid, at: Date.now() }),
+    )
+    const plan = await planCleanup(desk(repo), noProbe, new Date())
+    expect(plan.items).toEqual([])
   })
 })
 

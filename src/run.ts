@@ -1,5 +1,7 @@
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join, resolve, sep } from 'node:path'
+import { launchKind } from './agents'
+import { tryClaim } from './claim'
 import {
   type LoadedDesk,
   loadDeskConfig,
@@ -24,7 +26,6 @@ import { type RunTrigger, recordRun } from './history'
 import { markRunning, markSettled } from './hub'
 import { briefReason, noticeBody, notify, resolveNotify } from './notify'
 import { assembleManagerPrompt, taskVars } from './prompt'
-import { HERDR_AGENT_KINDS } from './schema'
 import { claimEvents, restoreEvents } from './watch'
 
 type RunResult = {
@@ -76,6 +77,16 @@ export function runDirFor(repo: string, task: TaskConfig, day: string): string {
   return join(repo, rel, day)
 }
 
+/** The lock one fire holds while it prompts or spawns this task's manager. */
+export function spawnClaimPath(repo: string, task: TaskConfig): string {
+  return join(dirname(runDirFor(repo, task, 'x')), 'spawn.lock')
+}
+
+/** How long a held claim is trusted: the agent start timeout plus a margin. */
+export function claimMaxAgeMs(task: TaskConfig): number {
+  return (task.agent.timeoutMs ?? 180000) + 60000
+}
+
 /**
  * Point `<task state dir>/LATEST` at today's run dir.
  *
@@ -93,21 +104,6 @@ export function writeLatestPointer(
   const pointer = join(stateDir, 'LATEST')
   rmSync(pointer, { recursive: true, force: true })
   writeFileSync(pointer, `${taskId}/${day}\n`)
-}
-
-/**
- * First ladder rung `herdr agent start --kind` accepts. Command rungs and
- * unknown names are skipped; a ladder with none throws before any worktree is
- * spawned, naming the rungs, instead of failing inside Herdr.
- */
-export function launchKind(ladder: string[]): string {
-  const kind = ladder.find((rung) => HERDR_AGENT_KINDS.has(rung.trim()))
-  if (kind === undefined) {
-    throw new Error(
-      `agent ladder [${ladder.join(', ')}] has no Herdr agent kind; use one of: ${[...HERDR_AGENT_KINDS].join(', ')}`,
-    )
-  }
-  return kind.trim()
 }
 
 export async function runTask(opts: {
@@ -277,6 +273,7 @@ async function execute(
   task: TaskConfig,
   trigger?: RunTrigger,
 ): Promise<RunResult> {
+  assertOwnWorktree(config.tasks, task)
   const day = dayKey()
   const runDir = runDirFor(repo, task, day)
   mkdirSync(runDir, { recursive: true })
@@ -346,6 +343,40 @@ async function execute(
   // skipped because Herdr was down has done no work, and eating the queue on a
   // skip is how ten events vanish with nothing anywhere saying they were never
   // run.
+  const claim = tryClaim(spawnClaimPath(repo, task), claimMaxAgeMs(task))
+  if (!claim) {
+    const reason = `another fire of ${task.id} is already prompting or spawning its manager — skip`
+    console.log(reason)
+    return done(preconditionSkip(reason))
+  }
+  try {
+    return await promptOrSpawn(
+      config,
+      repo,
+      task,
+      day,
+      runDir,
+      project,
+      listed,
+      done,
+      trigger,
+    )
+  } finally {
+    claim.release()
+  }
+}
+
+async function promptOrSpawn(
+  config: LoadedDesk,
+  repo: string,
+  task: TaskConfig,
+  day: string,
+  runDir: string,
+  project: { workspaceId: string },
+  listed: ListedWorkspace[],
+  done: (result: RunResult) => RunResult,
+  trigger: RunTrigger | undefined,
+): Promise<RunResult> {
   const events = claimEvents(repo, task.id)
   if (events.length) {
     writeFileSync(
@@ -455,6 +486,24 @@ async function execute(
  */
 export function deskWorktreeBranch(task: TaskConfig): string {
   return `desk/${taskSlug(task)}`
+}
+
+/**
+ * Throw when another task of the desk would share `task`'s manager branch.
+ *
+ * `local:babysit` and `local-babysit` slug to the same `desk/local-babysit`, so
+ * both managers would run in one checkout and commit over each other.
+ */
+export function assertOwnWorktree(tasks: TaskConfig[], task: TaskConfig): void {
+  const branch = deskWorktreeBranch(task)
+  const clash = tasks.find(
+    (t) => t.id !== task.id && deskWorktreeBranch(t) === branch,
+  )
+  if (clash) {
+    throw new Error(
+      `tasks '${task.id}' and '${clash.id}' share worktree branch ${branch}; rename one`,
+    )
+  }
 }
 
 /** Filesystem-safe form of a task id: `local:babysit` -> `local-babysit`. */
