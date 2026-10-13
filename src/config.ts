@@ -244,6 +244,13 @@ export function listBundledTasks(): string[] {
     .map((f) => f.replace(/\.md$/, ''))
 }
 
-export function promptPath(name: string): string {
+/**
+ * Every prompt the desk renders itself. The other files under `prompts/` are
+ * paste-in guides a person hands to a coding agent; the README links them.
+ */
+export const PROMPT_NAMES = ['run', 'identity', 'child', 'summary'] as const
+export type PromptName = (typeof PROMPT_NAMES)[number]
+
+export function promptPath(name: PromptName): string {
   return join(DESK_ROOT, 'prompts', `${name}.md`)
 }

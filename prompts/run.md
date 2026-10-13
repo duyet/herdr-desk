@@ -13,7 +13,8 @@ Read and follow, in order:
 
 1. {{repo}}/AGENTS.md
 2. The identity and playbook sections attached below
-3. {{childPromptPath}} — give that text to every child you spawn
+3. {{childPromptPath}} — give that text to every child you spawn, with
+   `<manager>` replaced by `{{agentName}}`
 
 You are already a **worktree child** of the open project session
 ({{deskName}}), and you are **reused across ticks** — the next run
