@@ -110,6 +110,8 @@ export type ListedWorkspace = {
   tokens?: Record<string, string>
   /** True when this Space is a linked worktree child, never a project root. */
   isLinkedWorktree?: boolean
+  /** Panes open in this Space; absent when Herdr did not say. */
+  paneCount?: number
 }
 
 /** Parse `herdr workspace list` JSON. */
@@ -138,6 +140,7 @@ export function listedWorkspaces(listJson: unknown): ListedWorkspace[] {
       linkedRaw === true || linkedRaw === 'true' ? true : undefined
     out.push({
       workspaceId,
+      paneCount: typeof ws.pane_count === 'number' ? ws.pane_count : undefined,
       label: str(ws.label) ?? str(ws.name) ?? str(ws.title),
       cwd: str(ws.cwd) ?? str(ws.path),
       repoRoot: str(wt.repo_root) ?? str(wt.repoRoot),

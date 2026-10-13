@@ -9,6 +9,7 @@ import {
   formatCleanup,
   formatResult,
   planCleanup,
+  planWorkspaces,
 } from './cleanup'
 import { listBundledTasks, loadDeskConfig, resolveTask } from './config'
 import { explainConfig, explainTasks, showConfig } from './configShow'
@@ -659,6 +660,14 @@ async function main() {
     if (failed.length) {
       console.log(
         `${failed.length} desk(s) skipped: unreadable config (desk scan)`,
+      )
+    }
+    const orphans = await planWorkspaces(
+      desks.map((d) => ({ repo: d.repo, tasks: d.config.tasks })),
+    )
+    if (orphans.items.length) {
+      console.log(
+        `${orphans.items.length} orphan lane workspace(s): reclaimed next tick, or \`herdr-desk cleanup\``,
       )
     }
     return

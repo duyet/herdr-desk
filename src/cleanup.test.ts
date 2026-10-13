@@ -16,10 +16,12 @@ import {
   type Probe,
   parseWorktrees,
   planCleanup,
+  planWorkspaces,
+  reclaimOrphanWorkspaces,
   realProbe,
 } from './cleanup'
 import type { TaskConfig } from './config'
-import type { ListedAgent } from './herdr'
+import type { ListedAgent, ListedWorkspace } from './herdr'
 
 const NOW = new Date('2026-09-30T12:00:00')
 const dirs: string[] = []
@@ -60,6 +62,7 @@ const noProbe: Probe = {
   headOnRemote: async () => true,
   headWithin: async () => true,
   agents: async () => [],
+  workspaces: async () => [],
 }
 
 function desk(repo: string): CleanupDesk[] {
@@ -382,5 +385,70 @@ describe('panes', () => {
     )
     expect(plan.items.filter((i) => i.kind === 'pane')).toEqual([])
     expect(plan.unavailable).toHaveLength(1)
+  })
+})
+
+describe('orphan lane workspaces', () => {
+  const repo = '/home/x/project/anyrouter'
+  const ws = (over: Partial<ListedWorkspace>): ListedWorkspace => ({
+    workspaceId: 'w1',
+    label: 'anyrouter local:collect',
+    paneCount: 0,
+    ...over,
+  })
+  const probeWith = (list: ListedWorkspace[] | null): Probe => ({
+    ...noProbe,
+    workspaces: async () => list,
+  })
+  const d = [{ repo, tasks: [task()] }]
+
+  test('plans only the empty lane workspace', async () => {
+    const plan = await planCleanup(
+      d,
+      probeWith([
+        ws({ workspaceId: 'empty' }),
+        ws({ workspaceId: 'live', paneCount: 1 }),
+        ws({ workspaceId: 'foreign', label: 'notes', paneCount: 0 }),
+      ]),
+      NOW,
+    )
+    const items = plan.items.filter((i) => i.kind === 'workspace')
+    expect(items).toHaveLength(1)
+    expect(items[0]).toMatchObject({ workspaceId: 'empty' })
+  })
+
+  test('never lists a workspace with a pane, an unknown pane count, or another repo', async () => {
+    const r = await planWorkspaces(
+      d,
+      probeWith([
+        ws({ workspaceId: 'a', paneCount: 2 }),
+        ws({ workspaceId: 'b', paneCount: undefined }),
+        ws({ workspaceId: 'c', label: 'chmonitor local:collect' }),
+        ws({ workspaceId: 'e', label: 'anyrouter fix-thing' }),
+      ]),
+    )
+    expect(r.items).toEqual([])
+  })
+
+  test('keeps a lane whose worktree is still live', async () => {
+    const wt = '/home/x/.herdr/worktrees/anyrouter/desk-local-collect'
+    const probe = {
+      ...probeWith([ws({ checkoutPath: wt })]),
+      worktrees: async () => [{ path: wt, locked: false, main: false }],
+    }
+    expect((await planWorkspaces(d, probe, () => false)).items).toEqual([])
+    expect((await planWorkspaces(d, probeWith([ws({ checkoutPath: wt })]), () => true)).items).toEqual([])
+  })
+
+  test('an unreadable Herdr plans nothing and says so', async () => {
+    const r = await planWorkspaces(d, probeWith(null))
+    expect(r).toEqual({ items: [], unavailable: true })
+  })
+
+  test('reclaim with nothing orphaned closes nothing', async () => {
+    expect(await reclaimOrphanWorkspaces(d, probeWith([]))).toEqual({
+      removed: [],
+      failed: [],
+    })
   })
 })

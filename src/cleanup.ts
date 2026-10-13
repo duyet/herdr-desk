@@ -1,7 +1,14 @@
 import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import type { TaskConfig } from './config'
-import { herdrCall, isAgentLive, type ListedAgent, namedAgents } from './herdr'
+import {
+  herdrCall,
+  isAgentLive,
+  type ListedAgent,
+  type ListedWorkspace,
+  listedWorkspaces,
+  namedAgents,
+} from './herdr'
 import { runDirFor } from './run'
 
 /** A finished run dir or manager pane is kept this long before it is stale. */
@@ -22,6 +29,7 @@ export type CleanupItem =
     }
   | { kind: 'rundir'; path: string; why: string }
   | { kind: 'pane'; paneId: string; agent: string; why: string }
+  | { kind: 'workspace'; workspaceId: string; label: string; why: string }
 
 type Kept = { what: string; why: string }
 
@@ -55,6 +63,8 @@ export type Probe = {
   headWithin(path: string, oid: string): Promise<boolean>
   /** `null` when Herdr cannot be asked. */
   agents(): Promise<ListedAgent[] | null>
+  /** `null` when Herdr cannot be asked. */
+  workspaces(): Promise<ListedWorkspace[] | null>
 }
 
 async function run(
@@ -127,6 +137,13 @@ export const realProbe: Probe = {
   async agents() {
     try {
       return namedAgents(await herdrCall(['agent', 'list']))
+    } catch {
+      return null
+    }
+  },
+  async workspaces() {
+    try {
+      return listedWorkspaces(await herdrCall(['workspace', 'list']))
     } catch {
       return null
     }
@@ -253,6 +270,59 @@ function stalePanes(
 
 export type CleanupDesk = { repo: string; tasks: TaskConfig[] }
 
+/** `<repo> local:<job>` / `<repo> desk:<job>`: the label a desk lane is opened with. */
+function isLaneLabel(label: string | undefined, repo: string): boolean {
+  if (!label) return false
+  const prefix = `${basename(repo)} `
+  if (!label.startsWith(prefix)) return false
+  const job = label.slice(prefix.length)
+  return /^(local|desk):\S+$/.test(job)
+}
+
+/**
+ * Lane workspaces left behind once their worktree is gone.
+ *
+ * A lane that crashed, or whose pane closed first, never closes its own
+ * workspace. It is only ever listed when it has *zero* panes (a count Herdr
+ * must state: an absent count is unknown, not zero), its label is a desk lane
+ * of this repo, and no live worktree sits at its path. Anything with a pane or
+ * a foreign label is left alone, however empty it looks.
+ */
+export async function planWorkspaces(
+  desks: CleanupDesk[],
+  probe: Probe = realProbe,
+  exists: (p: string) => boolean = existsSync,
+): Promise<{ items: CleanupItem[]; unavailable: boolean }> {
+  const workspaces = await probe.workspaces()
+  if (!workspaces) return { items: [], unavailable: true }
+  const items: CleanupItem[] = []
+  const claimed = new Set<string>()
+  for (const desk of desks) {
+    const candidates = workspaces.filter(
+      (w) =>
+        !claimed.has(w.workspaceId) &&
+        w.paneCount === 0 &&
+        isLaneLabel(w.label, desk.repo),
+    )
+    if (candidates.length === 0) continue
+    const live = new Set(
+      (await probe.worktrees(desk.repo)).map((wt) => wt.path),
+    )
+    for (const w of candidates) {
+      const path = w.checkoutPath ?? w.cwd
+      if (path && (live.has(path) || exists(path))) continue
+      claimed.add(w.workspaceId)
+      items.push({
+        kind: 'workspace',
+        workspaceId: w.workspaceId,
+        label: w.label as string,
+        why: 'no panes, no worktree',
+      })
+    }
+  }
+  return { items, unavailable: false }
+}
+
 /**
  * What a cleanup would remove. Pure read: this is what `--dry-run` prints and
  * exactly what `cleanup` executes, so the two cannot disagree.
@@ -306,6 +376,9 @@ export async function planCleanup(
     }
   }
   if (agents) plan.items.push(...stalePanes(expired, agents, now))
+  const orphans = await planWorkspaces(desks, probe)
+  if (orphans.unavailable) plan.unavailable.push('herdr workspaces')
+  plan.items.push(...orphans.items)
   return plan
 }
 
@@ -321,6 +394,8 @@ export async function applyCleanup(plan: CleanupPlan): Promise<CleanupResult> {
     try {
       if (item.kind === 'pane') {
         await herdrCall(['pane', 'close', item.paneId])
+      } else if (item.kind === 'workspace') {
+        await herdrCall(['workspace', 'close', item.workspaceId])
       } else if (item.kind === 'rundir') {
         rmSync(item.path, { recursive: true })
       } else {
@@ -344,6 +419,8 @@ function describeItem(item: CleanupItem): string {
   if (item.kind === 'worktree')
     return `worktree  ${item.path}  (${item.branch}, ${item.why})`
   if (item.kind === 'rundir') return `run dir   ${item.path}  (${item.why})`
+  if (item.kind === 'workspace')
+    return `workspace ${item.workspaceId}  (${item.label}, ${item.why})`
   return `pane      ${item.paneId}  (${item.agent}, ${item.why})`
 }
 
@@ -371,4 +448,17 @@ export function formatResult(result: CleanupResult): string {
   for (const f of result.failed)
     lines.push(`  failed: ${describeItem(f.item)}  — ${f.error}`)
   return lines.join('\n')
+}
+
+/**
+ * Close orphan lane workspaces and nothing else. This is what the daemon runs
+ * each tick, so it is idempotent: a closed workspace is no longer listed, and
+ * a Herdr that cannot be asked is a no-op rather than an error.
+ */
+export async function reclaimOrphanWorkspaces(
+  desks: CleanupDesk[],
+  probe: Probe = realProbe,
+): Promise<CleanupResult> {
+  const { items } = await planWorkspaces(desks, probe)
+  return applyCleanup({ items, kept: [], unavailable: [] })
 }
