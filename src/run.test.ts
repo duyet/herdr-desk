@@ -420,7 +420,7 @@ describe('runTask', () => {
    *
    * `herdrDown` leaves the socket missing, which is the precondition-skip path.
    */
-  function desk(herdrDown = false): string {
+  function desk(herdrDown = false, legacy = false): string {
     const state = tempDir('herdr-desk-run-')
     const repo = tempDir('herdr-desk-repo-')
     process.env.HERDR_PLUGIN_STATE_DIR = state
@@ -436,19 +436,25 @@ describe('runTask', () => {
           {
             id: TASK_ID,
             schedule: '0 7 * * *',
-            agentName: 'chm-babysit',
+            ...(legacy ? {} : { agentName: 'chm-babysit' }),
           },
         ],
       })}\n`,
     )
 
     const bin = join(state, 'herdr')
+    // An upgraded desk: the finished manager is still registered under the
+    // name every task used to share, in this task's own checkout.
+    const agents = legacy
+      ? '{"name":"chmonitor-desk","status":"done","pane_id":"p1","workspace_id":"wMgr","cwd":"/w/desk-local-babysit"}'
+      : '{"name":"chm-babysit","status":"working"}'
     writeFileSync(
       bin,
       `#!/bin/sh
 case "$1 $2" in
   "workspace list") echo '{"result":{"workspaces":[{"workspace_id":"wProj","cwd":"${repo}"}]}}' ;;
-  "agent list") echo '{"result":{"agents":[{"name":"chm-babysit","status":"working"}]}}' ;;
+  "agent list") echo '{"result":{"agents":[${agents}]}}' ;;
+  "agent prompt") printf '%s\n%s' "$3" "$4" > "${state}/prompted" ;;
   *) echo '{}' ;;
 esac
 `,
@@ -514,6 +520,19 @@ esac
     expect(result.skipped).toContain('already prompting or spawning')
     // The holder's lock is not ours to remove.
     expect(readFileSync(lockOf(repo), 'utf8')).toContain(`${process.pid}`)
+  })
+
+  test('an upgraded desk re-prompts its old session, and tells it its real name', async () => {
+    const repo = desk(false, true)
+    expect((await runTask({ repo })).prompted).toBe(true)
+    const state = process.env.HERDR_PLUGIN_STATE_DIR as string
+    const [name, ...prompt] = readFileSync(
+      join(state, 'prompted'),
+      'utf8',
+    ).split('\n')
+    expect(name).toBe('chmonitor-desk')
+    // Children report to this name; the new default would reach nobody.
+    expect(prompt.join('\n')).toContain('Your Herdr name: chmonitor-desk\n')
   })
 
   test('a finished fire releases its claim so the next one can run', async () => {
