@@ -20,6 +20,7 @@ import {
   tickOnce,
 } from './daemon'
 import { loadRuns } from './history'
+import { pauseKey, savePaused } from './pause'
 import { hold, MAX_HELD_MS, queued } from './queue'
 
 // Everything the tick reads off the host, so a run cannot pick up the machine's
@@ -402,6 +403,19 @@ describe('a held job whose slot comes due', () => {
 
     expect(loadRuns(50, { repo, task: TASK })).toHaveLength(1)
     expect(queued()).toHaveLength(0)
+  })
+
+  test('a paused job stays held instead of running from the queue', async () => {
+    // Pausing after the hold must still stop the job. The scheduled path and
+    // the watch step both honour the pause, and the retry path ran it anyway.
+    const repo = desk(true)
+    heldFor(repo)
+    savePaused({ jobs: { [pauseKey(repo, TASK)]: {} } })
+
+    await tickOnce(AT, roomy)
+
+    expect(loadRuns(50, { repo, task: TASK })).toHaveLength(0)
+    expect(queued()).toHaveLength(1)
   })
 
   test('a job whose run fails is still owed, at the age it had', async () => {
