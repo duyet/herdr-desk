@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs'
-import { basename, dirname, join } from 'node:path'
+import { basename, dirname, join, sep } from 'node:path'
 import { isStaleClaim } from './claim'
 import type { TaskConfig } from './config'
 import { herdrCall, isAgentLive, type ListedAgent, namedAgents } from './herdr'
@@ -10,7 +10,10 @@ export const RETAIN_DAYS = 14
 const DAY_MS = 86_400_000
 const DAY_DIR = /^\d{4}-\d{2}-\d{2}$/
 
-/** Branch prefix of the worktrees the desk itself creates for a manager. */
+/**
+ * Branch prefix of every worktree the desk creates: a manager's `desk/<job>`
+ * and the children `herdr-desk child` opens as `desk/<job>--<item>`.
+ */
 const DESK_BRANCH = 'desk/'
 
 export type CleanupItem =
@@ -49,6 +52,8 @@ export type WorktreeEntry = {
   /** Checked-out commit, from the porcelain `HEAD` line. */
   head?: string
   locked: boolean
+  /** Git reports the directory gone; `git worktree prune` drops the entry. */
+  prunable?: boolean
   /** The repo's own checkout, always the first `git worktree list` entry. */
   main: boolean
 }
@@ -94,14 +99,18 @@ export function parseWorktrees(porcelain: string): WorktreeEntry[] {
     let branch: string | undefined
     let head: string | undefined
     let locked = false
+    let prunable = false
     for (const line of block.split('\n')) {
       if (line.startsWith('worktree ')) path = line.slice(9)
       else if (line.startsWith('HEAD ')) head = line.slice(5)
       else if (line.startsWith('branch refs/heads/'))
         branch = line.slice('branch refs/heads/'.length)
       else if (line === 'locked' || line.startsWith('locked ')) locked = true
+      else if (line === 'prunable' || line.startsWith('prunable '))
+        prunable = true
     }
-    if (path) out.push({ path, branch, head, locked, main: out.length === 0 })
+    if (path)
+      out.push({ path, branch, head, locked, prunable, main: out.length === 0 })
   }
   return out
 }
@@ -162,6 +171,32 @@ export const realProbe: Probe = {
   },
 }
 
+/** `path` is `dir` or somewhere inside it. */
+function isWithin(path: string, dir: string): boolean {
+  return path === dir || path.startsWith(dir.endsWith(sep) ? dir : dir + sep)
+}
+
+/** Liveness by Herdr's status alone: a working agent never loses its pane. */
+const byStatus = () => true
+
+/**
+ * Finished agents still sitting in a worktree the plan removes. Their pane
+ * would outlive the checkout it was opened on, so it closes first.
+ */
+function panesIn(path: string, agents: ListedAgent[]): CleanupItem[] {
+  return agents
+    .filter(
+      (a) =>
+        a.paneId && a.cwd && !isAgentLive(a, byStatus) && isWithin(a.cwd, path),
+    )
+    .map((a) => ({
+      kind: 'pane',
+      paneId: a.paneId as string,
+      agent: a.name,
+      why: `agent ${a.status ?? 'gone'}, worktree removed`,
+    }))
+}
+
 /**
  * Decide whether one desk worktree may be removed, or say why not.
  *
@@ -174,11 +209,12 @@ async function judgeWorktree(
   repo: string,
   wt: WorktreeEntry,
   probe: Probe,
-  liveCwds: Set<string>,
+  liveCwds: string[],
 ): Promise<{ remove: boolean; why: string }> {
   if (wt.main) return { remove: false, why: 'main checkout' }
   if (wt.locked) return { remove: false, why: 'locked' }
-  if (liveCwds.has(wt.path)) return { remove: false, why: 'agent still live' }
+  if (liveCwds.some((cwd) => isWithin(cwd, wt.path)))
+    return { remove: false, why: 'agent still live' }
 
   const pr = await probe.pr(repo, wt.branch ?? '')
   if (!pr) return { remove: false, why: 'no PR, or PR state unknown' }
@@ -318,15 +354,16 @@ export async function planCleanup(
   const plan: CleanupPlan = { items: [], kept: [], unavailable: [] }
   const agents = await probe.agents()
   if (!agents) plan.unavailable.push('herdr agents (panes not checked)')
-  const liveCwds = new Set(
-    (agents ?? [])
-      .filter((a) => isAgentLive(a) && a.cwd)
-      .map((a) => a.cwd as string),
-  )
+  const liveCwds = (agents ?? [])
+    .filter((a) => isAgentLive(a) && a.cwd)
+    .map((a) => a.cwd as string)
 
   const expired: string[] = []
   for (const desk of desks) {
-    const worktrees = await probe.worktrees(desk.repo)
+    // A prunable entry's directory is already gone; apply prunes it first.
+    const worktrees = (await probe.worktrees(desk.repo)).filter(
+      (w) => !w.prunable,
+    )
     const checkedOut = new Set(worktrees.map((w) => w.branch))
     const removable = new Set<string>()
     for (const wt of worktrees) {
@@ -342,6 +379,7 @@ export async function planCleanup(
           branch,
           why: verdict.why,
         })
+        if (agents) plan.items.push(...panesIn(wt.path, agents))
         removable.add(branch)
       } else {
         plan.kept.push({ what: wt.path, why: verdict.why })
@@ -397,7 +435,16 @@ export async function planCleanup(
       })
     }
   }
-  if (agents) plan.items.push(...stalePanes(expired, agents, now))
+  if (agents) {
+    const planned = new Set(
+      plan.items.flatMap((i) => (i.kind === 'pane' ? [i.paneId] : [])),
+    )
+    plan.items.push(
+      ...stalePanes(expired, agents, now).filter(
+        (i) => i.kind !== 'pane' || !planned.has(i.paneId),
+      ),
+    )
+  }
   return plan
 }
 
@@ -457,8 +504,19 @@ async function removeItem(item: CleanupItem): Promise<void> {
   }
 }
 
-/** Remove exactly the items in `plan`, nothing it did not list. */
-export async function applyCleanup(plan: CleanupPlan): Promise<CleanupResult> {
+/**
+ * Remove exactly the items in `plan`, nothing it did not list.
+ *
+ * Each of `repos` gets `git worktree prune` first. It only drops git's record
+ * of a worktree whose directory is already gone, so it is safe to repeat, and
+ * a stale record would otherwise hold its branch "checked out" forever.
+ */
+export async function applyCleanup(
+  plan: CleanupPlan,
+  repos: string[] = [],
+): Promise<CleanupResult> {
+  for (const repo of new Set(repos))
+    await run(['git', 'worktree', 'prune'], repo)
   const result: CleanupResult = { removed: [], failed: [] }
   const ordered = [...plan.items].sort(
     (a, b) => APPLY_ORDER[a.kind] - APPLY_ORDER[b.kind],

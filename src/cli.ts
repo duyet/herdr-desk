@@ -771,7 +771,10 @@ async function main() {
     const plan = await planCleanup(desks)
     console.log(formatCleanup(plan, dryRun))
     if (dryRun) return
-    const result = await applyCleanup(plan)
+    const result = await applyCleanup(
+      plan,
+      desks.map((d) => d.repo),
+    )
     console.log(formatResult(result))
     if (result.failed.length > 0) process.exit(1)
     return
