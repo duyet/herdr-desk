@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { findConfigPath, type LoadedDesk, loadDeskConfig } from './config'
-import { herdrCall, listedWorkspaces } from './herdr'
+import { herdrCall, type ListedWorkspace, listedWorkspaces } from './herdr'
 import { findGroupLayers, globalRepoRoots } from './layers'
 import { pluginStateDir } from './paths'
 import { watchRepo } from './watch'
@@ -30,26 +30,35 @@ export function loadKnownRepos(): string[] {
   }
 }
 
-export function rememberRepos(repos: string[]): void {
-  mkdirSync(pluginStateDir(), { recursive: true })
+export function rememberRepos(
+  repos: string[],
+  known: string[] = loadKnownRepos(),
+): void {
   const merged = [
-    ...new Set([...loadKnownRepos(), ...repos.map((p) => resolve(p))]),
+    ...new Set([...known, ...repos.map((p) => resolve(p))]),
   ].sort()
+  // Every daemon tick lands here, and the set is almost always unchanged.
+  if (merged.length === known.length && existsSync(knownPath())) return
+  mkdirSync(pluginStateDir(), { recursive: true })
   writeFileSync(knownPath(), `${JSON.stringify({ repos: merged }, null, 2)}\n`)
 }
 
-export async function workspaceRepoRoots(): Promise<string[]> {
+/** Open workspaces, or why Herdr could not list them. */
+async function listWorkspaces(): Promise<ListedWorkspace[] | Error> {
   try {
-    const listed = listedWorkspaces(await herdrCall(['workspace', 'list']))
-    const roots: string[] = []
-    for (const w of listed) {
-      const root = w.repoRoot ?? w.cwd ?? w.checkoutPath
-      if (root) roots.push(resolve(root))
-    }
-    return [...new Set(roots)]
-  } catch {
-    return []
+    return listedWorkspaces(await herdrCall(['workspace', 'list']))
+  } catch (err) {
+    return err instanceof Error ? err : new Error(String(err))
   }
+}
+
+function workspaceRepoRoots(listed: ListedWorkspace[]): string[] {
+  const roots: string[] = []
+  for (const w of listed) {
+    const root = w.repoRoot ?? w.cwd ?? w.checkoutPath
+    if (root) roots.push(resolve(root))
+  }
+  return [...new Set(roots)]
 }
 
 /**
@@ -119,6 +128,11 @@ export type Discovery = {
   desks: Discovered[]
   /** Repos that have a config the running plugin cannot read. Never fatal. */
   failed: LoadFailure[]
+  /**
+   * The `workspace list` this discovery read, or why it failed. Returned so a
+   * tick that also needs the list does not spawn Herdr for it a second time.
+   */
+  workspaces: ListedWorkspace[] | Error
 }
 
 /**
@@ -130,7 +144,8 @@ export type Discovery = {
  * a desk is doing use this one.
  */
 export async function discoverAll(): Promise<Discovery> {
-  const live = await workspaceRepoRoots()
+  const workspaces = await listWorkspaces()
+  const live = workspaces instanceof Error ? [] : workspaceRepoRoots(workspaces)
   const extras = globalRepoRoots()
   const remembered = loadKnownRepos()
 
@@ -158,8 +173,11 @@ export async function discoverAll(): Promise<Discovery> {
   // remembering it is what makes the round trip work: the config is fixed, and
   // the next tick finds it again with no restart. It also keeps the failure
   // from being *only* a problem while the workspace happens to be open.
-  rememberRepos([...found.map((d) => d.repo), ...failed.map((f) => f.repo)])
-  return { desks: found, failed }
+  rememberRepos(
+    [...found.map((d) => d.repo), ...failed.map((f) => f.repo)],
+    remembered,
+  )
+  return { desks: found, failed, workspaces }
 }
 
 /** Open workspaces + remembered + plugin config extras. */

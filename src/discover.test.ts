@@ -118,6 +118,22 @@ const armAheadConfig = (name: string) => ({
   ],
 })
 
+describe('the remembered repo list', () => {
+  test('is not rewritten when discovery learns nothing new', async () => {
+    // Every daemon tick runs discovery. Rewriting the same content every 20
+    // seconds is disk churn and a window for a torn read.
+    const state = useState()
+    const good = tmp('good')
+    writeConfig(good, goodConfig('good'))
+    const path = join(state, 'known-repos.json')
+    writeFileSync(path, JSON.stringify({ repos: [good] }))
+
+    await discoverAll()
+
+    expect(readFileSync(path, 'utf8')).toBe(JSON.stringify({ repos: [good] }))
+  })
+})
+
 describe('a repo whose config cannot be read', () => {
   test('is reported with its error, not dropped', async () => {
     const state = useState()

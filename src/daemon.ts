@@ -439,7 +439,7 @@ export async function tickOnce(
   // desk killed part way through a long tick reopens the hole by one tick —
   // 20s against a window that is measured in hours.
   writeLastAlive(at)
-  const { desks, failed } = await discoverAll()
+  const { desks, failed, workspaces } = await discoverAll()
   // Before the fire loop, and not inside it: a repo that could not be read has
   // no jobs, so there is nothing to hold back, and reporting it must not be able
   // to stop a desk that is fine from firing.
@@ -580,7 +580,12 @@ export async function tickOnce(
   // fail its list call and log the same socket error every 20s tick.
   try {
     if (herdrReady().ok) {
-      const badges = await syncWorkspaceBadges(desks, failed)
+      const badges = await syncWorkspaceBadges(desks, failed, {
+        listWorkspaces: async () => {
+          if (workspaces instanceof Error) throw workspaces
+          return workspaces
+        },
+      })
       for (const err of badges.errors) log(`badge ${err}`)
     }
   } catch (err) {
