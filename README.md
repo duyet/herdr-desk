@@ -752,8 +752,27 @@ worktrees of the same parent. Writes under `stateDir/<YYYY-MM-DD>/`.
 ## New repo
 
 1. Add `.herdr-desk.json` (and optional `.herdr-desk/extra.md`).
+   `herdr-desk init [PATH]` writes one from `examples/minimal`, named after
+   the directory. It never overwrites a config that is already there.
 2. Open the repo as a Herdr workspace once, or list it in plugin `config.json`.
-3. Stop. Do not copy this plugin into the repo.
+3. Run `herdr-desk check [PATH]` (`init` runs it for you).
+4. Stop. Do not copy this plugin into the repo.
+
+`check` prints one line per item, and the exact fix under each problem:
+
+| Item | ok when |
+|------|---------|
+| `herdr` | the Herdr binary and socket exist |
+| `daemon` | `herdr-desk start` is running |
+| `config` | the repo's config is present and schema-valid |
+| `prompts` | every task's playbook resolves (bundled, path, or approved `gh:`) |
+| `agent` | the agent kind each task launches is on `PATH` |
+| `gh` | `gh auth status` passes, checked only when a task needs GitHub |
+| `git` | the repo is a git repo with a remote |
+| `state dir` | the plugin state dir can be created and written |
+
+A row whose input failed reads `skip`, not `ok`. Any problem exits 1.
+`--json` prints `{ init?, ok, checks: [{ name, status, detail, fix? }] }`.
 
 ## Version
 

@@ -4,6 +4,7 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { formatAnalytics, rollup } from './analytics'
 import { formatBoard } from './board'
+import { formatChecks, hasProblem, initConfig, runChecks } from './check'
 import {
   applyCleanup,
   formatCleanup,
@@ -126,6 +127,8 @@ function usage(): never {
 
   herdr-desk scan
   herdr-desk validate
+  herdr-desk check [PATH] [--json]
+  herdr-desk init [PATH] [--json]
   herdr-desk here [--repo DIR] [--wait]
   herdr-desk config show   [--repo DIR]
   herdr-desk config explain [--repo DIR] [--tasks]
@@ -617,6 +620,25 @@ async function main() {
       return
     }
     usage()
+  }
+
+  if (cmd === 'check' || cmd === 'init') {
+    const path = argv[1] && !argv[1].startsWith('--') ? argv[1] : '.'
+    const json = argv.includes('--json')
+    const init = cmd === 'init' ? initConfig(path) : undefined
+    if (init && !json) {
+      console.log(
+        init.written ? `wrote ${init.path}` : `kept ${init.path} (exists)`,
+      )
+    }
+    const rows = runChecks(path)
+    console.log(
+      json
+        ? JSON.stringify({ init, ok: !hasProblem(rows), checks: rows }, null, 2)
+        : formatChecks(rows),
+    )
+    if (hasProblem(rows)) process.exit(1)
+    return
   }
 
   if (cmd === 'validate') {
