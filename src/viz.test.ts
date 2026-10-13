@@ -181,7 +181,7 @@ describe('analytics', () => {
     expect(wrap?.rate).toBeNull()
     expect(r.skipCauses).toEqual([['repo not open in Herdr', 2]])
     expect(r.failCauses).toEqual([['herdr socket gone', 1]])
-    expect(r.agents).toEqual([['claude', 1]])
+    expect(r.agents).toEqual([{ agent: 'claude', sessions: 1, medianMin: 0 }])
   })
 
   test('format degrades to one line per job when the table is too wide', () => {
@@ -215,6 +215,51 @@ describe('analytics', () => {
     expect(out.replace(/\n +/g, '')).toContain('x/b.json')
     const wide = formatAnalytics(r, { width: 40, color: false }, true)
     expect(wide).toContain(`${base}/a.json`)
+  })
+
+  test('per repo: each checkout gets its own rate, skips excluded', () => {
+    const since = new Date(parseSince('30d', NOW.getTime()))
+    const other = { ...run('t', false, 'boom'), name: 'b', repo: '/r/b' }
+    const r = rollup([...LEDGER, other], [], since, NOW)
+    expect(r.repos).toEqual([
+      { repo: '/r/a', name: 'a', ran: 2, skipped: 2, failed: 1, rate: 2 / 3 },
+      { repo: '/r/b', name: 'b', ran: 0, skipped: 0, failed: 1, rate: 0 },
+    ])
+    expect(formatAnalytics(r, plain)).toContain('  67%  a ran 2 skip 2 fail 1')
+  })
+
+  test('fire time is the median of recorded ms; old records without ms are ignored', () => {
+    const since = new Date(parseSince('30d', NOW.getTime()))
+    const timed = (ms?: number) => ({ ...run('t', true, '{}'), ms })
+    const r = rollup(
+      [timed(1000), timed(3000), timed(60_000), timed()],
+      [],
+      since,
+      NOW,
+    )
+    expect(r.jobs[0].medianMs).toBe(3000)
+    expect(formatAnalytics(r, plain)).toMatch(/a\/t .*\| 3s/)
+    expect(rollup(LEDGER, [], since, NOW).jobs[0].medianMs).toBeNull()
+  })
+
+  test('session length per agent is the median of ended minus started', () => {
+    const since = new Date(parseSince('30d', NOW.getTime()))
+    const s = (start: string, end: string) => ({
+      ...sess('codex', start),
+      ended: end,
+    })
+    const r = rollup(
+      [],
+      [
+        s('2026-09-29T00:00:00Z', '2026-09-29T00:10:00Z'),
+        s('2026-09-29T01:00:00Z', '2026-09-29T01:30:00Z'),
+        s('2026-09-29T02:00:00Z', 'not a date'),
+      ],
+      since,
+      NOW,
+    )
+    expect(r.agents).toEqual([{ agent: 'codex', sessions: 3, medianMin: 20 }])
+    expect(formatAnalytics(r, plain)).toContain('    3  codex  20m')
   })
 })
 

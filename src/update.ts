@@ -9,6 +9,7 @@ import { join } from 'node:path'
 import { defaultHerdrBin, defaultSocket, herdrJson } from './herdr'
 import { loadGlobalConfig } from './layers'
 import { pluginStateDir } from './paths'
+import { track } from './usage'
 
 /**
  * Self-update: compare the installed version with the latest GitHub release
@@ -247,6 +248,7 @@ export async function reinstall(source: SelfSource): Promise<void> {
       `herdr plugin install ${target} failed (${exit}): ${(err || out).trim().slice(0, 400)}`,
     )
   }
+  track({ kind: 'upgrade', target })
 }
 
 /** Machine config only: a committed repo file must not steer the machine. */

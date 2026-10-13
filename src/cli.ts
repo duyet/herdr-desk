@@ -111,6 +111,7 @@ import {
   saveLastCheck,
   takeUpdateLock,
 } from './update'
+import { countUsage, formatUsage, loadUsageSince, track } from './usage'
 import {
   formatWatchStatus,
   loadWatchState,
@@ -206,15 +207,19 @@ function loadAnalytics(since: Date) {
   return {
     rolled: rollup(runs, sessions, since),
     insights: insightsOf({ runs, sessions, since }),
+    usage: countUsage(loadUsageSince(since)),
   }
 }
 
 /** JSON for `analytics --json` and `GET /api/analytics`. */
 function analyticsPayload(since: Date) {
-  const { rolled, insights } = loadAnalytics(since)
+  const { rolled, insights, usage } = loadAnalytics(since)
   return {
     insights,
+    usage,
     jobs: rolled.jobs,
+    repos: rolled.repos,
+    agents: rolled.agents,
     failCauses: rolled.failCauses,
     skipCauses: rolled.skipCauses,
     rate: rolled.rate,
@@ -572,6 +577,9 @@ async function main() {
   const argv = process.argv.slice(2)
   const cmd = argv[0]
   if (!cmd || cmd === '-h' || cmd === '--help') usage()
+  // The daemon calls `tick` every minute; counting it would bury every
+  // command a person typed under half a million lines a year.
+  if (cmd !== 'tick') track({ kind: 'command', command: cmd })
 
   if (cmd === 'tasks') {
     for (const t of listBundledTasks()) console.log(t)
@@ -796,7 +804,7 @@ async function main() {
       console.log(JSON.stringify(analyticsPayload(since), null, 2))
       return
     }
-    const { rolled, insights } = loadAnalytics(since)
+    const { rolled, insights, usage } = loadAnalytics(since)
     // Runs and failures are the next line. This one is only the counts
     // that line does not have: sessions, agents, pull URLs.
     const counts = countParts(insights.counts, [
@@ -806,6 +814,8 @@ async function main() {
     ]).join(' · ')
     if (counts) console.log(counts)
     console.log(formatAnalytics(rolled, termOpts(), argv.includes('--wide')))
+    const counted = formatUsage(usage)
+    if (counted) console.log(`\n${counted}`)
     return
   }
 
