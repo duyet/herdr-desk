@@ -35,8 +35,8 @@
     },
     "autoUpdate": {
       "type": "boolean",
-      "default": true,
-      "description": "Machine config.json only; ignored in repo files. When true, the daemon applies a newer GitHub release (checked at most once a day) by reinstalling the plugin."
+      "default": false,
+      "description": "Machine config.json only; ignored in repo files. The daemon checks GitHub releases at most once a day. Off (the default): notify once per new version. On: apply it when no desk run is in flight, verify the new tree boots and reports the new version, and reinstall the old tag when it does not."
     },
     "telemetry": {
       "type": "boolean",
