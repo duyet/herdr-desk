@@ -360,10 +360,14 @@ export async function planCleanup(
 
   const expired: string[] = []
   for (const desk of desks) {
-    // A prunable entry's directory is already gone; apply prunes it first.
-    const worktrees = (await probe.worktrees(desk.repo)).filter(
-      (w) => !w.prunable,
-    )
+    const listed = await probe.worktrees(desk.repo)
+    // A prunable entry's directory is already gone; apply prunes it first,
+    // and a finished pane left in it closes.
+    for (const gone of listed) {
+      if (gone.prunable && gone.branch?.startsWith(DESK_BRANCH) && agents)
+        plan.items.push(...panesIn(gone.path, agents))
+    }
+    const worktrees = listed.filter((w) => !w.prunable)
     const checkedOut = new Set(worktrees.map((w) => w.branch))
     const removable = new Set<string>()
     for (const wt of worktrees) {
