@@ -16,7 +16,7 @@ import {
 import { historyPath, type RunRecord } from './history'
 import { interpolate } from './interpolate'
 import { pluginStateDir } from './paths'
-import { canPromptManager, runDirFor, spawnDeskWorktree } from './run'
+import { managerToPrompt, runDirFor, spawnDeskWorktree } from './run'
 import { deskSlug } from './text'
 
 /**
@@ -240,9 +240,10 @@ export async function handToAgent(opts: {
     )
   }
   const agents = namedAgents(await herdrCall(['agent', 'list']))
-  if (canPromptManager(agents, listed, task)) {
-    await herdrCall(['agent', 'prompt', task.agentName, opts.prompt])
-    return { agent: task.agentName, how: 'prompted' }
+  const registered = managerToPrompt(agents, listed, task)
+  if (registered) {
+    await herdrCall(['agent', 'prompt', registered, opts.prompt])
+    return { agent: registered, how: 'prompted' }
   }
   const child = await spawnDeskWorktree(
     project.workspaceId,

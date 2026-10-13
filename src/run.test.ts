@@ -19,7 +19,7 @@ import {
   assertOwnWorktree,
   baseRefArgv,
   baseRefFrom,
-  canPromptManager,
+  managerToPrompt,
   deskWorktreeBranch,
   isManagerCheckout,
   preconditionSkip,
@@ -270,7 +270,7 @@ describe('isManagerCheckout', () => {
   })
 })
 
-describe('canPromptManager', () => {
+describe('managerToPrompt', () => {
   const prod: TaskConfig = { ...base, id: 'local:prod', agentName: 'chm-prod' }
 
   // The shape that lost 20 `chmonitor local:prod` fires in 95 seconds on
@@ -287,26 +287,66 @@ describe('canPromptManager', () => {
   }
 
   test('prompts a registered-but-unlisted manager, never starts one', () => {
-    expect(canPromptManager([registered], [], prod)).toBe(true)
+    expect(managerToPrompt([registered], [], prod)).toBe('chm-prod')
   })
 
   test('prompts a manager that is still working', () => {
     // `cwd` is left off: `isAgentLive` calls a session whose cwd is gone dead,
     // and no checkout at that path exists on a CI runner.
     expect(
-      canPromptManager([{ name: 'chm-prod', status: 'working' }], [], prod),
-    ).toBe(true)
+      managerToPrompt([{ name: 'chm-prod', status: 'working' }], [], prod),
+    ).toBe('chm-prod')
   })
 
   test('starts a session only for a name nobody holds', () => {
     // The other half of the rule. Without it the test above could pass for the
     // wrong reason — by answering true no matter what Herdr reported.
-    expect(canPromptManager([], [], prod)).toBe(false)
+    expect(managerToPrompt([], [], prod)).toBeNull()
   })
 
   test('starts when the registered manager’s worktree is gone', () => {
     // Its pane went with the checkout, so there is nothing left to prompt.
-    expect(canPromptManager([{ ...registered, cwd: '' }], [], prod)).toBe(false)
+    expect(managerToPrompt([{ ...registered, cwd: '' }], [], prod)).toBeNull()
+  })
+
+  // Before task ids named the session, every job of a desk defaulted to the
+  // one `<desk>-desk` name. A desk upgraded mid-life still has that session.
+  describe('legacy shared name', () => {
+    const migrated: TaskConfig = {
+      ...prod,
+      agentName: 'chmonitor-desk-local-prod',
+      legacyAgentName: 'chm-desk',
+    }
+    const legacy = (cwd: string, status = 'done'): ListedAgent => ({
+      ...registered,
+      name: 'chm-desk',
+      status,
+      cwd,
+    })
+
+    test('re-prompts the old session in this task’s checkout', () => {
+      const own = '/home/duyet/.herdr/worktrees/chmonitor/desk-local-prod'
+      expect(managerToPrompt([legacy(own)], [], migrated)).toBe('chm-desk')
+    })
+
+    test('never prompts the old session sitting in another job’s checkout', () => {
+      const other = '/home/duyet/.herdr/worktrees/chmonitor/desk-local-babysit'
+      expect(managerToPrompt([legacy(other)], [], migrated)).toBeNull()
+      expect(
+        managerToPrompt([legacy(other, 'working')], [], migrated),
+      ).toBeNull()
+    })
+
+    test('prefers the new name when both are registered', () => {
+      const own = '/home/duyet/.herdr/worktrees/chmonitor/desk-local-prod'
+      expect(
+        managerToPrompt(
+          [legacy(own), { ...registered, name: migrated.agentName }],
+          [],
+          migrated,
+        ),
+      ).toBe(migrated.agentName)
+    })
   })
 })
 

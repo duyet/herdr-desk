@@ -125,7 +125,7 @@ export function loadPerCore(): Reading {
  * Live and busy session counts from `herdr agent list`.
  *
  * Live is `working` plus `idle`, never `done`. A finished manager stays
- * registered on purpose — `canPromptManager` re-prompts it — so counting
+ * registered on purpose — `managerToPrompt` re-prompts it — so counting
  * registrations made this number only ever rise: a long-lived desk crossed
  * `maxAgents` once and then nothing on the machine fired again. Idle is counted
  * because a parked pane is a live PTY holding a slot. A state we do not

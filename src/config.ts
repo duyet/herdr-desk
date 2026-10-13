@@ -101,6 +101,8 @@ export type TaskConfig = {
   label?: string
   playbook: string
   agentName: string
+  /** The default every task of the desk once shared; matched only in this task's own checkout. */
+  legacyAgentName?: string
   /** Resolved agent selection. Replaces the 0.1.x `kind` field. */
   agent: AgentSpec
   /** Notification destination for this job, after layering. */
