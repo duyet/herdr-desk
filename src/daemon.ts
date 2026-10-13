@@ -20,7 +20,7 @@ import { clearFailures, recordAnnounced, shouldAnnounce } from './failures'
 import { check, type HostHealth, readHealth, type Verdict } from './health'
 import { defaultHerdrBin, herdrReady } from './herdr'
 import type { RunTrigger } from './history'
-import { publish } from './hub'
+import { publish, snapshot } from './hub'
 import { loadNotifyConfig, noticeBody, notify } from './notify'
 import { pluginStateDir } from './paths'
 import { isPaused, loadPaused, type PauseState } from './pause'
@@ -971,7 +971,8 @@ export async function runDaemon(): Promise<void> {
 }
 
 /**
- * Once a day, check for a release and apply it when `autoUpdate` is on.
+ * Once a day, check for a release and apply it when `autoUpdate` is on and
+ * no desk run is in flight. A failed apply has already rolled back.
  *
  * The daemon cannot run `desk update` itself — that stops the daemon, which
  * would be this process. So after a successful reinstall it drops its pid file,
@@ -982,6 +983,8 @@ async function autoUpdateStep(): Promise<void> {
   try {
     const outcome = await maybeAutoUpdate({
       log,
+      // Runs live in Herdr panes and outlast the tick; stuck ones do not count.
+      busy: () => snapshot().running > 0,
       notify: async (message) => {
         await notify({ message, label: 'update' }, loadNotifyConfig())
       },

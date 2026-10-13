@@ -313,9 +313,12 @@ Config and state live outside the plugin checkout, so a reinstall never loses
 
 The daemon checks the latest GitHub release at most once a day (the stamp is
 `update-check.json` in the state dir) and applies it when `autoUpdate` in the
-machine `config.json` is on, which is the default. Set `"autoUpdate": false` to
-only log what is available. It notifies on upgrade and on failure. A linked
-plugin or a pinned `--ref` is never upgraded. `docs/design.md` has the details.
+machine `config.json` is on. It is off by default: the daemon then notifies
+once per new version and `herdr-desk upgrade` applies it. When on, the daemon
+waits until no desk run is in flight, verifies the new tree boots and reports
+the new version, and reinstalls the old tag if it does not; a failed version is
+not retried automatically. It notifies on upgrade and on failure, and `status`
+prints the last check. A linked plugin or a pinned `--ref` is never upgraded. `docs/design.md` has the details.
 
 ## Troubleshooting
 
