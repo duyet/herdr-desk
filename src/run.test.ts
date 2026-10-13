@@ -21,7 +21,6 @@ import {
   canPromptManager,
   deskWorktreeBranch,
   isManagerCheckout,
-  launchKind,
   preconditionSkip,
   runDirFor,
   runTask,
@@ -307,21 +306,6 @@ describe('canPromptManager', () => {
   test('starts when the registered manager’s worktree is gone', () => {
     // Its pane went with the checkout, so there is nothing left to prompt.
     expect(canPromptManager([{ ...registered, cwd: '' }], [], prod)).toBe(false)
-  })
-})
-
-describe('launchKind', () => {
-  // `agent start --kind` only accepts Herdr's built-in kinds. anyrouter's
-  // `kind: "opencode2"` was passed through verbatim, so every spawn failed
-  // inside Herdr. The ladder must skip rungs Herdr cannot start.
-  test('skips rungs that are not Herdr agent kinds', () => {
-    expect(launchKind(['opencode2', 'anyr claude --yolo', 'claude'])).toBe(
-      'claude',
-    )
-  })
-
-  test('fails loud when no rung is a Herdr agent kind', () => {
-    expect(() => launchKind(['opencode2'])).toThrow(/opencode2/)
   })
 })
 

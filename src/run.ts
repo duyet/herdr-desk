@@ -1,5 +1,6 @@
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join, resolve, sep } from 'node:path'
+import { launchKind } from './agents'
 import {
   type LoadedDesk,
   loadDeskConfig,
@@ -24,7 +25,6 @@ import { type RunTrigger, recordRun } from './history'
 import { markRunning, markSettled } from './hub'
 import { briefReason, noticeBody, notify, resolveNotify } from './notify'
 import { assembleManagerPrompt, taskVars } from './prompt'
-import { HERDR_AGENT_KINDS } from './schema'
 import { track } from './usage'
 import { claimEvents, restoreEvents } from './watch'
 
@@ -96,20 +96,6 @@ export function writeLatestPointer(
   writeFileSync(pointer, `${taskId}/${day}\n`)
 }
 
-/**
- * First ladder rung `herdr agent start --kind` accepts. Command rungs and
- * unknown names are skipped; a ladder with none throws before any worktree is
- * spawned, naming the rungs, instead of failing inside Herdr.
- */
-export function launchKind(ladder: string[]): string {
-  const kind = ladder.find((rung) => HERDR_AGENT_KINDS.has(rung.trim()))
-  if (kind === undefined) {
-    throw new Error(
-      `agent ladder [${ladder.join(', ')}] has no Herdr agent kind; use one of: ${[...HERDR_AGENT_KINDS].join(', ')}`,
-    )
-  }
-  return kind.trim()
-}
 
 export async function runTask(opts: {
   repo: string
