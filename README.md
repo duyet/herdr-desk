@@ -365,7 +365,9 @@ length per agent.
 Usage counters. The desk appends one line to `usage.jsonl` in the state dir
 for each command you run (not the daemon's per-minute `tick`), each run
 started and finished, each child worktree spawned, and each upgrade. Lines
-hold ids, counts and timings only: no prompts, titles or error text.
+hold ids, counts and timings only: no prompts, titles, error text or paths
+(a repo is a short sha256 id of its path). Events older than 90 days are
+dropped, checked once a day.
 `analytics` prints the totals. Nothing leaves the machine today; there is no
 network sender, and a test fails if `src/usage.ts` gains one.
 
