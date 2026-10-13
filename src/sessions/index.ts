@@ -12,22 +12,13 @@ import { basename, dirname, join, resolve } from 'node:path'
 import { formatLocal } from '../day'
 import { pluginStateDir } from '../paths'
 import { textTable } from '../table'
-import { claudeReader } from './claude'
-import { codexReader } from './codex'
+import { transcriptReaders } from '../agents'
 import { deskReader } from './desk'
-import { geminiReader } from './gemini'
-import { grokReader } from './grok'
 import type { AgentName, SessionReader, SessionRow } from './types'
 
 export type { AgentName, SessionRow } from './types'
 
-export const READERS: SessionReader[] = [
-  claudeReader,
-  codexReader,
-  geminiReader,
-  grokReader,
-  deskReader,
-]
+export const READERS: SessionReader[] = [...transcriptReaders(), deskReader]
 
 type FileStamp = { agent: AgentName; mtimeMs: number; size: number }
 type Store = { files: Record<string, FileStamp>; rows: SessionRow[] }

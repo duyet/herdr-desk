@@ -1,3 +1,4 @@
+import { agentKindNames } from './agents'
 import { dirname, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { cronExprOk } from './cron'
@@ -19,32 +20,7 @@ const TASK_ID = /^[a-z0-9][a-z0-9_.:-]*$/i
 /** A rung: a bare Herdr kind, or a command with arguments. */
 const RUNG = /^\S[\s\S]*$/
 
-/** Kinds `herdr agent start --kind` accepts (from `herdr agent start --help`). */
-export const HERDR_AGENT_KINDS: ReadonlySet<string> = new Set([
-  'pi',
-  'claude',
-  'codex',
-  'gemini',
-  'cursor',
-  'devin',
-  'agy',
-  'cline',
-  'omp',
-  'mastracode',
-  'opencode',
-  'copilot',
-  'kimi',
-  'kiro',
-  'droid',
-  'amp',
-  'grok',
-  'hermes',
-  'kilo',
-  'qodercli',
-  'qwen',
-  'maki',
-  'muse',
-])
+export const HERDR_AGENT_KINDS: ReadonlySet<string> = new Set(agentKindNames())
 
 /**
  * The run path launches the first rung Herdr can `agent start`; a ladder with
