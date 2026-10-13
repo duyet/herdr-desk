@@ -46,3 +46,22 @@ export function deskSlug(name: string): string {
   const agent = `${slug || 'repo'}-desk`.slice(0, 32)
   return /^[a-z]/.test(agent) ? agent : `d-${agent}`.slice(0, 32)
 }
+
+/**
+ * Default Herdr name for one task's manager: the desk name plus the task id.
+ *
+ * Every task used to default to `deskSlug(name)`, so two jobs of one desk
+ * prompted the same session. A name past 32 characters is cut and gets a hash
+ * of the full id, so two long ids that share a prefix still differ. `summary`
+ * is reserved for the desk summary session.
+ */
+export function taskAgentName(deskName: string, taskId: string): string {
+  const base = deskSlug(deskName)
+  let id = taskId.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+  if (!id) id = 'task'
+  if (id === 'summary') id = 'task-summary'
+  const full = `${base}-${id}`
+  if (full.length <= 32) return full
+  const hash = Bun.hash(taskId).toString(36).slice(0, 6)
+  return `${full.slice(0, 32 - hash.length - 1).replace(/-+$/, '')}-${hash}`
+}

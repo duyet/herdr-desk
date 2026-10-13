@@ -9,7 +9,8 @@ describe('applyDefaults', () => {
     const t = cfg.tasks[0]
     expect(t.id).toBe('desk:github-issues')
     expect(t.playbook).toBe('github-issues')
-    expect(t.agentName).toBe('acme-app-desk')
+    expect(t.agentName).toBe('acme-app-desk-desk-github-issues')
+    expect(t.legacyAgentName).toBe('acme-app-desk')
     expect(t.maxChildren).toBe(5)
     expect(t.crons).toEqual(['0 7 * * *'])
     expect(t.schedule).toBe('0 7 * * *')
@@ -33,6 +34,49 @@ describe('applyDefaults', () => {
     const t = cfg.tasks[0]
     expect(t.id).toBe('local:triage')
     expect(t.crons).toEqual(['0 8 * * *', '0 21 * * *'])
+  })
+})
+
+describe('manager agent names', () => {
+  const two = (extra: object = {}) =>
+    applyDefaults(
+      {
+        name: 'chmonitor',
+        tasks: [{ id: 'local:prod' }, { id: 'local:babysit' }],
+        ...extra,
+      },
+      '/tmp/chm',
+    ).tasks
+
+  test('two jobs without a name get two sessions, not one', () => {
+    const [prod, babysit] = two()
+    expect(prod.agentName).toBe('chmonitor-desk-local-prod')
+    expect(babysit.agentName).toBe('chmonitor-desk-local-babysit')
+    expect(prod.legacyAgentName).toBe('chmonitor-desk')
+  })
+
+  test('a root agentName is the config saying share one session', () => {
+    const [prod, babysit] = two({ agentName: 'chm' })
+    expect(prod.agentName).toBe('chm')
+    expect(babysit.agentName).toBe('chm')
+    expect(prod.legacyAgentName).toBeUndefined()
+  })
+
+  test('long ids stay valid names and do not collide', () => {
+    const names = applyDefaults(
+      {
+        name: 'a-very-long-repository-name',
+        tasks: [
+          { id: 'local:nightly-dependency-audit-a' },
+          { id: 'local:nightly-dependency-audit-b' },
+          { id: 'summary' },
+        ],
+      },
+      '/tmp/long',
+    ).tasks.map((t) => t.agentName)
+    for (const n of names) expect(n).toMatch(/^[a-z][a-z0-9_-]{0,31}$/)
+    expect(new Set(names).size).toBe(3)
+    expect(names[2]).not.toBe('a-very-long-reposito-desk-summary')
   })
 })
 
