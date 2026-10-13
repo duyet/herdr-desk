@@ -573,6 +573,22 @@ describe('child worktrees on disk', () => {
     ])
   })
 
+  test('a done pane whose child directory was deleted closes; a working one stays', async () => {
+    const { repo, wt } = setup()
+    rmSync(wt, { recursive: true, force: true })
+    const p: Probe = {
+      ...probe({ [child]: 'OPEN' }),
+      agents: async () => [
+        { name: 'kid', status: 'done', paneId: 'p1', cwd: wt },
+        { name: 'busy', status: 'working', paneId: 'p2', cwd: wt },
+      ],
+    }
+    const plan = await planCleanup(desks(repo), p, NOW)
+    expect(plan.items).toEqual([
+      expect.objectContaining({ kind: 'pane', paneId: 'p1' }),
+    ])
+  })
+
   test('a deleted child directory is pruned, then its merged branch goes', async () => {
     const { repo, wt } = setup()
     rmSync(wt, { recursive: true, force: true })
