@@ -8,6 +8,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { join } from 'node:path'
+import { reclaimOrphanWorkspaces } from './cleanup'
 import { cronSlotsOnDay, cronSlotsToday } from './cron'
 import { dayKey } from './day'
 import {
@@ -16,7 +17,6 @@ import {
   firstLine,
   type LoadFailure,
 } from './discover'
-import { reclaimOrphanWorkspaces } from './cleanup'
 import { clearFailures, recordAnnounced, shouldAnnounce } from './failures'
 import { check, type HostHealth, readHealth, type Verdict } from './health'
 import { defaultHerdrBin, herdrReady } from './herdr'

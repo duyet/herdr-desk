@@ -17,8 +17,8 @@ import {
   parseWorktrees,
   planCleanup,
   planWorkspaces,
-  reclaimOrphanWorkspaces,
   realProbe,
+  reclaimOrphanWorkspaces,
 } from './cleanup'
 import type { TaskConfig } from './config'
 import type { ListedAgent, ListedWorkspace } from './herdr'
@@ -437,7 +437,15 @@ describe('orphan lane workspaces', () => {
       worktrees: async () => [{ path: wt, locked: false, main: false }],
     }
     expect((await planWorkspaces(d, probe, () => false)).items).toEqual([])
-    expect((await planWorkspaces(d, probeWith([ws({ checkoutPath: wt })]), () => true)).items).toEqual([])
+    expect(
+      (
+        await planWorkspaces(
+          d,
+          probeWith([ws({ checkoutPath: wt })]),
+          () => true,
+        )
+      ).items,
+    ).toEqual([])
   })
 
   test('an unreadable Herdr plans nothing and says so', async () => {
