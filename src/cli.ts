@@ -71,7 +71,7 @@ import {
   writeCache,
 } from './registry'
 import { collectReports, REPORT_FILE, sendReports } from './report'
-import { childBranch, openWorktree, runTask } from './run'
+import { childBranch, deskWorktreeBranch, openWorktree, runTask } from './run'
 import { scheduleLabel } from './schedule'
 import { SCHEMA_PATH, SCHEMA_URL } from './schema'
 import { writeContext } from './sessions/context'
@@ -749,7 +749,9 @@ async function main() {
     const opened = await openWorktree(
       workspace,
       branch,
-      `${config.name} ${task.id} ${item}`,
+      // One token after the desk name, like a manager's label, so an emptied
+      // child Space reads as a desk lane: `chmonitor local:babysit--issue-42`.
+      `${config.name} ${task.id}${branch.slice(deskWorktreeBranch(task).length)}`,
       repo,
       base,
     )
