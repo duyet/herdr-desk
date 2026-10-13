@@ -57,7 +57,10 @@ export function deskSlug(name: string): string {
  */
 export function taskAgentName(deskName: string, taskId: string): string {
   const base = deskSlug(deskName)
-  let id = taskId.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+  let id = taskId
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
   if (!id) id = 'task'
   if (id === 'summary') id = 'task-summary'
   const full = `${base}-${id}`
