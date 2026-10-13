@@ -105,11 +105,17 @@ import {
   upcomingFires,
 } from './timeline'
 import {
+  applyUpdate,
+  autoUpdateEnabled,
+  blockedBy,
   checkForUpdate,
-  reinstall,
+  installedVersion,
+  loadCheckState,
   releaseUpdateLock,
   saveLastCheck,
+  tagOf,
   takeUpdateLock,
+  updateStatusLine,
 } from './update'
 import {
   formatWatchStatus,
@@ -162,7 +168,8 @@ function usage(): never {
   herdr-desk dash [--json] [--no-color]
   herdr-desk serve [--port 8787] [--host ADDR]
   herdr-desk prompts list | check | apply [--accept] | pin REPO SHA
-  herdr-desk update [--check]
+  herdr-desk upgrade | update [--check]
+  herdr-desk version
   herdr-desk uninstall-cron
 `)
   process.exit(2)
@@ -661,6 +668,12 @@ async function main() {
         `${failed.length} desk(s) skipped: unreadable config (desk scan)`,
       )
     }
+    console.log(updateStatusLine(loadCheckState(), autoUpdateEnabled()))
+    return
+  }
+
+  if (cmd === 'version') {
+    console.log(installedVersion())
     return
   }
 
@@ -1144,29 +1157,39 @@ async function main() {
     return
   }
 
-  if (cmd === 'update') {
+  if (cmd === 'update' || cmd === 'upgrade') {
+    const state = loadCheckState()
     const check = await checkForUpdate()
-    saveLastCheck(new Date(), `manual ${check.installed} -> ${check.latest}`)
     const what = `${check.installed} -> ${check.latest}`
+    const blocked = blockedBy(check, state)
     const showChanges = () => {
       for (const line of check.changes ?? []) console.log(`  ${line}`)
     }
     if (!check.newer) {
+      saveLastCheck(new Date(), `current ${check.installed}`)
       console.log(
         `already current (${check.installed}, latest ${check.latest})`,
       )
       return
     }
     if (argv.includes('--check')) {
+      saveLastCheck(new Date(), `available ${what}`)
       console.log(
-        `update available ${what}${check.blocked ? ` (not applicable: ${check.blocked})` : ''}`,
+        `update available ${what}${blocked ? ` (not applicable: ${blocked})` : ''}`,
       )
       showChanges()
       return
     }
-    if (check.blocked) {
-      console.log(`update available ${what}, refusing: ${check.blocked}`)
+    if (blocked) {
+      console.log(`update available ${what}, refusing: ${blocked}`)
       showChanges()
+      process.exit(1)
+    }
+    const running = snapshot().running
+    if (running > 0) {
+      console.log(
+        `update available ${what}, refusing: ${running} desk run(s) in flight (desk hub)`,
+      )
       process.exit(1)
     }
     showChanges()
@@ -1174,23 +1197,25 @@ async function main() {
     // it reading files that are being replaced.
     takeUpdateLock()
     stopDaemon()
-    const startPlugin = () => {
-      // Release first: the start action itself honours the lock.
-      releaseUpdateLock()
-      return Bun.spawnSync(
-        [defaultHerdrBin(), 'plugin', 'action', 'invoke', 'herdr-desk.start'],
-        { stdout: 'pipe', stderr: 'pipe' },
-      )
-    }
-    try {
-      await reinstall(check.source)
-    } catch (err) {
-      // Bring the old daemon back so scheduled jobs keep firing.
-      startPlugin()
-      console.error(err instanceof Error ? err.message : String(err))
+    const res = await applyUpdate(check.source, check.installed, check.latest)
+    // Release first: the start action itself honours the lock.
+    releaseUpdateLock()
+    const start = Bun.spawnSync(
+      [defaultHerdrBin(), 'plugin', 'action', 'invoke', 'herdr-desk.start'],
+      { stdout: 'pipe', stderr: 'pipe' },
+    )
+    if (!res.ok) {
+      const back = res.rolledBack ? `, rolled back to ${check.installed}` : ''
+      saveLastCheck(new Date(), `fail ${what}${back}: ${res.error}`, {
+        rolledBackTo: res.rolledBack ? tagOf(check.installed) : undefined,
+      })
+      console.error(`update ${what} failed${back}: ${res.error}`)
       process.exit(1)
     }
-    const start = startPlugin()
+    saveLastCheck(new Date(), `updated ${what}`, {
+      failedVersion: undefined,
+      rolledBackTo: undefined,
+    })
     if (start.exitCode !== 0) {
       console.error(
         `updated ${what}, but restart failed: ${start.stderr.toString().trim()}`,

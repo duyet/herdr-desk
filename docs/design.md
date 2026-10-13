@@ -208,7 +208,7 @@ wants without editing code:
 | `notify` | off | needs targets anyway |
 | `issues` | off | files real GitHub issues, so per-machine opt-in |
 Self-upgrade is not a feature flag: it is the top-level `autoUpdate` boolean in
-the machine `config.json` (default `true`). The daemon checks the latest GitHub
+the machine `config.json` (default `false`: notify once per version). The daemon checks the latest GitHub
 release at most once a day; `autoUpdate` only gates *applying* it. A committed
 repo file cannot turn it on or off — the schema accepts the key, the daemon
 reads it only from the machine config.
@@ -584,9 +584,13 @@ Reinstall replaces the managed checkout, and is refused over a local link.
 - honour a pinned `requested_ref` — never silently move a user off their pin
 - the restart must happen *after* the swap, not before
 
-`desk update [--check]` runs this; `--check` is read-only. The daemon runs the
-same check once a day and, with `autoUpdate` on, reinstalls, drops its pid
-file, asks Herdr to start the new plugin, and exits. Changelog: read
+`desk upgrade [--check]` (alias `update`) runs this; `--check` is read-only. The
+daemon runs the same check once a day and, with `autoUpdate` on and no run in
+flight, reinstalls, runs `cli.ts version` from the new plugin root, and on a
+mismatch or failure reinstalls `--ref v<old>`. That pin is recorded in
+`update-check.json` as our own, so a later, newer release still applies; the
+failed version is skipped. On success it drops its pid file, asks Herdr to
+start the new plugin, and exits. Changelog: read
 `CHANGELOG.md` from the installed plugin root and show what changed since the
 running version, and surface it in the status output after an upgrade.
 
