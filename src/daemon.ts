@@ -8,6 +8,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { join } from 'node:path'
+import { reclaimOrphanWorkspaces } from './cleanup'
 import { cronSlotsOnDay, cronSlotsToday } from './cron'
 import { dayKey } from './day'
 import {
@@ -590,6 +591,20 @@ export async function tickOnce(
     }
   } catch (err) {
     log(`badge ${err instanceof Error ? err.message : String(err)}`)
+  }
+  // Orphan lane workspaces, same rules as the badges: after the fires, never
+  // able to stop one, and silent when there is no Herdr to ask.
+  try {
+    if (herdrReady().ok) {
+      const reclaimed = await reclaimOrphanWorkspaces(
+        desks.map((d) => ({ repo: d.repo, tasks: d.config.tasks })),
+      )
+      for (const r of reclaimed.removed)
+        if (r.kind === 'workspace') log(`reclaimed workspace ${r.label}`)
+      for (const f of reclaimed.failed) log(`reclaim failed: ${f.error}`)
+    }
+  } catch (err) {
+    log(`reclaim ${err instanceof Error ? err.message : String(err)}`)
   }
   saveFires(fires, at)
   if (n > 0 || needsHub) await publishHub()
