@@ -1,11 +1,19 @@
 import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
+  compactUsage,
   countUsage,
   formatUsage,
   loadUsageSince,
+  repoId,
   track,
   usagePath,
 } from './usage'
@@ -88,4 +96,60 @@ test('nothing leaves the machine: track makes no network call', () => {
 
 test('an empty log prints nothing rather than a row of zeros', () => {
   expect(formatUsage(countUsage([]))).toBe('')
+})
+
+test('a repo path never reaches disk, only a stable id', () => {
+  const repo = '/home/alice/secret-project'
+  track({ kind: 'run.started', repo, task: 't' })
+  track({ kind: 'run.finished', repo, task: 't', outcome: 'ran', ms: 1 })
+  track({ kind: 'child.spawned', repo, task: 't', agent: 'claude' })
+  const raw = readFileSync(usagePath(), 'utf8')
+  expect(raw).not.toContain('alice')
+  expect(raw).not.toContain('secret-project')
+  expect(raw).not.toContain('/home')
+  const events = raw
+    .trim()
+    .split('\n')
+    .map((l) => JSON.parse(l))
+  for (const e of events) {
+    expect(e.repo).toBeUndefined()
+    expect(e.repoId).toBe(repoId(repo))
+  }
+  expect(repoId(repo)).toMatch(/^[0-9a-f]{12}$/)
+  expect(repoId('/other')).not.toBe(repoId(repo))
+})
+
+test('events older than 90 days are dropped, newer ones kept', () => {
+  writeFileSync(
+    usagePath(),
+    `${JSON.stringify({ kind: 'command', command: 'old', at: '2026-05-01T00:00:00.000Z' })}\n{bad\n`,
+  )
+  track({ kind: 'command', command: 'new' }, at('2026-10-01T00:00:00Z'))
+  const c = countUsage(loadUsageSince(at('2000-01-01T00:00:00Z')))
+  expect(c.commands).toEqual({ new: 1 })
+})
+
+test('compaction runs once per day and is idempotent', () => {
+  track({ kind: 'command', command: 'a' }, at('2026-10-01T00:00:00Z'))
+  const marker = join(dir, 'usage.compacted')
+  expect(readFileSync(marker, 'utf8').trim()).toBe('2026-10-01')
+  const before = readFileSync(usagePath(), 'utf8')
+  compactUsage(at('2026-10-01T12:00:00Z'))
+  expect(readFileSync(usagePath(), 'utf8')).toBe(before)
+
+  writeFileSync(
+    usagePath(),
+    `${JSON.stringify({ kind: 'command', command: 'old', at: '2026-01-01T00:00:00.000Z' })}\n${before}`,
+  )
+  compactUsage(at('2026-10-01T13:00:00Z'))
+  expect(readFileSync(usagePath(), 'utf8')).toContain('"old"')
+
+  compactUsage(at('2026-10-02T00:00:00Z'))
+  const once = readFileSync(usagePath(), 'utf8')
+  expect(once).not.toContain('"old"')
+  compactUsage(at('2026-10-02T00:00:00Z'))
+  rmSync(marker)
+  compactUsage(at('2026-10-02T00:00:00Z'))
+  expect(readFileSync(usagePath(), 'utf8')).toBe(once)
+  expect(existsSync(`${usagePath()}.${process.pid}.tmp`)).toBe(false)
 })
