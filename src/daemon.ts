@@ -439,7 +439,7 @@ export async function tickOnce(
   // desk killed part way through a long tick reopens the hole by one tick —
   // 20s against a window that is measured in hours.
   writeLastAlive(at)
-  const { desks, failed } = await discoverAll()
+  const { desks, failed, workspaces } = await discoverAll()
   // Before the fire loop, and not inside it: a repo that could not be read has
   // no jobs, so there is nothing to hold back, and reporting it must not be able
   // to stop a desk that is fine from firing.
@@ -566,7 +566,7 @@ export async function tickOnce(
   }
   // A held job is retried *after* the scheduled ones, so the queue can never
   // starve a job that was actually due.
-  if (await retryHeld(at, gate)) n++
+  if (await retryHeld(at, paused, gate)) n++
   // And the watch step is after both, so a repo's poll script — which is the
   // one piece of this daemon that runs code a repo wrote — can never delay a
   // cron slot that was genuinely due.
@@ -580,7 +580,12 @@ export async function tickOnce(
   // fail its list call and log the same socket error every 20s tick.
   try {
     if (herdrReady().ok) {
-      const badges = await syncWorkspaceBadges(desks, failed)
+      const badges = await syncWorkspaceBadges(desks, failed, {
+        listWorkspaces: async () => {
+          if (workspaces instanceof Error) throw workspaces
+          return workspaces
+        },
+      })
       for (const err of badges.errors) log(`badge ${err}`)
     }
   } catch (err) {
@@ -846,6 +851,7 @@ export function giveUpLine(job: HeldJob): string {
  */
 async function retryHeld(
   at: Date,
+  paused: PauseState,
   gate: (h: HostHealth) => Verdict = check,
 ): Promise<boolean> {
   const { jobs, expired } = view(at)
@@ -857,7 +863,9 @@ async function retryHeld(
     // the desk runs, and the queue only ever grows.
     clear(gone.repo, gone.task)
   }
-  const next_ = jobs[0]
+  // A job paused after it was held stays owed, and does not block the jobs
+  // behind it.
+  const next_ = jobs.find((j) => !isPaused(paused, j.repo, j.task, at))
   if (!next_) return false
   const health = readHealth()
   if (!gate(health).ok) return false
