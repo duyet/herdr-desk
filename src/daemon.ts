@@ -28,6 +28,7 @@ import { isPaused, loadPaused, type PauseState } from './pause'
 import { clear, type HeldJob, hold, requeue, view } from './queue'
 import { formatDuration } from './report'
 import { runTask } from './run'
+import { maybeTelemetry } from './telemetry'
 import { maybeAutoUpdate, updateLockHeld } from './update'
 import {
   isDue,
@@ -988,6 +989,7 @@ export async function runDaemon(): Promise<void> {
     } catch (err) {
       log(`tick ${err instanceof Error ? err.message : err}`)
     }
+    void telemetryStep()
     await autoUpdateStep()
     await Bun.sleep(TICK_MS)
   }
@@ -1020,6 +1022,20 @@ async function autoUpdateStep(): Promise<void> {
   } catch (err) {
     log(`update ${err instanceof Error ? err.message : String(err)}`)
   }
+}
+
+/**
+ * Once a day, one anonymous ping (see telemetry.ts). Not awaited: the tick
+ * never waits on the network. `maybeTelemetry` does not throw, so the void is
+ * safe; the first-run notice goes to the log and to the notify channel.
+ */
+async function telemetryStep(): Promise<void> {
+  await maybeTelemetry({
+    notice: (line) => {
+      log(line)
+      void notify({ message: line, label: 'telemetry' }, loadNotifyConfig())
+    },
+  })
 }
 
 function sourceNewerThanDaemon(): boolean {

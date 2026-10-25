@@ -785,6 +785,20 @@ worktrees of the same parent. Writes under `stateDir/<YYYY-MM-DD>/`.
 A row whose input failed reads `skip`, not `ok`. Any problem exits 1.
 `--json` prints `{ init?, ok, checks: [{ name, status, detail, fix? }] }`.
 
+## Telemetry
+
+herdr-desk sends anonymous usage data so the maintainers know which versions and platforms are in use.
+
+The daemon sends one `ping` per machine per day. The first time it runs it also sends `install`, and writes one line saying so to `daemon.log` (and to your notify channel, if one is set up).
+
+What is sent: event name (`ping` or `install`), a random install id, app version, OS, CPU architecture, whether it ran in CI, and the country (derived by Cloudflare from the request). The id is a random UUID kept in `telemetry-id` in the plugin state dir.
+
+What is not sent: IP address, user agent, file paths, hostnames, usernames, emails, repo names, command arguments, or any file content.
+
+Opt out: set `HERDR_DESK_TELEMETRY_DISABLED=1` or `DO_NOT_TRACK=1` in the daemon's environment, or put `"telemetry": false` in the machine `config.json`. Nothing is sent when `CI` is set. Set `HERDR_DESK_TELEMETRY_DEBUG=1` to print what would be sent to stderr instead of sending it.
+
+Public aggregate stats: https://telemetry.anyr.workers.dev/herdr-desk
+
 ## Version
 
 **0.1.x only.** release-please opens a `chore(main): release 0.1.N` PR
