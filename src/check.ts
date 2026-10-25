@@ -8,6 +8,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { basename, join, resolve } from 'node:path'
+import { launchKind } from './agents'
 import {
   DESK_ROOT,
   findConfigPath,
@@ -19,7 +20,6 @@ import { daemonPid } from './daemon'
 import { herdrReady } from './herdr'
 import { pluginStateDir } from './paths'
 import { GH_PREFIX } from './registry'
-import { launchKind } from './run'
 
 /**
  * First-run check for a repo adopting herdr-desk.
