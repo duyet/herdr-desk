@@ -5,6 +5,7 @@ import { findConfigPath, type LoadedDesk, loadDeskConfig } from './config'
 import { cronNext } from './cron'
 import { daemonPid } from './daemon'
 import { describeJob } from './describe'
+import { herdrCall, namedAgents } from './herdr'
 import { resolveConfig } from './layers'
 import { describePause, loadPaused, pausedNow } from './pause'
 import { scheduleLabel } from './schedule'
@@ -121,6 +122,97 @@ export function parseInvocation(env: Env): Invocation {
   return out
 }
 
+/**
+ * Where a spawn id on this card came from.
+ *
+ * `repo-source` is Herdr's own answer for the repo; `invocation` is the firing
+ * context's id, kept only as the documented fallback; `none` is both being
+ * empty, printed rather than hidden.
+ */
+export type SpawnSource = 'repo-source' | 'invocation' | 'none'
+
+export type SpawnResolution = {
+  /** The invocation with `workspaceId` and `paneId` overridden in place. */
+  inv: Invocation
+  /** Where the workspace id on this card came from. */
+  workspaceSource: SpawnSource
+  /** True when the pane on this card is actually an observed one. */
+  paneFound: boolean
+}
+
+/** The two Herdr probes the resolution is built on. Swapped whole in tests. */
+export type SpawnIdDeps = {
+  worktreeList: (repo: string) => Promise<unknown>
+  agentList: () => Promise<unknown>
+}
+
+export const realSpawnIdDeps: SpawnIdDeps = {
+  worktreeList: (repo) => herdrCall(['worktree', 'list', '--cwd', repo]),
+  agentList: () => herdrCall(['agent', 'list']),
+}
+
+/**
+ * Resolve the ids a spawn prompt should carry, from the repo.
+ *
+ * #118: `{{workspaceId}}` in the run prompt read the firing context, so on
+ * 2026-10-04 the triage lane got its own lane Space (`wNS`) and an empty pane —
+ * and `herdr worktree create --workspace wNS` would nest children inside
+ * another lane. The parent the repo's children belong to is not in the
+ * invocation at all: `herdr worktree list --cwd <repo>` names it under
+ * `.result.source.source_workspace_id`. The invocation id stays as the
+ * documented fallback, because a keybind popup is run *inside* a workspace and
+ * Herdr being down must degrade this card, not crash it.
+ *
+ * The pane comes from the named agent's own row in `herdr agent list` — the
+ * firing context carries `focused_pane_id` only when the invocation happened
+ * to focus that pane, and empty is exactly what broke the lane. A pane that
+ * still cannot be found is kept on the card with a bold note naming how to
+ * look it up, never eaten silently.
+ */
+export async function resolveSpawnContext(
+  inv: Invocation,
+  repo: string,
+  deps: SpawnIdDeps = realSpawnIdDeps,
+): Promise<SpawnResolution> {
+  const out: SpawnResolution = {
+    inv: { ...inv },
+    workspaceSource: 'none',
+    paneFound: false,
+  }
+  try {
+    const list = record(await deps.worktreeList(repo))
+    const id = text(record(record(list.result).source).source_workspace_id)
+    if (id) {
+      out.inv.workspaceId = id
+      out.workspaceSource = 'repo-source'
+    }
+  } catch {
+    // Herdr missing or no session for this repo; the invocation's own id is
+    // what remains. The card prints which source each id came from, so a
+    // fallback `wNS` is marked as such instead of posing as the repo's Space.
+  }
+  if (out.workspaceSource === 'none') {
+    out.workspaceSource = out.inv.workspaceId ? 'invocation' : 'none'
+  }
+  if (out.inv.paneId) {
+    out.paneFound = true
+  } else if (out.inv.paneAgent) {
+    try {
+      const hit = namedAgents(await deps.agentList()).find(
+        (a) => a.name === out.inv.paneAgent && a.paneId,
+      )
+      if (hit) {
+        out.inv.paneId = hit.paneId
+        out.paneFound = true
+      }
+    } catch {
+      // Same degradation as the workspace probe: the note below says what a
+      // reader can do about it, and the card still renders.
+    }
+  }
+  return out
+}
+
 /** How the repo directory was chosen, printed so the choice is auditable. */
 export type RepoVia = 'checkout' | 'repo-root' | 'cwd' | 'cwd-fallback'
 
@@ -222,6 +314,8 @@ export type CardOptions = {
   now?: Date
   /** Test seam for the daemon pid. */
   pid?: number | null
+  /** Test seam for the spawn id probes. */
+  spawnDeps?: SpawnIdDeps
 }
 
 /**
@@ -331,6 +425,22 @@ function jobRows(data: DeskCardData): string[][] {
   })
 }
 
+/** One `spawn ids` line: which workspace, which pane, and where each came from. */
+function spawnIdsLine(spawn: SpawnResolution): string {
+  const workspace =
+    spawn.workspaceSource === 'repo-source'
+      ? spawn.inv.workspaceId
+      : spawn.inv.workspaceId
+        ? `${spawn.inv.workspaceId} (invocation, not the repo's source)`
+        : '**none found**'
+  const pane = spawn.paneFound
+    ? spawn.inv.paneId
+    : spawn.inv.paneAgent
+      ? `**not found: no pane for ${spawn.inv.paneAgent} in \`herdr agent list\`**`
+      : '**not found: no agent name in this invocation**'
+  return `workspace ${workspace}  pane ${pane}`
+}
+
 /**
  * Render the card.
  *
@@ -339,14 +449,18 @@ function jobRows(data: DeskCardData): string[][] {
  * - **Nothing is claimed that was not observed.** The dashboard line prints the
  *   canonical URL either way and states plainly whether anything is listening
  *   plus the command that starts it, instead of handing over a link that
- *   answers 404.
+ *   answers 404. The spawn ids line says the same truth about its ids: where
+ *   the workspace came from, and a bold note instead of a silent blank pane.
  * - **An unconfigured repo says so, naming the directory that was checked.**
  *   Silence, or a guessed path, is the #97 shape: a repo that looks absent for
  *   a reason that is not the real one.
  * - **Commands are printed, not run.** The card reads. It starts nothing and
  *   fires no job, so it is safe to bind to a key.
  */
-export function renderCard(data: DeskCardData): string {
+export function renderCard(
+  data: DeskCardData,
+  spawn: SpawnResolution | undefined = undefined,
+): string {
   const { pick, inv } = data
   const lines: string[] = []
 
@@ -363,6 +477,19 @@ export function renderCard(data: DeskCardData): string {
     `workspace  ${ws.length ? ws.join('  ') : '(no workspace context)'}`,
   )
   lines.push(`repo from  ${pick.via}`)
+
+  // Resolved per #118, not merely parsed: a fallback id says so on its face,
+  // because a lane Space used as a parent is the exact failure that issue
+  // describes.
+  lines.push(
+    `spawn ids  ${spawnIdsLine(
+      spawn ?? {
+        inv,
+        workspaceSource: inv.workspaceId ? 'invocation' : 'none',
+        paneFound: inv.paneId !== undefined,
+      },
+    )}`,
+  )
 
   lines.push('')
   if (data.configError) {
@@ -414,15 +541,24 @@ export function renderCard(data: DeskCardData): string {
  * The card for the workspace Herdr invoked this command for.
  *
  * `--repo` is applied before any path from the invocation context, so an
- * explicit flag always beats ambient state.
+ * explicit flag always beats ambient state. The spawn ids on the card are
+ * resolved against the same repo the card names (#118): the parent project
+ * Space comes from `herdr worktree list --cwd <repo>` first, the invocation
+ * id only as the documented fallback.
  */
 export async function deskCard(
   inv: Invocation,
   opts: CardOptions = {},
 ): Promise<string> {
-  const data = collectCard(inv, opts)
-  if (opts.probe === null) return renderCard(data)
-  return renderCard(await withProbe(data, opts.probe ?? tcpProbe))
+  // The repo the card reports is the repo the ids are resolved against, so a
+  // `--repo` override moves both together.
+  const repo = opts.override
+    ? resolve(opts.override)
+    : pickRepo(inv, opts.cwd ?? process.cwd()).repo
+  const spawn = await resolveSpawnContext(inv, repo, opts.spawnDeps)
+  const data = collectCard(spawn.inv, opts)
+  if (opts.probe === null) return renderCard(data, spawn)
+  return renderCard(await withProbe(data, opts.probe ?? tcpProbe), spawn)
 }
 
 /**
