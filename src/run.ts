@@ -25,6 +25,7 @@ import { markRunning, markSettled } from './hub'
 import { briefReason, noticeBody, notify, resolveNotify } from './notify'
 import { assembleManagerPrompt, taskVars } from './prompt'
 import { HERDR_AGENT_KINDS } from './schema'
+import { track } from './usage'
 import { claimEvents, restoreEvents } from './watch'
 
 type RunResult = {
@@ -119,8 +120,10 @@ export async function runTask(opts: {
   const config = loadDeskConfig(opts.repo)
   const repo = config.repo ?? opts.repo
   const task = resolveTask(config, opts.taskId)
+  const started = Date.now()
+  track({ kind: 'run.started', repo, task: task.id })
   try {
-    const result = await execute(config, repo, task, opts.trigger)
+    const result = await execute(config, repo, task, opts.trigger, started)
     // Reaching the manager means the job is no longer broken in the way it was.
     // Clearing here is what makes the *next* fault on this job announce, instead
     // of being held back as a repeat of one that is already over.
@@ -137,6 +140,14 @@ export async function runTask(opts: {
       ok: false,
       detail: message,
       trigger: opts.trigger,
+      ms: Date.now() - started,
+    })
+    track({
+      kind: 'run.finished',
+      repo,
+      task: task.id,
+      outcome: 'fail',
+      ms: Date.now() - started,
     })
     // The hub has to learn that this job is over, or it keeps counting as
     // running until it goes stale and reads as stuck — a failure reported as a
@@ -275,7 +286,8 @@ async function execute(
   config: LoadedDesk,
   repo: string,
   task: TaskConfig,
-  trigger?: RunTrigger,
+  trigger: RunTrigger | undefined,
+  started: number,
 ): Promise<RunResult> {
   const day = dayKey()
   const runDir = runDirFor(repo, task, day)
@@ -283,6 +295,7 @@ async function execute(
   writeLatestPointer(dirname(runDir), task.id, day)
 
   const done = (result: RunResult) => {
+    const ms = Date.now() - started
     recordRun({
       name: config.name,
       repo,
@@ -291,6 +304,14 @@ async function execute(
       ok: true,
       detail: JSON.stringify(result),
       trigger,
+      ms,
+    })
+    track({
+      kind: 'run.finished',
+      repo,
+      task: task.id,
+      outcome: result.skipped ? 'skip' : 'ran',
+      ms,
     })
     return result
   }
@@ -389,6 +410,7 @@ async function execute(
       label,
       repo,
     )
+    track({ kind: 'child.spawned', repo, task: task.id, agent: kind })
     const paneId = child.paneId
     const childWorkspaceId = child.workspaceId
     const workspaceId = project.workspaceId

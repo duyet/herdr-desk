@@ -21,6 +21,8 @@ export type RunRecord = {
   detail?: string
   /** Set when a person or a repo event fired the job, not a cron slot. */
   trigger?: RunTrigger
+  /** Wall time of the fire itself (spawn or prompt), not the agent's work. */
+  ms?: number
 }
 
 /** How a job is identified in the ledger, independent of its display name. */
