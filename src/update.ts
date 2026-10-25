@@ -227,17 +227,22 @@ export async function checkForUpdate(
   return { installed, latest, newer, source, blocked, changes }
 }
 
-/** `herdr plugin install owner/repo --yes`. Plain output, so not herdrJson. */
-export async function reinstall(source: SelfSource): Promise<void> {
+/**
+ * `herdr plugin install owner/repo --yes`, or `--ref REF` for a rollback.
+ * Plain output, so not herdrJson. Without `ref` this also clears a pin.
+ */
+export async function reinstall(
+  source: SelfSource,
+  ref?: string,
+): Promise<void> {
   const target = `${source.owner ?? 'duyet'}/${source.repo ?? PLUGIN_ID}`
-  const proc = Bun.spawn(
-    [defaultHerdrBin(), 'plugin', 'install', target, '--yes'],
-    {
-      env: { ...process.env, HERDR_SOCKET_PATH: defaultSocket() },
-      stdout: 'pipe',
-      stderr: 'pipe',
-    },
-  )
+  const args = [defaultHerdrBin(), 'plugin', 'install', target, '--yes']
+  if (ref) args.push('--ref', ref)
+  const proc = Bun.spawn(args, {
+    env: { ...process.env, HERDR_SOCKET_PATH: defaultSocket() },
+    stdout: 'pipe',
+    stderr: 'pipe',
+  })
   const [out, err, exit] = await Promise.all([
     new Response(proc.stdout).text(),
     new Response(proc.stderr).text(),
@@ -245,39 +250,180 @@ export async function reinstall(source: SelfSource): Promise<void> {
   ])
   if (exit !== 0) {
     throw new Error(
-      `herdr plugin install ${target} failed (${exit}): ${(err || out).trim().slice(0, 400)}`,
+      `herdr plugin install ${target}${ref ? ` --ref ${ref}` : ''} failed (${exit}): ${(err || out).trim().slice(0, 400)}`,
     )
   }
   track({ kind: 'upgrade', target })
 }
 
-/** Machine config only: a committed repo file must not steer the machine. */
+const SMOKE_TIMEOUT_MS = 30_000
+
+/**
+ * Boot the installed tree's CLI and return the version it reports. This is
+ * what "the new version starts" means here: the outgoing daemon cannot watch
+ * its successor come up, but a tree whose CLI does not load, or reports the
+ * wrong version, is not one to restart onto.
+ */
+export async function smokeVersion(root: string): Promise<string> {
+  const proc = Bun.spawn(
+    [process.execPath, join(root, 'src', 'cli.ts'), 'version'],
+    { stdout: 'pipe', stderr: 'pipe', stdin: 'ignore' },
+  )
+  const timer = setTimeout(() => proc.kill(), SMOKE_TIMEOUT_MS)
+  const [out, err, exit] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ])
+  clearTimeout(timer)
+  if (exit !== 0) {
+    throw new Error(
+      `${root}: cli exited ${exit}: ${(err || out).trim().slice(0, 400)}`,
+    )
+  }
+  return out.trim()
+}
+
+export type ApplyDeps = {
+  install?: (source: SelfSource, ref?: string) => Promise<void>
+  source?: () => Promise<SelfSource>
+  smoke?: (root: string) => Promise<string>
+}
+
+export type ApplyResult =
+  | { ok: true }
+  | { ok: false; error: string; rolledBack: boolean }
+
+/** `0.1.8` / `v0.1.8` → `v0.1.8`, the release-please tag. */
+export function tagOf(version: string): string {
+  return `v${version.replace(/^v/, '')}`
+}
+
+/**
+ * Install `to`, prove the new tree boots and reports `to`, and reinstall
+ * `from` (pinned by tag) when it does not. The one upgrade path: the daemon
+ * and `desk upgrade` both go through here.
+ */
+export async function applyUpdate(
+  source: SelfSource,
+  from: string,
+  to: string,
+  deps: ApplyDeps = {},
+): Promise<ApplyResult> {
+  const install = deps.install ?? reinstall
+  let error: string
+  try {
+    await install(source)
+    const after = await (deps.source ?? selfSource)()
+    const root = after.pluginRoot ?? source.pluginRoot ?? PLUGIN_ROOT
+    const got = await (deps.smoke ?? smokeVersion)(root)
+    if (compareVersions(got, to) === 0) return { ok: true }
+    error = `new tree reports ${got}, expected ${to}`
+  } catch (err) {
+    error = err instanceof Error ? err.message : String(err)
+  }
+  try {
+    await install(source, tagOf(from))
+    return { ok: false, error, rolledBack: true }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    return {
+      ok: false,
+      error: `${error}; rollback failed: ${msg}`,
+      rolledBack: false,
+    }
+  }
+}
+
+/**
+ * Machine config only: a committed repo file must not steer the machine.
+ * Off by default: an upgrade swaps the scheduler's code under every desk on
+ * the machine, so the owner opts in. Off still checks daily and notifies once
+ * per new version.
+ */
 export function autoUpdateEnabled(global = loadGlobalConfig()): boolean {
-  return global.autoUpdate !== false
+  return global.autoUpdate === true
 }
 
 function checkPath(): string {
   return join(pluginStateDir(), 'update-check.json')
 }
 
-export function loadLastCheck(): string | null {
+/** What `update-check.json` remembers between daily checks. */
+export type CheckState = {
+  at: string
+  result: string
+  /** The version a notify-only check last announced. */
+  notified?: string
+  /** A version whose apply failed; never retried automatically. */
+  failedVersion?: string
+  /** The tag a failed apply pinned the install back to. */
+  rolledBackTo?: string
+}
+
+export function loadCheckState(): CheckState | null {
   if (!existsSync(checkPath())) return null
   try {
-    const raw = JSON.parse(readFileSync(checkPath(), 'utf8')) as {
-      at?: unknown
+    const raw = JSON.parse(readFileSync(checkPath(), 'utf8')) as Record<
+      string,
+      unknown
+    >
+    if (typeof raw.at !== 'string') return null
+    const s = (v: unknown) => (typeof v === 'string' ? v : undefined)
+    return {
+      at: raw.at,
+      result: s(raw.result) ?? '',
+      notified: s(raw.notified),
+      failedVersion: s(raw.failedVersion),
+      rolledBackTo: s(raw.rolledBackTo),
     }
-    return typeof raw.at === 'string' ? raw.at : null
   } catch {
     return null
   }
 }
 
-export function saveLastCheck(at: Date, result: string): void {
+export function loadLastCheck(): string | null {
+  return loadCheckState()?.at ?? null
+}
+
+/** Stamp a check. Fields in `patch` replace remembered ones; the rest stay. */
+export function saveLastCheck(
+  at: Date,
+  result: string,
+  patch: Partial<Omit<CheckState, 'at' | 'result'>> = {},
+): void {
+  const next: CheckState = {
+    ...loadCheckState(),
+    ...patch,
+    at: at.toISOString(),
+    result,
+  }
   mkdirSync(pluginStateDir(), { recursive: true })
-  writeFileSync(
-    checkPath(),
-    `${JSON.stringify({ at: at.toISOString(), result }, null, 2)}\n`,
-  )
+  writeFileSync(checkPath(), `${JSON.stringify(next, null, 2)}\n`)
+}
+
+/** One line for `desk status`. */
+export function updateStatusLine(
+  state: CheckState | null,
+  enabled: boolean,
+  now = new Date(),
+): string {
+  const mode = enabled ? 'auto' : 'notify-only'
+  if (!state) return `update: never checked (${mode})`
+  const hours = Math.floor((now.getTime() - Date.parse(state.at)) / 3_600_000)
+  const when = Number.isNaN(hours) ? state.at : `${hours}h ago`
+  return `update: ${state.result} (${mode}), checked ${when}`
+}
+
+/** Why not to apply, ignoring a pin left by our own rollback. */
+export function blockedBy(
+  check: UpdateCheck,
+  state: CheckState | null,
+): string | undefined {
+  const ownPin =
+    state?.rolledBackTo !== undefined &&
+    check.source.requestedRef === state.rolledBackTo
+  return ownPin ? undefined : check.blocked
 }
 
 export function checkDue(last: string | null, now: Date): boolean {
@@ -290,17 +436,21 @@ export function checkDue(last: string | null, now: Date): boolean {
 export type AutoUpdateDeps = {
   now?: Date
   enabled?: boolean
+  /** True while a desk run is in flight; an upgrade waits for it. */
+  busy?: () => boolean
   check?: () => Promise<UpdateCheck>
-  apply?: (source: SelfSource) => Promise<void>
+  apply?: (source: SelfSource, from: string, to: string) => Promise<ApplyResult>
   notify?: (message: string) => Promise<void>
   log?: (line: string) => void
 }
 
 export type AutoUpdateOutcome =
   | 'not-due'
+  | 'deferred'
   | 'current'
   | 'available'
   | 'blocked'
+  | 'skipped'
   | 'updated'
   | 'failed'
 
@@ -309,13 +459,19 @@ export type AutoUpdateOutcome =
  * happens only when `autoUpdate` is on. The timestamp is written before
  * anything is applied and on failure too, so a network error or a release
  * whose manifest version lags its tag cannot retry (and notify) every tick.
+ *
+ * Busy is tested before the network: a deferred tick writes no stamp so the
+ * next tick retries, and must not spend a GitHub request each time.
  */
 export async function maybeAutoUpdate(
   deps: AutoUpdateDeps = {},
 ): Promise<AutoUpdateOutcome> {
   const now = deps.now ?? new Date()
   const log = deps.log ?? (() => {})
-  if (!checkDue(loadLastCheck(), now)) return 'not-due'
+  const state = loadCheckState()
+  if (!checkDue(state?.at ?? null, now)) return 'not-due'
+  const enabled = deps.enabled ?? autoUpdateEnabled()
+  if (enabled && deps.busy?.()) return 'deferred'
   let check: UpdateCheck
   try {
     check = await (deps.check ?? checkForUpdate)()
@@ -330,28 +486,50 @@ export async function maybeAutoUpdate(
     return 'current'
   }
   const what = `${check.installed} -> ${check.latest}`
-  if (check.blocked) {
+  const send = deps.notify ?? (async () => {})
+  if (blockedBy(check, state)) {
     saveLastCheck(now, `blocked ${what}`)
     log(`update available ${what}, not applied: ${check.blocked}`)
     return 'blocked'
   }
-  if (!(deps.enabled ?? autoUpdateEnabled())) {
-    saveLastCheck(now, `available ${what}`)
+  if (!enabled) {
+    const first = state?.notified !== check.latest
+    saveLastCheck(now, `available ${what}`, { notified: check.latest })
     log(`update available ${what} (autoUpdate off)`)
+    if (first) {
+      await send(
+        `herdr-desk ${what} is available: run \`herdr-desk upgrade\`, or set "autoUpdate": true`,
+      ).catch(() => {})
+    }
     return 'available'
   }
+  if (state?.failedVersion === check.latest) {
+    saveLastCheck(now, `skipped ${what}: it failed before`)
+    log(`update ${what} skipped: it failed before`)
+    return 'skipped'
+  }
   saveLastCheck(now, `applying ${what}`)
-  const send = deps.notify ?? (async () => {})
-  try {
-    await (deps.apply ?? reinstall)(check.source)
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    saveLastCheck(now, `fail ${what}: ${msg}`)
-    log(`update ${what} failed: ${msg}`)
-    await send(`herdr-desk update ${what} failed: ${msg}`).catch(() => {})
+  const res = await (deps.apply ?? applyUpdate)(
+    check.source,
+    check.installed,
+    check.latest,
+  )
+  if (!res.ok) {
+    const back = res.rolledBack ? `, rolled back to ${check.installed}` : ''
+    saveLastCheck(now, `fail ${what}${back}: ${res.error}`, {
+      failedVersion: check.latest,
+      rolledBackTo: res.rolledBack ? tagOf(check.installed) : undefined,
+    })
+    log(`update ${what} failed${back}: ${res.error}`)
+    await send(`herdr-desk update ${what} failed${back}: ${res.error}`).catch(
+      () => {},
+    )
     return 'failed'
   }
-  saveLastCheck(now, `updated ${what}`)
+  saveLastCheck(now, `updated ${what}`, {
+    failedVersion: undefined,
+    rolledBackTo: undefined,
+  })
   log(`updated ${what}`)
   const changes = check.changes?.length
     ? `\n${check.changes.map((l) => `· ${l}`).join('\n')}`
