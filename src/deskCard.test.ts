@@ -204,9 +204,11 @@ describe('resolveSpawnContext', () => {
     ).toBe(false)
     expect(
       (
-        await resolveSpawnContext(inv, dir, spawnProbes('wA4', [
-          { name: 'someone-else', pane_id: 'w7:p1' },
-        ]))
+        await resolveSpawnContext(
+          inv,
+          dir,
+          spawnProbes('wA4', [{ name: 'someone-else', pane_id: 'w7:p1' }]),
+        )
       ).inv.paneId,
     ).toBeUndefined()
   })
@@ -230,29 +232,39 @@ describe('resolveSpawnContext', () => {
         override: dir,
         probe: null,
         pid: 1,
-        spawnDeps: spawnProbes('wA4', [
-          { name: 'hd-desk', pane_id: 'w80:p1' },
-        ]),
+        spawnDeps: spawnProbes('wA4', [{ name: 'hd-desk', pane_id: 'w80:p1' }]),
       },
     )
     expect(text).toContain('spawn ids  workspace wA4  pane w80:p1')
     expect(text).not.toContain('wNS')
   })
 
-  test("an unfound pane keeps its line and names the lookup, in bold", async () => {
+  test('an unfound pane keeps its line and names the lookup, in bold', async () => {
     const dir = repo(okConfig)
     const text = await deskCard(
       { workspaceId: 'wNS', checkoutPath: dir, paneAgent: 'hd-desk' },
-      { override: dir, probe: null, pid: 1, spawnDeps: spawnProbes('wA4', null) },
+      {
+        override: dir,
+        probe: null,
+        pid: 1,
+        spawnDeps: spawnProbes('wA4', null),
+      },
     )
-    expect(text).toContain(`**not found: no pane for hd-desk in \`herdr agent list\`**`)
+    expect(text).toContain(
+      `**not found: no pane for hd-desk in \`herdr agent list\`**`,
+    )
   })
 
   test('no ids anywhere still renders, bold-nothing on both', async () => {
     const dir = repo(okConfig)
     const text = await deskCard(
       {},
-      { override: dir, probe: null, pid: 1, spawnDeps: spawnProbes(null, null) },
+      {
+        override: dir,
+        probe: null,
+        pid: 1,
+        spawnDeps: spawnProbes(null, null),
+      },
     )
     expect(text).toContain('spawn ids  workspace **none found**')
     expect(text).toContain('**not found: no agent name in this invocation**')
