@@ -19,9 +19,10 @@ import {
   assertOwnWorktree,
   baseRefArgv,
   baseRefFrom,
-  canPromptManager,
+  childBranch,
   deskWorktreeBranch,
   isManagerCheckout,
+  managerToPrompt,
   preconditionSkip,
   runDirFor,
   runTask,
@@ -234,6 +235,41 @@ describe('deskWorktreeBranch', () => {
   })
 })
 
+describe('childBranch', () => {
+  test('lives under desk/ beside the manager branch, never inside it', () => {
+    expect(childBranch(base, 'Issue #42')).toBe(
+      'desk/desk-github-issues--issue-42',
+    )
+  })
+
+  test('git accepts a child ref while the manager ref exists', () => {
+    // `desk/<task>/<item>` is refused once `desk/<task>` is a ref.
+    const repo = mkdtempSync(join(tmpdir(), 'desk-child-'))
+    try {
+      const git = (...args: string[]) =>
+        Bun.spawnSync(
+          ['git', '-c', 'user.name=t', '-c', 'user.email=t@t', ...args],
+          { cwd: repo },
+        ).exitCode
+      git('init', '-q')
+      git('commit', '-q', '--allow-empty', '-m', 'root')
+      expect(git('branch', deskWorktreeBranch(base))).toBe(0)
+      expect(git('branch', childBranch(base, 'pr-17'))).toBe(0)
+    } finally {
+      rmSync(repo, { recursive: true, force: true })
+    }
+  })
+
+  test('the child checkout is never mistaken for the manager', () => {
+    const dir = `/w/${childBranch(base, 'pr-17').replace('/', '-')}`
+    expect(isManagerCheckout(dir, base)).toBe(false)
+  })
+
+  test('refuses an item with nothing to name a branch after', () => {
+    expect(() => childBranch(base, '///')).toThrow()
+  })
+})
+
 describe('isManagerCheckout', () => {
   const babysit: TaskConfig = { ...base, id: 'local:babysit' }
 
@@ -270,7 +306,7 @@ describe('isManagerCheckout', () => {
   })
 })
 
-describe('canPromptManager', () => {
+describe('managerToPrompt', () => {
   const prod: TaskConfig = { ...base, id: 'local:prod', agentName: 'chm-prod' }
 
   // The shape that lost 20 `chmonitor local:prod` fires in 95 seconds on
@@ -287,26 +323,66 @@ describe('canPromptManager', () => {
   }
 
   test('prompts a registered-but-unlisted manager, never starts one', () => {
-    expect(canPromptManager([registered], [], prod)).toBe(true)
+    expect(managerToPrompt([registered], [], prod)).toBe('chm-prod')
   })
 
   test('prompts a manager that is still working', () => {
     // `cwd` is left off: `isAgentLive` calls a session whose cwd is gone dead,
     // and no checkout at that path exists on a CI runner.
     expect(
-      canPromptManager([{ name: 'chm-prod', status: 'working' }], [], prod),
-    ).toBe(true)
+      managerToPrompt([{ name: 'chm-prod', status: 'working' }], [], prod),
+    ).toBe('chm-prod')
   })
 
   test('starts a session only for a name nobody holds', () => {
     // The other half of the rule. Without it the test above could pass for the
     // wrong reason — by answering true no matter what Herdr reported.
-    expect(canPromptManager([], [], prod)).toBe(false)
+    expect(managerToPrompt([], [], prod)).toBeNull()
   })
 
   test('starts when the registered manager’s worktree is gone', () => {
     // Its pane went with the checkout, so there is nothing left to prompt.
-    expect(canPromptManager([{ ...registered, cwd: '' }], [], prod)).toBe(false)
+    expect(managerToPrompt([{ ...registered, cwd: '' }], [], prod)).toBeNull()
+  })
+
+  // Before task ids named the session, every job of a desk defaulted to the
+  // one `<desk>-desk` name. A desk upgraded mid-life still has that session.
+  describe('legacy shared name', () => {
+    const migrated: TaskConfig = {
+      ...prod,
+      agentName: 'chmonitor-desk-local-prod',
+      legacyAgentName: 'chm-desk',
+    }
+    const legacy = (cwd: string, status = 'done'): ListedAgent => ({
+      ...registered,
+      name: 'chm-desk',
+      status,
+      cwd,
+    })
+
+    test('re-prompts the old session in this task’s checkout', () => {
+      const own = '/home/duyet/.herdr/worktrees/chmonitor/desk-local-prod'
+      expect(managerToPrompt([legacy(own)], [], migrated)).toBe('chm-desk')
+    })
+
+    test('never prompts the old session sitting in another job’s checkout', () => {
+      const other = '/home/duyet/.herdr/worktrees/chmonitor/desk-local-babysit'
+      expect(managerToPrompt([legacy(other)], [], migrated)).toBeNull()
+      expect(
+        managerToPrompt([legacy(other, 'working')], [], migrated),
+      ).toBeNull()
+    })
+
+    test('prefers the new name when both are registered', () => {
+      const own = '/home/duyet/.herdr/worktrees/chmonitor/desk-local-prod'
+      expect(
+        managerToPrompt(
+          [legacy(own), { ...registered, name: migrated.agentName }],
+          [],
+          migrated,
+        ),
+      ).toBe(migrated.agentName)
+    })
   })
 })
 
@@ -344,7 +420,7 @@ describe('runTask', () => {
    *
    * `herdrDown` leaves the socket missing, which is the precondition-skip path.
    */
-  function desk(herdrDown = false): string {
+  function desk(herdrDown = false, legacy = false): string {
     const state = tempDir('herdr-desk-run-')
     const repo = tempDir('herdr-desk-repo-')
     process.env.HERDR_PLUGIN_STATE_DIR = state
@@ -360,19 +436,25 @@ describe('runTask', () => {
           {
             id: TASK_ID,
             schedule: '0 7 * * *',
-            agentName: 'chm-babysit',
+            ...(legacy ? {} : { agentName: 'chm-babysit' }),
           },
         ],
       })}\n`,
     )
 
     const bin = join(state, 'herdr')
+    // An upgraded desk: the finished manager is still registered under the
+    // name every task used to share, in this task's own checkout.
+    const agents = legacy
+      ? '{"name":"chmonitor-desk","status":"done","pane_id":"p1","workspace_id":"wMgr","cwd":"/w/desk-local-babysit"}'
+      : '{"name":"chm-babysit","status":"working"}'
     writeFileSync(
       bin,
       `#!/bin/sh
 case "$1 $2" in
   "workspace list") echo '{"result":{"workspaces":[{"workspace_id":"wProj","cwd":"${repo}"}]}}' ;;
-  "agent list") echo '{"result":{"agents":[{"name":"chm-babysit","status":"working"}]}}' ;;
+  "agent list") echo '{"result":{"agents":[${agents}]}}' ;;
+  "agent prompt") printf '%s\n%s' "$3" "$4" > "${state}/prompted" ;;
   *) echo '{}' ;;
 esac
 `,
@@ -438,6 +520,19 @@ esac
     expect(result.skipped).toContain('already prompting or spawning')
     // The holder's lock is not ours to remove.
     expect(readFileSync(lockOf(repo), 'utf8')).toContain(`${process.pid}`)
+  })
+
+  test('an upgraded desk re-prompts its old session, and tells it its real name', async () => {
+    const repo = desk(false, true)
+    expect((await runTask({ repo })).prompted).toBe(true)
+    const state = process.env.HERDR_PLUGIN_STATE_DIR as string
+    const [name, ...prompt] = readFileSync(
+      join(state, 'prompted'),
+      'utf8',
+    ).split('\n')
+    expect(name).toBe('chmonitor-desk')
+    // Children report to this name; the new default would reach nobody.
+    expect(prompt.join('\n')).toContain('Your Herdr name: chmonitor-desk\n')
   })
 
   test('a finished fire releases its claim so the next one can run', async () => {

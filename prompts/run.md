@@ -22,9 +22,18 @@ re-prompts you in this same session rather than starting a new one. Treat
 this session as the standing manager for the job.
 
 Create the run dir if needed. Write `queue.md`, `workers.md`, and
-`summary.md` **before** spawning anyone. Then run the playbook. Further
-children: `herdr worktree create --workspace "{{workspaceId}}"` so they
-nest under the same project Space — never `workspace create`.
+`summary.md` **before** spawning anyone. Then run the playbook. Open every
+child worktree with the desk, never with `herdr worktree create` yourself:
+
+```
+{{deskBin}} child {{taskId}} <item> --workspace "{{workspaceId}}" --repo "{{repo}}"
+```
+
+`<item>` is a short name for the work (`issue-42`, `pr-17`). The desk
+names the branch `desk/<job>--<item>`, nests the worktree under the
+project Space, and prints `{"branch", "workspaceId", "paneId"}`; start the
+child's agent on that pane. The same command re-opens the branch when it
+already exists. A branch the desk did not name is never cleaned up for you.
 
 ## Reuse before you spawn
 
@@ -33,8 +42,8 @@ yourself, and do not open a second manager worktree.
 
 - Prompt children you already started: `herdr agent prompt <name> <text>`.
 - Check what exists first: `herdr worktree list`, `herdr agent list`.
-- Re-open an existing branch instead of branching again:
-  `herdr worktree open --workspace "{{workspaceId}}" --branch <branch>`.
+- Re-open an existing child by running the same `child` command with the
+  same `<item>`, instead of branching again.
 - One item per child worktree. Prefer reusing a child whose PR is still open
   and whose task is unchanged over spawning a fresh one.
 - Scale to what is actually useful — fewer, better children beat a fixed count.

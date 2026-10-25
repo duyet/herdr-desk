@@ -73,7 +73,7 @@ import {
   writeCache,
 } from './registry'
 import { collectReports, REPORT_FILE, sendReports } from './report'
-import { runTask } from './run'
+import { childBranch, deskWorktreeBranch, openWorktree, runTask } from './run'
 import { scheduleLabel } from './schedule'
 import { SCHEMA_PATH, SCHEMA_URL } from './schema'
 import { writeContext } from './sessions/context'
@@ -157,6 +157,7 @@ function usage(): never {
   herdr-desk watch test --repo DIR [--task ID]
   herdr-desk watch reset [--repo DIR] [--task ID]
   herdr-desk cleanup [--dry-run]
+  herdr-desk child JOB ITEM --workspace ID [--repo DIR] [--base REF]
   herdr-desk last
   herdr-desk sessions index
   herdr-desk sessions [--repo DIR] [--agent NAME] [--since 7d]
@@ -780,6 +781,36 @@ async function main() {
     return
   }
 
+  if (cmd === 'child') {
+    const repo = resolve(arg('--repo', argv) ?? process.cwd())
+    const workspace = arg('--workspace', argv)
+    const base = arg('--base', argv)
+    const skip = new Set([arg('--repo', argv), workspace, base])
+    const [job, item] = argv
+      .slice(1)
+      .filter((a) => !a.startsWith('--') && !skip.has(a))
+    if (!job || !item || !workspace) {
+      console.log(
+        'usage: herdr-desk child JOB ITEM --workspace ID [--repo DIR] [--base REF]',
+      )
+      process.exit(2)
+    }
+    const config = loadDeskConfig(repo)
+    const task = resolveTask(config, job)
+    const branch = childBranch(task, item)
+    const opened = await openWorktree(
+      workspace,
+      branch,
+      // One token after the desk name, like a manager's label, so an emptied
+      // child Space reads as a desk lane: `chmonitor local:babysit--issue-42`.
+      `${config.name} ${task.id}${branch.slice(deskWorktreeBranch(task).length)}`,
+      repo,
+      base,
+    )
+    console.log(JSON.stringify({ branch, ...opened }))
+    return
+  }
+
   if (cmd === 'watch') {
     await watchCommand(argv)
     return
@@ -794,7 +825,10 @@ async function main() {
     const plan = await planCleanup(desks)
     console.log(formatCleanup(plan, dryRun))
     if (dryRun) return
-    const result = await applyCleanup(plan)
+    const result = await applyCleanup(
+      plan,
+      desks.map((d) => d.repo),
+    )
     console.log(formatResult(result))
     if (result.failed.length > 0) process.exit(1)
     return
