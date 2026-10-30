@@ -1,6 +1,6 @@
 id = "herdr-desk"
 name = "Herdr Desk"
-version = "0.1.8" # x-release-please-version
+version = "0.1.9" # x-release-please-version
 description = "Scheduled repo managers: pick up .herdr-desk.json from open workspaces and fire start/wrap Grok managers"
 # 0.8.0, not 0.7.0: the `card` popup below uses `placement = "popup"`, which
 # 0.7.0's PluginPanePlacement does not have. Herdr refuses to link a plugin whose
