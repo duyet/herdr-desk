@@ -55,8 +55,7 @@ later on a manifest field it cannot parse.
     "ladder": ["opencode2", "opencode", "claude", "codex"],
     "permission": "yolo"
   },
-  "features": { "issues": false },
-  "autoUpdate": true
+  "features": { "issues": false }
 }
 ```
 
@@ -312,9 +311,9 @@ Config and state live outside the plugin checkout, so a reinstall never loses
 `config.json`, `runs.jsonl`, or `fires.json`.
 
 The daemon checks the latest GitHub release at most once a day (the stamp is
-`update-check.json` in the state dir) and applies it when `autoUpdate` in the
-machine `config.json` is on. It is off by default: the daemon then notifies
-once per new version and `herdr-desk upgrade` applies it. When on, the daemon
+`update-check.json` in the state dir) and applies it unless `autoUpdate` in the
+machine `config.json` is `false`. It is on by default; when off, the daemon
+notifies once per new version and `herdr-desk upgrade` applies it. When on, the daemon
 waits until no desk run is in flight, verifies the new tree boots and reports
 the new version, and reinstalls the old tag if it does not; a failed version is
 not retried automatically. It notifies on upgrade and on failure, and `status`

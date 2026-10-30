@@ -96,9 +96,9 @@ again. If the check fails it reinstalls the old tag. It moves only when a
 release tag is newer than the installed version, and refuses while a desk
 run is in flight. A linked checkout or a `--ref` pin refuses.
 
-The daemon checks once a day. By default it only notifies, once per new
-version. `"autoUpdate": true` in the machine `config.json` lets it apply the
-release itself, between runs. `status` prints the last check.
+The daemon checks once a day. By default it applies the new
+release itself, between runs. `"autoUpdate": false` in the machine `config.json`
+turns that off: it then only notifies, once per new version. `status` prints the last check.
 
 Tip of `main`, before that tag exists:
 
@@ -812,7 +812,7 @@ and updates `CHANGELOG.md`. `feat` / `fix` bump the patch, not 0.2.
 Merge that PR yourself — do not auto-merge it.
 
 Upgrading means reinstalling. See [Update](#update). The daemon does that
-itself only when the machine `config.json` sets `"autoUpdate": true`.
+itself unless the machine `config.json` sets `"autoUpdate": false`.
 `bun src/cli.ts status` reports the installed version.
 
 ## Dev
