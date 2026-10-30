@@ -337,12 +337,13 @@ export async function applyUpdate(
 
 /**
  * Machine config only: a committed repo file must not steer the machine.
- * Off by default: an upgrade swaps the scheduler's code under every desk on
- * the machine, so the owner opts in. Off still checks daily and notifies once
- * per new version.
+ * On by default; `"autoUpdate": false` opts out. An upgrade swaps the
+ * scheduler's code under every desk on the machine, so it only runs between
+ * desk runs and rolls back on failure. Off still checks daily and notifies
+ * once per new version.
  */
 export function autoUpdateEnabled(global = loadGlobalConfig()): boolean {
-  return global.autoUpdate === true
+  return global.autoUpdate !== false
 }
 
 function checkPath(): string {
@@ -495,10 +496,10 @@ export async function maybeAutoUpdate(
   if (!enabled) {
     const first = state?.notified !== check.latest
     saveLastCheck(now, `available ${what}`, { notified: check.latest })
-    log(`update available ${what} (autoUpdate off)`)
+    log(`update available ${what} (autoUpdate disabled)`)
     if (first) {
       await send(
-        `herdr-desk ${what} is available: run \`herdr-desk upgrade\`, or set "autoUpdate": true`,
+        `herdr-desk ${what} is available: run \`herdr-desk upgrade\`, or remove "autoUpdate": false`,
       ).catch(() => {})
     }
     return 'available'

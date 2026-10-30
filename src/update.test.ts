@@ -412,11 +412,11 @@ describe('applyUpdate', () => {
 })
 
 describe('autoUpdate config', () => {
-  // Applying swaps the scheduler under every desk, so the owner opts in.
-  test('defaults to off, on only when explicitly true', () => {
-    expect(autoUpdateEnabled({})).toBe(false)
-    expect(autoUpdateEnabled({ autoUpdate: false })).toBe(false)
+  // Upgrades are safe (between runs, verified, rolled back), so on by default.
+  test('defaults to on, off only when explicitly false', () => {
+    expect(autoUpdateEnabled({})).toBe(true)
     expect(autoUpdateEnabled({ autoUpdate: true })).toBe(true)
+    expect(autoUpdateEnabled({ autoUpdate: false })).toBe(false)
   })
 
   test('schema accepts a boolean and rejects anything else', () => {

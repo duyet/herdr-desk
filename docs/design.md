@@ -153,7 +153,6 @@ are **per-machine, not per-repo**. They belong in
   },
 
   "features": { "issues": false, "notify": true },
-  "autoUpdate": true,
   "defaults": { "schedule": "0 7 * * *", "maxChildren": 16 },
   "limits":  { "concurrentChildren": 8, "perRung": 3, "issuesPerRun": 6 }
 }
@@ -208,7 +207,7 @@ wants without editing code:
 | `notify` | off | needs targets anyway |
 | `issues` | off | files real GitHub issues, so per-machine opt-in |
 Self-upgrade is not a feature flag: it is the top-level `autoUpdate` boolean in
-the machine `config.json` (default `false`: notify once per version). The daemon checks the latest GitHub
+the machine `config.json` (default `true`; `false` only notifies, once per version). The daemon checks the latest GitHub
 release at most once a day; `autoUpdate` only gates *applying* it. A committed
 repo file cannot turn it on or off — the schema accepts the key, the daemon
 reads it only from the machine config.
@@ -585,7 +584,7 @@ Reinstall replaces the managed checkout, and is refused over a local link.
 - the restart must happen *after* the swap, not before
 
 `desk upgrade [--check]` (alias `update`) runs this; `--check` is read-only. The
-daemon runs the same check once a day and, with `autoUpdate` on and no run in
+daemon runs the same check once a day and, with `autoUpdate` not `false` and no run in
 flight, reinstalls, runs `cli.ts version` from the new plugin root, and on a
 mismatch or failure reinstalls `--ref v<old>`. That pin is recorded in
 `update-check.json` as our own, so a later, newer release still applies; the
