@@ -3,6 +3,36 @@
 Versions stay on **0.1.x**. `feat` and `fix` bump the patch. Do not merge a
 1.0 or 0.2 release PR.
 
+## [0.1.9](https://github.com/duyet/herdr-desk/compare/v0.1.8...v0.1.9) (2026-10-30)
+
+
+### Features
+
+* add anonymous daily usage ping ([#117](https://github.com/duyet/herdr-desk/issues/117)) ([38c6d3e](https://github.com/duyet/herdr-desk/commit/38c6d3ec7febb394f76838098519d7bc162c8ee2))
+* agent kind table, idempotent spawn claim, branch and lock cleanup ([#113](https://github.com/duyet/herdr-desk/issues/113)) ([afea785](https://github.com/duyet/herdr-desk/commit/afea7850d50df9f794ca899ee1e1ed3d3f4d319b))
+* better analytics and local usage counters ([#111](https://github.com/duyet/herdr-desk/issues/111)) ([bf51ed8](https://github.com/duyet/herdr-desk/commit/bf51ed82227b98c218ffa5f309743f4f603c4cd6))
+* **check:** first-run check and init for a repo adopting herdr-desk ([#115](https://github.com/duyet/herdr-desk/issues/115)) ([87fea5b](https://github.com/duyet/herdr-desk/commit/87fea5b9e28960bf9329f281dc591e4139a71460))
+* **cleanup:** desk-named child worktrees, prune, panes, per-job manager names ([#116](https://github.com/duyet/herdr-desk/issues/116)) ([b4d7808](https://github.com/duyet/herdr-desk/commit/b4d78085bc6260712ada1319f084df4ec68f9af5))
+* **desk:** arm the PR watcher now that 0.1.8 carries it ([#99](https://github.com/duyet/herdr-desk/issues/99)) ([935233f](https://github.com/duyet/herdr-desk/commit/935233f6e2412a5b9cc2c54e6c564bd87003adb5))
+* **desk:** sidebar badge for open project workspaces ([c729920](https://github.com/duyet/herdr-desk/commit/c7299205c42f45730cb516200fcec1e374304d82))
+* **here:** a workspace desk card, and an honest note on why not a menu ([#105](https://github.com/duyet/herdr-desk/issues/105)) ([3e15224](https://github.com/duyet/herdr-desk/commit/3e1522415a92bc7e92337151e9e3a6731f99c98a))
+* **update:** opt-in auto-upgrade that verifies and rolls back ([#112](https://github.com/duyet/herdr-desk/issues/112)) ([4e90c72](https://github.com/duyet/herdr-desk/commit/4e90c723ad7d15b3a6ae16aa11470b815899083f))
+
+
+### Bug Fixes
+
+* **cleanup:** reclaim empty lane workspaces after their worktree is gone ([#108](https://github.com/duyet/herdr-desk/issues/108)) ([5824564](https://github.com/duyet/herdr-desk/commit/582456419140fd669d83b0872b2eb8f2cf175776))
+* **daemon:** honour pause in the held queue; one workspace list per tick ([#109](https://github.com/duyet/herdr-desk/issues/109)) ([062062b](https://github.com/duyet/herdr-desk/commit/062062bbdc48a59ec6cdb475f234362d77f6c39f))
+* **desk:** name the repo in the give-up line, and stop view() deleting ([#103](https://github.com/duyet/herdr-desk/issues/103)) ([fe30b3e](https://github.com/duyet/herdr-desk/commit/fe30b3edfd25d6d9382a1857b179683892928f04))
+* **desk:** pin child model to opencode/glm-5.3-flash-free ([#121](https://github.com/duyet/herdr-desk/issues/121)) ([964e137](https://github.com/duyet/herdr-desk/commit/964e13734a040a72012ffe15395348ef769cdc6d))
+* **health:** gate on sessions that are still open ([#104](https://github.com/duyet/herdr-desk/issues/104)) ([7ce0c3c](https://github.com/duyet/herdr-desk/commit/7ce0c3c76e8f6e94d936b4448acd16cd89e646f4))
+* **here:** spawn prompt ids resolved from the repo, not the firing lane ([#119](https://github.com/duyet/herdr-desk/issues/119)) ([bd49f9a](https://github.com/duyet/herdr-desk/commit/bd49f9a30500949f46b4ea743bc835b8f9d6fd7b))
+* **prompts:** fill every var, drop repo-specific text from bundled playbooks ([#110](https://github.com/duyet/herdr-desk/issues/110)) ([6b17cb4](https://github.com/duyet/herdr-desk/commit/6b17cb4bc9c13c0d9896965b1b1133bd596ee0be))
+* **prune:** squash-aware guard 4 — keep only tips newer than the last merge ([#120](https://github.com/duyet/herdr-desk/issues/120)) ([0fad491](https://github.com/duyet/herdr-desk/commit/0fad4911ebfc95780b999392c68fde1a8b76ae33))
+* **update:** auto-upgrade on by default ([#122](https://github.com/duyet/herdr-desk/issues/122)) ([a8004d1](https://github.com/duyet/herdr-desk/commit/a8004d1a5178ce86f5cce85b496300ecae7744f8))
+* **usage:** store a hashed repo id, not the path, and keep 90 days ([#114](https://github.com/duyet/herdr-desk/issues/114)) ([5a816cc](https://github.com/duyet/herdr-desk/commit/5a816cc6a04d08253e88f0d58a5ffdf40c36e159))
+* **watch:** make the watch surface honest, and report a repo that cannot be read ([#98](https://github.com/duyet/herdr-desk/issues/98)) ([ff47894](https://github.com/duyet/herdr-desk/commit/ff478946c64a141ccd2b52381135d1dfb0e09c9c))
+
 ## [0.1.8](https://github.com/duyet/herdr-desk/compare/v0.1.7...v0.1.8) (2026-10-05)
 
 
