@@ -156,6 +156,17 @@ describe('agentCounts', () => {
     expect(agentCounts(listing({ parked: 5 }))).toEqual({ agents: 5, busy: 0 })
   })
 
+  test('a row with no status counts as open', () => {
+    // No status is not a free pass: count it, so a Herdr upgrade that drops or
+    // renames the field holds every fire instead of removing the cap.
+    const got = agentCounts({
+      result: {
+        agents: [{ name: 'a' }, { name: 'b' }, { name: 'c' }],
+      },
+    })
+    expect(got).toEqual({ agents: 3, busy: 0 })
+  })
+
   test('an unreadable listing is zero, never a throw', () => {
     expect(agentCounts(null)).toEqual({ agents: 0, busy: 0 })
     expect(agentCounts({})).toEqual({ agents: 0, busy: 0 })
