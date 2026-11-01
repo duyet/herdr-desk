@@ -6,7 +6,8 @@ import type { LoadedDesk } from './config'
 import type { Discovered } from './discover'
 import { historyPath, loadRuns, type RunRecord } from './history'
 import { emptyPause, pauseKey, withPause } from './pause'
-import { formatSchedule } from './status'
+import { hold, view } from './queue'
+import { formatHeld, formatSchedule } from './status'
 
 const LAST = 4
 
@@ -155,5 +156,73 @@ describe('formatSchedule paused', () => {
     expect(held).toContain('paused')
     expect(held).not.toContain('2026-10-01 07:00')
     expect(formatSchedule([d], now)).toContain('2026-10-01 07:00')
+  })
+})
+
+describe('formatHeld', () => {
+  // #123: an ~18 h cap stall held every scheduled job while `status` kept
+  // showing advancing `Next` times and `ok` last runs. The line must say the
+  // hold out loud, with numbers the reader can act on — count, age, breach.
+  const REPO = '/r/a'
+  const t0 = new Date('2026-09-28T10:00:00.000Z')
+  const now = new Date(t0.getTime() + 4.2 * 3_600_000)
+
+  test('no hold queue, no line', () => {
+    withLedger(
+      () => {},
+      () => expect(formatHeld(view(now))).toBeNull(),
+    )
+  })
+
+  test('one held job: count, oldest age, and its breach on one line', () => {
+    withLedger(
+      () => {
+        // Nothing to write; the queue file starts absent and `hold` makes it.
+      },
+      () => {
+        hold(
+          {
+            repo: REPO,
+            task: 'triage',
+            slot: '07:00',
+            reason: '26 agents over 24',
+          },
+          t0,
+        )
+        // An acted-on view, not a hand-built one — the same shape the CLI prints.
+        expect(formatHeld(view(now))).toBe(
+          'held: 1 (oldest 4.2h): 26 agents over 24',
+        )
+      },
+    )
+  })
+
+  test('many held: the count is the queue, the reason is the oldest job’s', () => {
+    withLedger(
+      () => {},
+      () => {
+        hold(
+          {
+            repo: REPO,
+            task: 'triage',
+            slot: '07:00',
+            reason: '26 agents over 24',
+          },
+          t0,
+        )
+        hold(
+          {
+            repo: REPO,
+            task: 'prod-health',
+            slot: '07:10',
+            reason: '3.1GB free of 4GB',
+          },
+          new Date(t0.getTime() + 3_600_000),
+        )
+        expect(formatHeld(view(now))).toBe(
+          'held: 2 (oldest 4.2h): 26 agents over 24',
+        )
+      },
+    )
   })
 })

@@ -1,9 +1,11 @@
+import { duration } from './analytics'
 import { cronNext } from './cron'
 import { formatLocal } from './day'
 import { describeJob } from './describe'
 import type { Discovered } from './discover'
 import { failureStreak, loadRuns } from './history'
 import { describePause, emptyPause, type PauseState, pausedNow } from './pause'
+import type { QueueView } from './queue'
 import { scheduleLabel } from './schedule'
 import { textTable } from './table'
 
@@ -59,4 +61,20 @@ export function formatSchedule(
     ['Repo', 'Job', 'Cron', 'Next', 'Last', 'Fails', 'Agent', 'What'],
     rows,
   )
+}
+
+/**
+ * One line about the hold queue, or null when nothing is held.
+ *
+ * #123: an ~18 h cap stall held every scheduled job, yet `status` kept
+ * rendering an advancing `Next` column and `ok` last runs, so the desk looked
+ * busy-when-healthy while the only evidence sat in daemon.log. A single line
+ * compiles what the queue already knows: how many jobs are held, how long the
+ * oldest has waited, and the breach it last recorded — same gate, same cap,
+ * so the head's reason stands for the rest.
+ */
+export function formatHeld(view: QueueView): string | null {
+  const [oldest] = view.jobs
+  if (!oldest) return null
+  return `held: ${view.jobs.length} (oldest ${duration(view.oldestMs)}): ${oldest.reason}`
 }

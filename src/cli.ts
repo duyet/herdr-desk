@@ -54,6 +54,7 @@ import {
   withoutPause,
   withPause,
 } from './pause'
+import { view as queueView } from './queue'
 import {
   approve,
   approvedContent,
@@ -86,7 +87,7 @@ import {
 } from './sessions/index'
 import type { SessionRow } from './sessions/types'
 import { parseSince } from './since'
-import { formatSchedule } from './status'
+import { formatHeld, formatSchedule } from './status'
 import {
   buildSummaryPrompt,
   handToAgent,
@@ -692,6 +693,12 @@ async function main() {
     const { desks, failed } = await discoverAll()
     console.log(`daemon: ${pid ? `running (pid ${pid})` : 'stopped'}`)
     console.log(formatSchedule(desks, new Date(), loadPaused()))
+    // #123: a stall that held every scheduled job showed here only as an
+    // advancing `Next` column and `ok` last runs, so the desk read as healthy
+    // while the hold evidence sat in daemon.log. The queue view already knows;
+    // one line, shaped like the single-line problem counts below, is enough.
+    const held = formatHeld(queueView(new Date()))
+    if (held) console.log(held)
     // A count, not a table: `status` is what a phone notification carries, and
     // the per-repo detail is one command away in `scan`. A desk that is not
     // being read at all is otherwise a healthy machine doing nothing.
