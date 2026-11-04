@@ -5,6 +5,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -131,6 +132,24 @@ describe('the remembered repo list', () => {
     await discoverAll()
 
     expect(readFileSync(path, 'utf8')).toBe(JSON.stringify({ repos: [good] }))
+  })
+})
+
+describe('a repo reached through a symlink', () => {
+  test('is one desk, so its jobs fire once per slot', async () => {
+    const state = useState()
+    const real = tmp('real')
+    writeConfig(real, goodConfig('real'))
+    const link = join(tmp('links'), 'alias')
+    symlinkSync(real, link)
+    writeFileSync(
+      join(state, 'known-repos.json'),
+      JSON.stringify({ repos: [real, link] }),
+    )
+
+    const { desks } = await discoverAll()
+
+    expect(desks.filter((d) => d.config.name === 'real')).toHaveLength(1)
   })
 })
 

@@ -1,4 +1,10 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  writeFileSync,
+} from 'node:fs'
 import { join, resolve } from 'node:path'
 import { findConfigPath, type LoadedDesk, loadDeskConfig } from './config'
 import { herdrCall, type ListedWorkspace, listedWorkspaces } from './herdr'
@@ -143,6 +149,21 @@ export type Discovery = {
  * #97 is about. The daemon and the two commands a person runs to find out what
  * a desk is doing use this one.
  */
+/**
+ * One key per checkout on disk. A symlinked path to a repo (for example
+ * `~/project/anyrouter -> ~/project/anyrouter-dev/anyrouter`) is the same desk,
+ * and keying on the unresolved path loaded it twice, so every job fired twice
+ * per slot: one spawn, then a second prompt into the same agent.
+ */
+function canonicalRepo(repo: string): string {
+  const abs = resolve(repo)
+  try {
+    return realpathSync(abs)
+  } catch {
+    return abs
+  }
+}
+
 export async function discoverAll(): Promise<Discovery> {
   const workspaces = await listWorkspaces()
   const live = workspaces instanceof Error ? [] : workspaceRepoRoots(workspaces)
@@ -154,7 +175,7 @@ export async function discoverAll(): Promise<Discovery> {
   const seen = new Set<string>()
 
   const add = (repo: string, source: Discovered['source']) => {
-    const key = resolve(repo)
+    const key = canonicalRepo(repo)
     if (seen.has(key)) return
     // Marked before the load, not after: a repo that fails to load must be
     // attempted once per tick like any other, and the same bad config reached
